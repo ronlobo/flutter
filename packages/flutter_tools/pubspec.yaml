@@ -5,36 +5,49 @@ homepage: http://flutter.io
 author: Flutter Authors <flutter-dev@googlegroups.com>
 
 environment:
-  sdk: '>=1.12.0 <2.0.0'
+  sdk: '>=1.19.0 <2.0.0'
 
 dependencies:
-  analyzer: '>=0.26.1+17' # see note below
   archive: ^1.0.20
-  args: ^0.13.2+1
-  crypto: ^0.9.1
-  den_api: ^0.1.0
-  mustache4dart: ^1.0.0
+  args: ^0.13.4
+  coverage: ^0.8.0
+  crypto: '>=1.1.1 <3.0.0'
+  file: ^0.1.0
+  http: ^0.11.3
+  json_rpc_2: ^2.0.0
+
+  # Version 1.0.4 has mysterious "pub get" spam about "drudge". If you update
+  # this dependency, be sure not to include 1.0.4 and to check the output of
+  # "pub get" for spam about "drudge".
+  json_schema: 1.0.3
+
+  linter: ^0.1.21
+  meta: ^1.0.3
+  mustache: ^0.2.5
+  package_config: '>=0.1.5 <2.0.0'
   path: ^1.3.0
+  pub_semver: ^1.0.0
   stack_trace: ^1.4.0
-  test: 0.12.6+1 # see note below
+  usage: ^2.2.1
+  web_socket_channel: ^1.0.4
+  xml: ^2.4.1
   yaml: ^2.1.3
 
-  flx:
-    path: ../flx
+  # We depend on very specific internal implementation details of the
+  # 'test' package, which change between versions, so here we pin it
+  # precisely.
+  test: 0.12.15+4
 
-# A note about 'test':
-# We depend on very specific internal implementation details of the
-# 'test' package, which change between versions, so here we pin it
-# precisely. This is also pinned in the 'flutter' package.
-# See also https://github.com/dart-lang/test/pull/320
-
-# A note about 'analyzer':
-# We don't actually depend on 'analyzer', but 'test' does. We aren't
-# compatible with some older versions of 'analyzer'. We lie here,
-# saying we do depend on it, so that we constrain the version that
-# 'test' will get to a version that we'll probably be ok with. (This
-# is why there's no upper bound on our dependency.)
-# See also https://github.com/dart-lang/pub/issues/1356
+  # Version from the vended Dart SDK as defined in `dependency_overrides`.
+  analyzer: any
 
 dev_dependencies:
-  mockito: ^0.10.1
+  mockito: ^1.0.0
+
+# Exclude this package from the hosted API docs.
+dartdoc:
+  nodoc: true
+
+dependency_overrides:
+  analyzer:
+    path: ../../bin/cache/dart-sdk/lib/analyzer

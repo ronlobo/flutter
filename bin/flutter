@@ -5,26 +5,52 @@
 
 set -e
 
-export FLUTTER_ROOT=$(dirname $(dirname "${BASH_SOURCE[0]}"))
+function follow_links() {
+  cd -P "${1%/*}"
+  file="$PWD/${1##*/}"
+  while [ -h "$file" ]; do
+    # On Mac OS, readlink -f doesn't work.
+    cd -P "${file%/*}"
+    file="$(readlink "$file")"
+    cd -P "${file%/*}"
+    file="$PWD/${file##*/}"
+  done
+  echo "$PWD/${file##*/}"
+}
+
+PROG_NAME="$(follow_links "$BASH_SOURCE")"
+BIN_DIR="$(cd "${PROG_NAME%/*}" ; pwd -P)"
+export FLUTTER_ROOT="$(cd "${BIN_DIR}/.." ; pwd -P)"
+
 FLUTTER_TOOLS_DIR="$FLUTTER_ROOT/packages/flutter_tools"
 SNAPSHOT_PATH="$FLUTTER_ROOT/bin/cache/flutter_tools.snapshot"
 STAMP_PATH="$FLUTTER_ROOT/bin/cache/flutter_tools.stamp"
 SCRIPT_PATH="$FLUTTER_TOOLS_DIR/bin/flutter_tools.dart"
+DART_SDK_PATH="$FLUTTER_ROOT/bin/cache/dart-sdk"
 
-# TODO(abarth): We shouldn't require dart to be on the user's path.
-DART=dart
+DART="$DART_SDK_PATH/bin/dart"
 
-REVISION=`(cd "$FLUTTER_ROOT"; git rev-parse HEAD)`
-if [ ! -f "$SNAPSHOT_PATH" ] || [ ! -f "$STAMP_PATH" ] || [ `cat "$STAMP_PATH"` != "$REVISION" ] || [ "$FLUTTER_TOOLS_DIR/pubspec.yaml" -nt "$FLUTTER_TOOLS_DIR/pubspec.lock" ]; then
-  echo Updating flutter tool...
-  (cd "$FLUTTER_TOOLS_DIR"; pub get > /dev/null)
-  $DART --snapshot="$SNAPSHOT_PATH" --package-root="$FLUTTER_TOOLS_DIR/packages" "$SCRIPT_PATH"
-  echo -n $REVISION > "$STAMP_PATH"
-fi
+(
+  if hash flock 2>/dev/null; then
+    flock 3 # ensures that we don't simultaneously update Dart in multiple parallel instances
+    # some platforms (e.g. Mac) don't have flock or any reliable alternative
+  fi
+  REVISION=`(cd "$FLUTTER_ROOT"; git rev-parse HEAD)`
+  if [ ! -f "$SNAPSHOT_PATH" ] || [ ! -f "$STAMP_PATH" ] || [ `cat "$STAMP_PATH"` != "$REVISION" ] || [ "$FLUTTER_TOOLS_DIR/pubspec.yaml" -nt "$FLUTTER_TOOLS_DIR/pubspec.lock" ]; then
+    mkdir -p "$FLUTTER_ROOT/bin/cache"
+    touch "$FLUTTER_ROOT/bin/cache/.dartignore"
+    "$FLUTTER_ROOT/bin/internal/update_dart_sdk.sh"
+
+    echo Building flutter tool...
+    FLUTTER_DIR="$FLUTTER_ROOT/packages/flutter"
+    (cd "$FLUTTER_TOOLS_DIR"; rm -f pubspec.lock; "../../bin/cache/dart-sdk/bin/pub" get --verbosity=error --no-packages-dir)
+    "$DART" --snapshot="$SNAPSHOT_PATH" --packages="$FLUTTER_TOOLS_DIR/.packages" "$SCRIPT_PATH"
+    echo $REVISION > "$STAMP_PATH"
+  fi
+) 3< "$PROG_NAME"
 
 set +e
-
-$DART "$SNAPSHOT_PATH" "$@"
+"$DART" "$SNAPSHOT_PATH" "$@"
 
 # The VM exits with code 253 if the snapshot version is out-of-date.
 # If it is, we need to snapshot it again.
@@ -34,6 +60,5 @@ if [ $EXIT_CODE != 253 ]; then
 fi
 
 set -e
-
-$DART --snapshot="$SNAPSHOT_PATH" --package-root="$FLUTTER_TOOLS_DIR/packages" "$SCRIPT_PATH"
-$DART "$SNAPSHOT_PATH" "$@"
+"$DART" --snapshot="$SNAPSHOT_PATH" --packages="$FLUTTER_TOOLS_DIR/.packages" "$SCRIPT_PATH"
+"$DART" "$SNAPSHOT_PATH" "$@"

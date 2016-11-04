@@ -4,31 +4,47 @@
 
 import 'framework.dart';
 
+/// Signature for [Notification] listeners.
+///
 /// Return true to cancel the notification bubbling.
+///
+/// Used by [NotificationListener.onNotification].
 typedef bool NotificationListenerCallback<T extends Notification>(T notification);
 
+/// A notification that can bubble up the widget tree.
 abstract class Notification {
+  /// Applied to each ancestor of the [dispatch] target. Dispatches this
+  /// Notification to ancestor [NotificationListener] widgets.
+  bool visitAncestor(Element element) {
+    if (element is StatelessElement &&
+        element.widget is NotificationListener<Notification>) {
+      final NotificationListener<Notification> widget = element.widget;
+      if (widget._dispatch(this)) // that function checks the type dynamically
+        return false;
+    }
+    return true;
+  }
+
+  /// Start bubbling this notification at the given build context.
   void dispatch(BuildContext target) {
-    target.visitAncestorElements((Element element) {
-      if (element is StatelessComponentElement &&
-          element.widget is NotificationListener) {
-        final NotificationListener widget = element.widget;
-        if (widget._dispatch(this))
-          return false;
-      }
-      return true;
-    });
+    assert(target != null); // Only call dispatch if the widget's State is still mounted.
+    target.visitAncestorElements(visitAncestor);
   }
 }
 
-class NotificationListener<T extends Notification> extends StatelessComponent {
+/// A widget that listens for [Notification]s bubbling up the tree.
+class NotificationListener<T extends Notification> extends StatelessWidget {
+  /// Creates a widget that listens for notifications.
   NotificationListener({
     Key key,
     this.child,
     this.onNotification
   }) : super(key: key);
 
+  /// The widget below this widget in the tree.
   final Widget child;
+
+  /// Called when a notification of the appropriate type arrives at this location in the tree.
   final NotificationListenerCallback<T> onNotification;
 
   bool _dispatch(Notification notification) {
@@ -37,6 +53,7 @@ class NotificationListener<T extends Notification> extends StatelessComponent {
     return false;
   }
 
+  @override
   Widget build(BuildContext context) => child;
 }
 

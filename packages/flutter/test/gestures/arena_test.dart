@@ -11,19 +11,23 @@ const int primaryKey = 4;
 
 class TestGestureArenaMember extends GestureArenaMember {
   bool acceptRan = false;
-  void acceptGesture(Object key) {
+
+  @override
+  void acceptGesture(int key) {
     expect(key, equals(primaryKey));
     acceptRan = true;
   }
   bool rejectRan = false;
-  void rejectGesture(Object key) {
+
+  @override
+  void rejectGesture(int key) {
     expect(key, equals(primaryKey));
     rejectRan = true;
   }
 }
 
 class GestureTester {
-  GestureArena arena = new GestureArena();
+  GestureArenaManager arena = new GestureArenaManager();
   TestGestureArenaMember first = new TestGestureArenaMember();
   TestGestureArenaMember second = new TestGestureArenaMember();
 

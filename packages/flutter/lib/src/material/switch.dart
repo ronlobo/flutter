@@ -2,12 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'dart:ui' as ui;
-
 import 'package:flutter/gestures.dart';
-import 'package:flutter/painting.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
+import 'package:meta/meta.dart';
 
 import 'colors.dart';
 import 'constants.dart';
@@ -16,25 +15,105 @@ import 'shadows.dart';
 import 'theme.dart';
 import 'toggleable.dart';
 
-class Switch extends StatelessComponent {
-  Switch({ Key key, this.value, this.activeColor, this.onChanged })
-      : super(key: key);
+/// A material design switch.
+///
+/// Used to toggle the on/off state of a single setting.
+///
+/// The switch itself does not maintain any state. Instead, when the state of
+/// the switch changes, the widget calls the [onChanged] callback. Most widgets
+/// that use a switch will listen for the [onChanged] callback and rebuild the
+/// switch with a new [value] to update the visual appearance of the switch.
+///
+/// Requires one of its ancestors to be a [Material] widget.
+///
+/// See also:
+///
+///  * [CheckBox]
+///  * [Radio]
+///  * [Slider]
+///  * <https://material.google.com/components/selection-controls.html#selection-controls-switch>
+class Switch extends StatefulWidget {
+  /// Creates a material design switch.
+  ///
+  /// The switch itself does not maintain any state. Instead, when the state of
+  /// the switch changes, the widget calls the [onChanged] callback. Most widgets
+  /// that use a switch will listen for the [onChanged] callback and rebuild the
+  /// switch with a new [value] to update the visual appearance of the switch.
+  ///
+  /// * [value] determines this switch is on or off.
+  /// * [onChanged] is called when the user toggles with switch on or off.
+  Switch({
+    Key key,
+    @required this.value,
+    @required this.onChanged,
+    this.activeColor,
+    this.activeThumbImage,
+    this.inactiveThumbImage
+  }) : super(key: key);
 
+  /// Whether this switch is on or off.
   final bool value;
-  final Color activeColor;
+
+  /// Called when the user toggles with switch on or off.
+  ///
+  /// The switch passes the new value to the callback but does not actually
+  /// change state until the parent widget rebuilds the switch with the new
+  /// value.
+  ///
+  /// If null, the switch will be displayed as disabled.
+  ///
+  /// The callback provided to onChanged should update the state of the parent
+  /// [StatefulWidget] using the [State.setState] method, so that the parent
+  /// gets rebuilt; for example:
+  ///
+  /// ```dart
+  /// new Switch(
+  ///   value: _giveVerse,
+  ///   onChanged: (bool newValue) {
+  ///     setState(() {
+  ///       _giveVerse = newValue;
+  ///     });
+  ///   },
+  /// ),
+  /// ```
   final ValueChanged<bool> onChanged;
 
+  /// The color to use when this switch is on.
+  ///
+  /// Defaults to accent color of the current [Theme].
+  final Color activeColor;
+
+  /// An image to use on the thumb of this switch when the switch is on.
+  final ImageProvider activeThumbImage;
+
+  /// An image to use on the thumb of this switch when the switch is off.
+  final ImageProvider inactiveThumbImage;
+
+  @override
+  _SwitchState createState() => new _SwitchState();
+
+  @override
+  void debugFillDescription(List<String> description) {
+    super.debugFillDescription(description);
+    description.add('value: ${value ? "on" : "off"}');
+    if (onChanged == null)
+      description.add('disabled');
+  }
+}
+
+class _SwitchState extends State<Switch> with TickerProviderStateMixin {
+  @override
   Widget build(BuildContext context) {
     assert(debugCheckHasMaterial(context));
-    ThemeData themeData = Theme.of(context);
-    final isDark = themeData.brightness == ThemeBrightness.dark;
+    final ThemeData themeData = Theme.of(context);
+    final bool isDark = themeData.brightness == Brightness.dark;
 
-    Color activeThumbColor = activeColor ?? themeData.accentColor;
-    Color activeTrackColor = activeThumbColor.withAlpha(0x80);
+    final Color activeThumbColor = config.activeColor ?? themeData.accentColor;
+    final Color activeTrackColor = activeThumbColor.withAlpha(0x80);
 
     Color inactiveThumbColor;
     Color inactiveTrackColor;
-    if (onChanged != null) {
+    if (config.onChanged != null) {
       inactiveThumbColor = isDark ? Colors.grey[400] : Colors.grey[50];
       inactiveTrackColor = isDark ? Colors.white30 : Colors.black26;
     } else {
@@ -43,12 +122,16 @@ class Switch extends StatelessComponent {
     }
 
     return new _SwitchRenderObjectWidget(
-      value: value,
+      value: config.value,
       activeColor: activeThumbColor,
       inactiveColor: inactiveThumbColor,
+      activeThumbImage: config.activeThumbImage,
+      inactiveThumbImage: config.inactiveThumbImage,
       activeTrackColor: activeTrackColor,
       inactiveTrackColor: inactiveTrackColor,
-      onChanged: onChanged
+      configuration: createLocalImageConfiguration(context),
+      onChanged: config.onChanged,
+      vsync: this,
     );
   }
 }
@@ -59,39 +142,58 @@ class _SwitchRenderObjectWidget extends LeafRenderObjectWidget {
     this.value,
     this.activeColor,
     this.inactiveColor,
+    this.activeThumbImage,
+    this.inactiveThumbImage,
     this.activeTrackColor,
     this.inactiveTrackColor,
-    this.onChanged
+    this.configuration,
+    this.onChanged,
+    this.vsync,
   }) : super(key: key);
 
   final bool value;
   final Color activeColor;
   final Color inactiveColor;
+  final ImageProvider activeThumbImage;
+  final ImageProvider inactiveThumbImage;
   final Color activeTrackColor;
   final Color inactiveTrackColor;
+  final ImageConfiguration configuration;
   final ValueChanged<bool> onChanged;
+  final TickerProvider vsync;
 
-  _RenderSwitch createRenderObject() => new _RenderSwitch(
+  @override
+  _RenderSwitch createRenderObject(BuildContext context) => new _RenderSwitch(
     value: value,
     activeColor: activeColor,
     inactiveColor: inactiveColor,
+    activeThumbImage: activeThumbImage,
+    inactiveThumbImage: inactiveThumbImage,
     activeTrackColor: activeTrackColor,
     inactiveTrackColor: inactiveTrackColor,
-    onChanged: onChanged
+    configuration: configuration,
+    onChanged: onChanged,
+    vsync: vsync,
   );
 
-  void updateRenderObject(_RenderSwitch renderObject, _SwitchRenderObjectWidget oldWidget) {
-    renderObject.value = value;
-    renderObject.activeColor = activeColor;
-    renderObject.inactiveColor = inactiveColor;
-    renderObject.activeTrackColor = activeTrackColor;
-    renderObject.inactiveTrackColor = inactiveTrackColor;
-    renderObject.onChanged = onChanged;
+  @override
+  void updateRenderObject(BuildContext context, _RenderSwitch renderObject) {
+    renderObject
+      ..value = value
+      ..activeColor = activeColor
+      ..inactiveColor = inactiveColor
+      ..activeThumbImage = activeThumbImage
+      ..inactiveThumbImage = inactiveThumbImage
+      ..activeTrackColor = activeTrackColor
+      ..inactiveTrackColor = inactiveTrackColor
+      ..configuration = configuration
+      ..onChanged = onChanged
+      ..vsync = vsync;
   }
 }
 
 const double _kTrackHeight = 14.0;
-const double _kTrackWidth = 29.0;
+const double _kTrackWidth = 33.0;
 const double _kTrackRadius = _kTrackHeight / 2.0;
 const double _kThumbRadius = 10.0;
 const double _kSwitchWidth = _kTrackWidth - 2 * _kTrackRadius + 2 * kRadialReactionRadius;
@@ -102,28 +204,53 @@ class _RenderSwitch extends RenderToggleable {
     bool value,
     Color activeColor,
     Color inactiveColor,
+    ImageProvider activeThumbImage,
+    ImageProvider inactiveThumbImage,
     Color activeTrackColor,
     Color inactiveTrackColor,
-    ValueChanged<bool> onChanged
-  }) : super(
-     value: value,
-     activeColor: activeColor,
-     inactiveColor: inactiveColor,
-     onChanged: onChanged,
-     minRadialReactionRadius: _kThumbRadius,
-     size: const Size(_kSwitchWidth, _kSwitchHeight)
-   ) {
-    _activeTrackColor = activeTrackColor;
-    _inactiveTrackColor = inactiveTrackColor;
-    _drag = new HorizontalDragGestureRecognizer(router: Gesturer.instance.pointerRouter, gestureArena: Gesturer.instance.gestureArena)
+    ImageConfiguration configuration,
+    ValueChanged<bool> onChanged,
+    @required TickerProvider vsync,
+  }) : _activeThumbImage = activeThumbImage,
+       _inactiveThumbImage = inactiveThumbImage,
+       _activeTrackColor = activeTrackColor,
+       _inactiveTrackColor = inactiveTrackColor,
+       _configuration = configuration,
+       super(
+         value: value,
+         activeColor: activeColor,
+         inactiveColor: inactiveColor,
+         onChanged: onChanged,
+         size: const Size(_kSwitchWidth, _kSwitchHeight),
+         vsync: vsync,
+       ) {
+    _drag = new HorizontalDragGestureRecognizer()
       ..onStart = _handleDragStart
       ..onUpdate = _handleDragUpdate
       ..onEnd = _handleDragEnd;
   }
 
+  ImageProvider get activeThumbImage => _activeThumbImage;
+  ImageProvider _activeThumbImage;
+  set activeThumbImage(ImageProvider value) {
+    if (value == _activeThumbImage)
+      return;
+    _activeThumbImage = value;
+    markNeedsPaint();
+  }
+
+  ImageProvider get inactiveThumbImage => _inactiveThumbImage;
+  ImageProvider _inactiveThumbImage;
+  set inactiveThumbImage(ImageProvider value) {
+    if (value == _inactiveThumbImage)
+      return;
+    _inactiveThumbImage = value;
+    markNeedsPaint();
+  }
+
   Color get activeTrackColor => _activeTrackColor;
   Color _activeTrackColor;
-  void set activeTrackColor(Color value) {
+  set activeTrackColor(Color value) {
     assert(value != null);
     if (value == _activeTrackColor)
       return;
@@ -133,7 +260,7 @@ class _RenderSwitch extends RenderToggleable {
 
   Color get inactiveTrackColor => _inactiveTrackColor;
   Color _inactiveTrackColor;
-  void set inactiveTrackColor(Color value) {
+  set inactiveTrackColor(Color value) {
     assert(value != null);
     if (value == _inactiveTrackColor)
       return;
@@ -141,25 +268,42 @@ class _RenderSwitch extends RenderToggleable {
     markNeedsPaint();
   }
 
+  ImageConfiguration get configuration => _configuration;
+  ImageConfiguration _configuration;
+  set configuration (ImageConfiguration value) {
+    assert(value != null);
+    if (value == _configuration)
+      return;
+    _configuration = value;
+    markNeedsPaint();
+  }
+
+  @override
+  void detach() {
+    _cachedThumbPainter?.dispose();
+    _cachedThumbPainter = null;
+    super.detach();
+  }
+
   double get _trackInnerLength => size.width - 2.0 * kRadialReactionRadius;
 
   HorizontalDragGestureRecognizer _drag;
 
-  void _handleDragStart(Point globalPosition) {
+  void _handleDragStart(DragStartDetails details) {
     if (onChanged != null)
       reactionController.forward();
   }
 
-  void _handleDragUpdate(double delta) {
+  void _handleDragUpdate(DragUpdateDetails details) {
     if (onChanged != null) {
       position
         ..curve = null
         ..reverseCurve = null;
-      positionController.value += delta / _trackInnerLength;
+      positionController.value += details.primaryDelta / _trackInnerLength;
     }
   }
 
-  void _handleDragEnd(Offset velocity) {
+  void _handleDragEnd(DragEndDetails details) {
     if (position.value >= 0.5)
       positionController.forward();
     else
@@ -167,59 +311,89 @@ class _RenderSwitch extends RenderToggleable {
     reactionController.reverse();
   }
 
+  @override
   void handleEvent(PointerEvent event, BoxHitTestEntry entry) {
+    assert(debugHandleEvent(event, entry));
     if (event is PointerDownEvent && onChanged != null)
       _drag.addPointer(event);
     super.handleEvent(event, entry);
   }
 
   Color _cachedThumbColor;
-  BoxPainter _thumbPainter;
+  ImageProvider _cachedThumbImage;
+  BoxPainter _cachedThumbPainter;
 
+  BoxDecoration _createDefaultThumbDecoration(Color color, ImageProvider image) {
+    return new BoxDecoration(
+      backgroundColor: color,
+      backgroundImage: image == null ? null : new BackgroundImage(image: image),
+      shape: BoxShape.circle,
+      boxShadow: kElevationToShadow[1]
+    );
+  }
+
+  bool _isPainting = false;
+
+  void _handleDecorationChanged() {
+    // If the image decoration is available synchronously, we'll get called here
+    // during paint. There's no reason to mark ourselves as needing paint if we
+    // are already in the middle of painting. (In fact, doing so would trigger
+    // an assert).
+    if (!_isPainting)
+      markNeedsPaint();
+  }
+
+  @override
   void paint(PaintingContext context, Offset offset) {
     final Canvas canvas = context.canvas;
 
     final bool isActive = onChanged != null;
+    final double currentPosition = position.value;
 
-    Color thumbColor = isActive ? Color.lerp(inactiveColor, activeColor, position.value) : inactiveColor;
-    Color trackColor = isActive ? Color.lerp(inactiveTrackColor, activeTrackColor, position.value) : inactiveTrackColor;
+    final Color trackColor = isActive ? Color.lerp(inactiveTrackColor, activeTrackColor, currentPosition) : inactiveTrackColor;
 
     // Paint the track
-    Paint paint = new Paint()
+    final Paint paint = new Paint()
       ..color = trackColor;
-    double trackHorizontalPadding = kRadialReactionRadius - _kTrackRadius;
-    Rect trackRect = new Rect.fromLTWH(
+    final double trackHorizontalPadding = kRadialReactionRadius - _kTrackRadius;
+    final Rect trackRect = new Rect.fromLTWH(
       offset.dx + trackHorizontalPadding,
       offset.dy + (size.height - _kTrackHeight) / 2.0,
       size.width - 2.0 * trackHorizontalPadding,
       _kTrackHeight
     );
-    ui.RRect trackRRect = new ui.RRect.fromRectXY(
-        trackRect, _kTrackRadius, _kTrackRadius);
+    final RRect trackRRect = new RRect.fromRectAndRadius(trackRect, const Radius.circular(_kTrackRadius));
     canvas.drawRRect(trackRRect, paint);
 
-    Offset thumbOffset = new Offset(
-      offset.dx + kRadialReactionRadius + position.value * _trackInnerLength,
-      offset.dy + size.height / 2.0);
+    final Point thumbPosition = new Point(
+      kRadialReactionRadius + currentPosition * _trackInnerLength,
+      size.height / 2.0
+    );
 
-    paintRadialReaction(canvas, thumbOffset);
+    paintRadialReaction(canvas, offset, thumbPosition);
 
-    if (_cachedThumbColor != thumbColor) {
-      _thumbPainter = new BoxDecoration(
-        backgroundColor: thumbColor,
-        shape: BoxShape.circle,
-        boxShadow: elevationToShadow[1]
-      ).createBoxPainter();
-      _cachedThumbColor = thumbColor;
+    try {
+      _isPainting = true;
+      BoxPainter thumbPainter;
+      final Color thumbColor = isActive ? Color.lerp(inactiveColor, activeColor, currentPosition) : inactiveColor;
+      final ImageProvider thumbImage = isActive ? (currentPosition < 0.5 ? inactiveThumbImage : activeThumbImage) : inactiveThumbImage;
+      if (_cachedThumbPainter == null || thumbColor != _cachedThumbColor || thumbImage != _cachedThumbImage) {
+        _cachedThumbColor = thumbColor;
+        _cachedThumbImage = thumbImage;
+        _cachedThumbPainter = _createDefaultThumbDecoration(thumbColor, thumbImage).createBoxPainter(_handleDecorationChanged);
+      }
+      thumbPainter = _cachedThumbPainter;
+
+      // The thumb contracts slightly during the animation
+      final double inset = 1.0 - (currentPosition - 0.5).abs() * 2.0;
+      final double radius = _kThumbRadius - inset;
+      thumbPainter.paint(
+        canvas,
+        thumbPosition.toOffset() + offset - new Offset(radius, radius),
+        configuration.copyWith(size: new Size.fromRadius(radius))
+      );
+    } finally {
+      _isPainting = false;
     }
-
-    // The thumb contracts slightly during the animation
-    double inset = 2.0 - (position.value - 0.5).abs() * 2.0;
-    double radius = _kThumbRadius - inset;
-    Rect thumbRect = new Rect.fromLTRB(thumbOffset.dx - radius,
-                                       thumbOffset.dy - radius,
-                                       thumbOffset.dx + radius,
-                                       thumbOffset.dy + radius);
-    _thumbPainter.paint(canvas, thumbRect);
   }
 }

@@ -11,7 +11,7 @@ const Duration kPressTimeout = const Duration(milliseconds: 100);
 
 /// Maximum length of time between a tap down and a tap up for the gesture to be
 /// considered a tap. (Currently not honored by the TapGestureRecognizer.)
-// TODO(ianh): Remove this, or implement a hover-tap gesture recogniser which
+// TODO(ianh): Remove this, or implement a hover-tap gesture recognizer which
 // uses this.
 const Duration kHoverTapTimeout = const Duration(milliseconds: 150);
 
@@ -78,9 +78,9 @@ const double kWindowTouchSlop = 16.0;  // Logical pixels
 /// gesture.
 // TODO(ianh): Make sure nobody has their own version of this.
 const double kMinFlingVelocity = 50.0;  // Logical pixels / second
+// const Velocity kMinFlingVelocity = const Velocity(pixelsPerSecond: 50.0);
 
-/// The maximum velocity of a touch to consider that touch to trigger a fling
-/// gesture.
+/// Drag gesture fling velocities are clipped to this value.
 // TODO(ianh): Make sure nobody has their own version of this.
 const double kMaxFlingVelocity = 8000.0;  // Logical pixels / second
 

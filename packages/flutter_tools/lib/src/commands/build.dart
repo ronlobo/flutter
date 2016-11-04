@@ -1,54 +1,106 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 import 'dart:async';
+import 'dart:io';
 
-import '../base/context.dart';
-import '../flx.dart';
+import 'package:meta/meta.dart';
+
+import '../build_info.dart';
+import '../globals.dart';
 import '../runner/flutter_command.dart';
-import '../toolchain.dart';
+import '../base/utils.dart';
+import 'build_apk.dart';
+import 'build_aot.dart';
+import 'build_flx.dart';
+import 'build_ios.dart';
 
 class BuildCommand extends FlutterCommand {
-  final String name = 'build';
-  final String description = 'Packages your Flutter app into an FLX.';
-
-  BuildCommand() {
-    argParser.addFlag('precompiled', negatable: false);
-    argParser.addOption('asset-base', defaultsTo: defaultAssetBase);
-    argParser.addOption('compiler');
-    argParser.addOption('main', defaultsTo: defaultMainPath);
-    argParser.addOption('manifest', defaultsTo: defaultManifestPath);
-    argParser.addOption('private-key', defaultsTo: defaultPrivateKeyPath);
-    argParser.addOption('output-file', abbr: 'o', defaultsTo: defaultFlxOutputPath);
-    argParser.addOption('snapshot', defaultsTo: defaultSnapshotPath);
+  BuildCommand({bool verboseHelp: false}) {
+    addSubcommand(new BuildApkCommand());
+    addSubcommand(new BuildAotCommand());
+    addSubcommand(new BuildCleanCommand());
+    addSubcommand(new BuildIOSCommand());
+    addSubcommand(new BuildFlxCommand(verboseHelp: verboseHelp));
   }
 
-  Future<int> runInProject() async {
-    String compilerPath = argResults['compiler'];
+  @override
+  final String name = 'build';
 
-    if (compilerPath == null)
-      await downloadToolchain();
-    else
-      toolchain = new Toolchain(compiler: new Compiler(compilerPath));
+  @override
+  final String description = 'Flutter build commands.';
 
-    String outputPath = argResults['output-file'];
+  @override
+  Future<int> verifyThenRunCommand() async {
+    if (!commandValidator())
+      return 1;
+    return super.verifyThenRunCommand();
+  }
 
-    return await build(
-      toolchain,
-      assetBase: argResults['asset-base'],
-      mainPath: argResults['main'],
-      manifestPath: argResults['manifest'],
-      outputPath: outputPath,
-      snapshotPath: argResults['snapshot'],
-      privateKeyPath: argResults['private-key'],
-      precompiledSnapshot: argResults['precompiled']
-    ).then((int result) {
-      if (result == 0)
-        printStatus('Built $outputPath.');
+  @override
+  Future<int> runCommand() => new Future<int>.value(0);
+}
+
+abstract class BuildSubCommand extends FlutterCommand {
+  @override
+  @mustCallSuper
+  Future<int> verifyThenRunCommand() async {
+    if (!commandValidator())
+      return 1;
+    return super.verifyThenRunCommand();
+  }
+
+  @override
+  @mustCallSuper
+  Future<int> runCommand() async {
+    if (isRunningOnBot) {
+      File dotPackages = new File('.packages');
+      printStatus('Contents of .packages:');
+      if (dotPackages.existsSync())
+        printStatus(dotPackages.readAsStringSync());
       else
-        printError('Error building $outputPath: $result.');
-      return result;
-    });
+        printError('File not found: ${dotPackages.absolute.path}');
+
+      File pubspecLock = new File('pubspec.lock');
+      printStatus('Contents of pubspec.lock:');
+      if (pubspecLock.existsSync())
+        printStatus(pubspecLock.readAsStringSync());
+      else
+        printError('File not found: ${pubspecLock.absolute.path}');
+    }
+    return 0;
+  }
+}
+
+class BuildCleanCommand extends FlutterCommand {
+  @override
+  final String name = 'clean';
+
+  @override
+  final String description = 'Delete the build/ directory.';
+
+  @override
+  Future<int> verifyThenRunCommand() async {
+    if (!commandValidator())
+      return 1;
+    return super.verifyThenRunCommand();
+  }
+
+  @override
+  Future<int> runCommand() async {
+    Directory buildDir = new Directory(getBuildDirectory());
+    printStatus("Deleting '${buildDir.path}${Platform.pathSeparator}'.");
+
+    if (!buildDir.existsSync())
+      return 0;
+
+    try {
+      buildDir.deleteSync(recursive: true);
+      return 0;
+    } catch (error) {
+      printError(error.toString());
+      return 1;
+    }
   }
 }

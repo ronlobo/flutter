@@ -2,16 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'package:flutter/animation.dart';
-
 import 'basic.dart';
+import 'container.dart';
 import 'framework.dart';
 import 'gesture_detector.dart';
 import 'navigator.dart';
 import 'transitions.dart';
 
-/// Prevents the user from interacting with widgets behind itself.
-class ModalBarrier extends StatelessComponent {
+/// A widget that prevents the user from interacting with widgets behind itself.
+class ModalBarrier extends StatelessWidget {
+  /// Creates a widget that blocks user interaction.
   ModalBarrier({
     Key key,
     this.color,
@@ -24,11 +24,12 @@ class ModalBarrier extends StatelessComponent {
   /// Whether touching the barrier will pop the current route off the [Navigator].
   final bool dismissable;
 
+  @override
   Widget build(BuildContext context) {
     return new Semantics(
       container: true,
       child: new GestureDetector(
-        onTapDown: (Point position) {
+        onTapDown: (TapDownDetails details) {
           if (dismissable)
             Navigator.pop(context);
         },
@@ -46,23 +47,25 @@ class ModalBarrier extends StatelessComponent {
   }
 }
 
-/// Prevents the user from interacting with widgets behind itself.
-class AnimatedModalBarrier extends AnimatedComponent {
+/// A widget that prevents the user from interacting with widgets behind itself.
+class AnimatedModalBarrier extends AnimatedWidget {
+  /// Creates a widget that blocks user interaction.
   AnimatedModalBarrier({
     Key key,
     Animation<Color> color,
     this.dismissable: true
-  }) : color = color, super(key: key, animation: color);
+  }) : super(key: key, animation: color);
 
   /// If non-null, fill the barrier with this color.
-  final Animation<Color> color;
+  Animation<Color> get color => animation;
 
   /// Whether touching the barrier will pop the current route off the [Navigator].
   final bool dismissable;
 
+  @override
   Widget build(BuildContext context) {
     return new ModalBarrier(
-      color: color.value,
+      color: color?.value,
       dismissable: dismissable
     );
   }

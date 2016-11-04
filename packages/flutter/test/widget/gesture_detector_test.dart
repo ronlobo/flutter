@@ -4,203 +4,223 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/widgets.dart';
-import 'package:test/test.dart';
 
 void main() {
-  test('Uncontested scrolls start immediately', () {
-    testWidgets((WidgetTester tester) {
-      TestPointer pointer = new TestPointer(7);
+  testWidgets('Uncontested scrolls start immediately', (WidgetTester tester) async {
+    bool didStartDrag = false;
+    double updatedDragDelta;
+    bool didEndDrag = false;
 
-      bool didStartDrag = false;
-      double updatedDragDelta;
-      bool didEndDrag = false;
+    Widget widget = new GestureDetector(
+      onVerticalDragStart: (DragStartDetails details) {
+        didStartDrag = true;
+      },
+      onVerticalDragUpdate: (DragUpdateDetails details) {
+        updatedDragDelta = details.primaryDelta;
+      },
+      onVerticalDragEnd: (DragEndDetails details) {
+        didEndDrag = true;
+      },
+      child: new Container(
+        decoration: const BoxDecoration(
+          backgroundColor: const Color(0xFF00FF00)
+        )
+      )
+    );
 
-      Widget widget = new GestureDetector(
-        onVerticalDragStart: (_) {
-          didStartDrag = true;
+    await tester.pumpWidget(widget);
+    expect(didStartDrag, isFalse);
+    expect(updatedDragDelta, isNull);
+    expect(didEndDrag, isFalse);
+
+    Point firstLocation = new Point(10.0, 10.0);
+    TestGesture gesture = await tester.startGesture(firstLocation, pointer: 7);
+    expect(didStartDrag, isTrue);
+    didStartDrag = false;
+    expect(updatedDragDelta, isNull);
+    expect(didEndDrag, isFalse);
+
+    Point secondLocation = new Point(10.0, 9.0);
+    await gesture.moveTo(secondLocation);
+    expect(didStartDrag, isFalse);
+    expect(updatedDragDelta, -1.0);
+    updatedDragDelta = null;
+    expect(didEndDrag, isFalse);
+
+    await gesture.up();
+    expect(didStartDrag, isFalse);
+    expect(updatedDragDelta, isNull);
+    expect(didEndDrag, isTrue);
+    didEndDrag = false;
+
+    await tester.pumpWidget(new Container());
+  });
+
+  testWidgets('Match two scroll gestures in succession', (WidgetTester tester) async {
+    int gestureCount = 0;
+    double dragDistance = 0.0;
+
+    Point downLocation = new Point(10.0, 10.0);
+    Point upLocation = new Point(10.0, 20.0);
+
+    Widget widget = new GestureDetector(
+      onVerticalDragUpdate: (DragUpdateDetails details) { dragDistance += details.primaryDelta; },
+      onVerticalDragEnd: (DragEndDetails details) { gestureCount += 1; },
+      onHorizontalDragUpdate: (DragUpdateDetails details) { fail("gesture should not match"); },
+      onHorizontalDragEnd: (DragEndDetails details) { fail("gesture should not match"); },
+      child: new Container(
+        decoration: const BoxDecoration(
+          backgroundColor: const Color(0xFF00FF00)
+        )
+      )
+    );
+    await tester.pumpWidget(widget);
+
+    TestGesture gesture = await tester.startGesture(downLocation, pointer: 7);
+    await gesture.moveTo(upLocation);
+    await gesture.up();
+
+    gesture = await tester.startGesture(downLocation, pointer: 7);
+    await gesture.moveTo(upLocation);
+    await gesture.up();
+
+    expect(gestureCount, 2);
+    expect(dragDistance, 20.0);
+
+    await tester.pumpWidget(new Container());
+  });
+
+  testWidgets('Pan doesn\'t crash', (WidgetTester tester) async {
+    bool didStartPan = false;
+    Offset panDelta;
+    bool didEndPan = false;
+
+    await tester.pumpWidget(
+      new GestureDetector(
+        onPanStart: (DragStartDetails details) {
+          didStartPan = true;
         },
-        onVerticalDragUpdate: (double scrollDelta) {
-          updatedDragDelta = scrollDelta;
+        onPanUpdate: (DragUpdateDetails details) {
+          panDelta = details.delta;
         },
-        onVerticalDragEnd: (Offset velocity) {
-          didEndDrag = true;
+        onPanEnd: (DragEndDetails details) {
+          didEndPan = true;
         },
         child: new Container(
           decoration: const BoxDecoration(
             backgroundColor: const Color(0xFF00FF00)
           )
         )
-      );
+      )
+    );
 
-      tester.pumpWidget(widget);
-      expect(didStartDrag, isFalse);
-      expect(updatedDragDelta, isNull);
-      expect(didEndDrag, isFalse);
+    expect(didStartPan, isFalse);
+    expect(panDelta, isNull);
+    expect(didEndPan, isFalse);
 
-      Point firstLocation = new Point(10.0, 10.0);
-      tester.dispatchEvent(pointer.down(firstLocation), firstLocation);
-      expect(didStartDrag, isTrue);
-      didStartDrag = false;
-      expect(updatedDragDelta, isNull);
-      expect(didEndDrag, isFalse);
+    await tester.scrollAt(new Point(10.0, 10.0), new Offset(20.0, 30.0));
 
-      Point secondLocation = new Point(10.0, 9.0);
-      tester.dispatchEvent(pointer.move(secondLocation), firstLocation);
-      expect(didStartDrag, isFalse);
-      expect(updatedDragDelta, -1.0);
-      updatedDragDelta = null;
-      expect(didEndDrag, isFalse);
-
-      tester.dispatchEvent(pointer.up(), firstLocation);
-      expect(didStartDrag, isFalse);
-      expect(updatedDragDelta, isNull);
-      expect(didEndDrag, isTrue);
-      didEndDrag = false;
-
-      tester.pumpWidget(new Container());
-    });
+    expect(didStartPan, isTrue);
+    expect(panDelta.dx, 20.0);
+    expect(panDelta.dy, 30.0);
+    expect(didEndPan, isTrue);
   });
 
-  test('Match two scroll gestures in succession', () {
-    testWidgets((WidgetTester tester) {
-      TestPointer pointer = new TestPointer(7);
+  testWidgets('Translucent', (WidgetTester tester) async {
+    bool didReceivePointerDown;
+    bool didTap;
 
-      int gestureCount = 0;
-      double dragDistance = 0.0;
-
-      Point downLocation = new Point(10.0, 10.0);
-      Point upLocation = new Point(10.0, 20.0);
-
-      Widget widget = new GestureDetector(
-        onVerticalDragUpdate: (double delta) { dragDistance += delta; },
-        onVerticalDragEnd: (Offset velocity) { gestureCount += 1; },
-        onHorizontalDragUpdate: (_) { fail("gesture should not match"); },
-        onHorizontalDragEnd: (Offset velocity) { fail("gesture should not match"); },
-        child: new Container(
-          decoration: const BoxDecoration(
-            backgroundColor: const Color(0xFF00FF00)
-          )
-        )
-      );
-      tester.pumpWidget(widget);
-
-      tester.dispatchEvent(pointer.down(downLocation), downLocation);
-      tester.dispatchEvent(pointer.move(upLocation), downLocation);
-      tester.dispatchEvent(pointer.up(), downLocation);
-
-      tester.dispatchEvent(pointer.down(downLocation), downLocation);
-      tester.dispatchEvent(pointer.move(upLocation), downLocation);
-      tester.dispatchEvent(pointer.up(), downLocation);
-
-      expect(gestureCount, 2);
-      expect(dragDistance, 20.0);
-
-      tester.pumpWidget(new Container());
-    });
-  });
-
-  test('Pan doesn\'t crash', () {
-    testWidgets((WidgetTester tester) {
-      bool didStartPan = false;
-      Offset panDelta;
-      bool didEndPan = false;
-
-      tester.pumpWidget(
-        new GestureDetector(
-          onPanStart: (_) {
-            didStartPan = true;
-          },
-          onPanUpdate: (Offset delta) {
-            panDelta = delta;
-          },
-          onPanEnd: (_) {
-            didEndPan = true;
-          },
-          child: new Container(
-            decoration: const BoxDecoration(
-              backgroundColor: const Color(0xFF00FF00)
-            )
-          )
-        )
-      );
-
-      expect(didStartPan, isFalse);
-      expect(panDelta, isNull);
-      expect(didEndPan, isFalse);
-
-      tester.scrollAt(new Point(10.0, 10.0), new Offset(20.0, 30.0));
-
-      expect(didStartPan, isTrue);
-      expect(panDelta.dx, 20.0);
-      expect(panDelta.dy, 30.0);
-      expect(didEndPan, isTrue);
-    });
-  });
-
-  test('Translucent', () {
-    testWidgets((WidgetTester tester) {
-      bool didReceivePointerDown;
-      bool didTap;
-
-      void pumpWidgetTree(HitTestBehavior behavior) {
-        tester.pumpWidget(
-          new Stack(
-            children: <Widget>[
-              new Listener(
-                onPointerDown: (_) {
-                  didReceivePointerDown = true;
-                },
-                child: new Container(
-                  width: 100.0,
-                  height: 100.0,
-                  decoration: const BoxDecoration(
-                    backgroundColor: const Color(0xFF00FF00)
-                  )
-                )
-              ),
-              new Container(
+    Future<Null> pumpWidgetTree(HitTestBehavior behavior) {
+      return tester.pumpWidget(
+        new Stack(
+          children: <Widget>[
+            new Listener(
+              onPointerDown: (_) {
+                didReceivePointerDown = true;
+              },
+              child: new Container(
                 width: 100.0,
                 height: 100.0,
-                child: new GestureDetector(
-                  onTap: () {
-                    didTap = true;
-                  },
-                  behavior: behavior
+                decoration: const BoxDecoration(
+                  backgroundColor: const Color(0xFF00FF00)
                 )
               )
-            ]
-          )
-        );
-      }
+            ),
+            new Container(
+              width: 100.0,
+              height: 100.0,
+              child: new GestureDetector(
+                onTap: () {
+                  didTap = true;
+                },
+                behavior: behavior
+              )
+            )
+          ]
+        )
+      );
+    }
 
-      didReceivePointerDown = false;
-      didTap = false;
-      pumpWidgetTree(null);
-      tester.tapAt(new Point(10.0, 10.0));
-      expect(didReceivePointerDown, isTrue);
-      expect(didTap, isTrue);
+    didReceivePointerDown = false;
+    didTap = false;
+    await pumpWidgetTree(null);
+    await tester.tapAt(new Point(10.0, 10.0));
+    expect(didReceivePointerDown, isTrue);
+    expect(didTap, isTrue);
 
-      didReceivePointerDown = false;
-      didTap = false;
-      pumpWidgetTree(HitTestBehavior.deferToChild);
-      tester.tapAt(new Point(10.0, 10.0));
-      expect(didReceivePointerDown, isTrue);
-      expect(didTap, isFalse);
+    didReceivePointerDown = false;
+    didTap = false;
+    await pumpWidgetTree(HitTestBehavior.deferToChild);
+    await tester.tapAt(new Point(10.0, 10.0));
+    expect(didReceivePointerDown, isTrue);
+    expect(didTap, isFalse);
 
-      didReceivePointerDown = false;
-      didTap = false;
-      pumpWidgetTree(HitTestBehavior.opaque);
-      tester.tapAt(new Point(10.0, 10.0));
-      expect(didReceivePointerDown, isFalse);
-      expect(didTap, isTrue);
+    didReceivePointerDown = false;
+    didTap = false;
+    await pumpWidgetTree(HitTestBehavior.opaque);
+    await tester.tapAt(new Point(10.0, 10.0));
+    expect(didReceivePointerDown, isFalse);
+    expect(didTap, isTrue);
 
-      didReceivePointerDown = false;
-      didTap = false;
-      pumpWidgetTree(HitTestBehavior.translucent);
-      tester.tapAt(new Point(10.0, 10.0));
-      expect(didReceivePointerDown, isTrue);
-      expect(didTap, isTrue);
+    didReceivePointerDown = false;
+    didTap = false;
+    await pumpWidgetTree(HitTestBehavior.translucent);
+    await tester.tapAt(new Point(10.0, 10.0));
+    expect(didReceivePointerDown, isTrue);
+    expect(didTap, isTrue);
 
-    });
+  });
+
+  testWidgets('Empty', (WidgetTester tester) async {
+    bool didTap = false;
+    await tester.pumpWidget(
+      new Center(
+        child: new GestureDetector(
+          onTap: () {
+            didTap = true;
+          },
+        )
+      )
+    );
+    expect(didTap, isFalse);
+    await tester.tapAt(new Point(10.0, 10.0));
+    expect(didTap, isTrue);
+  });
+
+  testWidgets('Only container', (WidgetTester tester) async {
+    bool didTap = false;
+    await tester.pumpWidget(
+      new Center(
+        child: new GestureDetector(
+          onTap: () {
+            didTap = true;
+          },
+          child: new Container(),
+        )
+      )
+    );
+    expect(didTap, isFalse);
+    await tester.tapAt(new Point(10.0, 10.0));
+    expect(didTap, isFalse);
   });
 }

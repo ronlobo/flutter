@@ -3,67 +3,134 @@
 // found in the LICENSE file.
 
 import 'dart:math' as math;
-import 'dart:ui' as ui;
+import 'dart:ui' show SemanticsFlags;
 
-import 'package:flutter/painting.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/rendering.dart';
-import 'package:sky_services/semantics/semantics.mojom.dart' as mojom;
 
 import 'basic.dart';
+import 'binding.dart';
 import 'framework.dart';
 import 'gesture_detector.dart';
 
-class SemanticsDebugger extends StatefulComponent {
+/// A widget that visualizes the semantics for the child.
+///
+/// This widget is useful for understand how an app presents itself to
+/// accessibility technology.
+class SemanticsDebugger extends StatefulWidget {
+  /// Creates a widget that visualizes the semantics for the child.
+  ///
+  /// The [child] argument must not be null.
   const SemanticsDebugger({ Key key, this.child }) : super(key: key);
+
+  /// The widget below this widget in the tree.
   final Widget child;
+
+  @override
   _SemanticsDebuggerState createState() => new _SemanticsDebuggerState();
 }
 
 class _SemanticsDebuggerState extends State<SemanticsDebugger> {
+  _SemanticsClient _client;
+
+  @override
   void initState() {
     super.initState();
-    _SemanticsDebuggerListener.ensureInstantiated();
-    _SemanticsDebuggerListener.instance.addListener(_update);
+    // TODO(abarth): We shouldn't reach out to the WidgetsBinding.instance
+    // static here because we might not be in a tree that's attached to that
+    // binding. Instead, we should find a way to get to the PipelineOwner from
+    // the BuildContext.
+    _client = new _SemanticsClient(WidgetsBinding.instance.pipelineOwner)
+      ..addListener(_update);
   }
+
+  @override
   void dispose() {
-    _SemanticsDebuggerListener.instance.removeListener(_update);
+    _client
+      ..removeListener(_update)
+      ..dispose();
     super.dispose();
   }
+
   void _update() {
-    setState(() {
-      // the generation of the _SemanticsDebuggerClient has changed
+    SchedulerBinding.instance.addPostFrameCallback((Duration timeStamp) {
+      // We want the update to take effect next frame, so to make that
+      // explicit we call setState() in a post-frame callback.
+      if (mounted) {
+        // If we got disposed this frame, we will still get an update,
+        // because the inactive list is flushed after the semantics updates
+        // are transmitted to the semantics clients.
+        setState(() {
+          // The generation of the _SemanticsDebuggerListener has changed.
+        });
+      }
     });
   }
+
   Point _lastPointerDownLocation;
   void _handlePointerDown(PointerDownEvent event) {
     setState(() {
       _lastPointerDownLocation = event.position;
     });
   }
+
   void _handleTap() {
     assert(_lastPointerDownLocation != null);
-    _SemanticsDebuggerListener.instance.handleTap(_lastPointerDownLocation);
+    _performAction(_lastPointerDownLocation, SemanticsAction.tap);
     setState(() {
       _lastPointerDownLocation = null;
     });
   }
+
   void _handleLongPress() {
     assert(_lastPointerDownLocation != null);
-    _SemanticsDebuggerListener.instance.handleLongPress(_lastPointerDownLocation);
+    _performAction(_lastPointerDownLocation, SemanticsAction.longPress);
     setState(() {
       _lastPointerDownLocation = null;
     });
   }
-  void _handlePanEnd(Offset velocity) {
-    assert(_lastPointerDownLocation != null);
-    _SemanticsDebuggerListener.instance.handlePanEnd(_lastPointerDownLocation, velocity);
+
+  void _handlePanEnd(DragEndDetails details) {
+    double vx = details.velocity.pixelsPerSecond.dx;
+    double vy = details.velocity.pixelsPerSecond.dy;
+    if (vx.abs() == vy.abs())
+      return;
+    if (vx.abs() > vy.abs()) {
+      if (vx.sign < 0) {
+        _performAction(_lastPointerDownLocation, SemanticsAction.decrease);
+        _performAction(_lastPointerDownLocation, SemanticsAction.scrollLeft);
+      } else {
+        _performAction(_lastPointerDownLocation, SemanticsAction.increase);
+        _performAction(_lastPointerDownLocation, SemanticsAction.scrollRight);
+      }
+    } else {
+      if (vy.sign < 0)
+        _performAction(_lastPointerDownLocation, SemanticsAction.scrollUp);
+      else
+        _performAction(_lastPointerDownLocation, SemanticsAction.scrollDown);
+    }
     setState(() {
       _lastPointerDownLocation = null;
     });
   }
+
+  void _performAction(Point position, SemanticsAction action) {
+    _pipelineOwner.semanticsOwner?.performActionAt(position, action);
+  }
+
+  // TODO(abarth): This shouldn't be a static. We should get the pipeline owner
+  // from [context] somehow.
+  PipelineOwner get _pipelineOwner => WidgetsBinding.instance.pipelineOwner;
+
+  @override
   Widget build(BuildContext context) {
     return new CustomPaint(
-      foregroundPainter: new _SemanticsDebuggerPainter(_SemanticsDebuggerListener.instance.generation, _lastPointerDownLocation),
+      foregroundPainter: new _SemanticsDebuggerPainter(
+        _pipelineOwner,
+        _client.generation,
+        _lastPointerDownLocation
+      ),
       child: new GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: _handleTap,
@@ -83,282 +150,175 @@ class _SemanticsDebuggerState extends State<SemanticsDebugger> {
   }
 }
 
-typedef bool _SemanticsDebuggerEntryFilter(_SemanticsDebuggerEntry entry);
-
-class _SemanticsDebuggerEntry {
-  _SemanticsDebuggerEntry(this.id);
-
-  final int id;
-  bool canBeTapped = false;
-  bool canBeLongPressed = false;
-  bool canBeScrolledHorizontally = false;
-  bool canBeScrolledVertically = false;
-  bool hasCheckedState = false;
-  bool isChecked = false;
-  String label;
-  Matrix4 transform;
-  Rect rect;
-  List<_SemanticsDebuggerEntry> children;
-
-  String toString() {
-    return '_SemanticsDebuggerEntry($id; $rect; "$label"'
-           '${canBeTapped ? "; canBeTapped" : ""}'
-           '${canBeLongPressed ? "; canBeLongPressed" : ""}'
-           '${canBeScrolledHorizontally ? "; canBeScrolledHorizontally" : ""}'
-           '${canBeScrolledVertically ? "; canBeScrolledVertically" : ""}'
-           '${hasCheckedState ? isChecked ? "; checked" : "; unchecked" : ""}'
-           ')';
-  }
-  String toStringDeep([ String prefix = '']) {
-    if (prefix.length > 20)
-      return '$prefix<ABORTED>\n';
-    String result = '$prefix$this\n';
-    for (_SemanticsDebuggerEntry child in children.reversed) {
-      prefix += '  ';
-      result += '${child.toStringDeep(prefix)}';
-    }
-    return result;
+class _SemanticsClient extends ChangeNotifier {
+  _SemanticsClient(PipelineOwner pipelineOwner) {
+    _semanticsHandle = pipelineOwner.ensureSemantics(
+      listener: _didUpdateSemantics
+    );
   }
 
-  int findDepth() {
-    if (children == null || children.isEmpty)
-      return 1;
-    return children.map((_SemanticsDebuggerEntry e) => e.findDepth()).reduce((int runningDepth, int nextDepth) {
-      return math.max(runningDepth, nextDepth);
-    }) + 1;
-  }
+  SemanticsHandle _semanticsHandle;
 
-  static const TextStyle textStyles = const TextStyle(
-    color: const Color(0xFF000000),
-    fontSize: 10.0,
-    height: 0.8,
-    textAlign: TextAlign.center
-  );
-
-  TextPainter textPainter;
-  void updateMessage() {
-    List<String> annotations = <String>[];
-    bool wantsTap = false;
-    if (hasCheckedState) {
-      annotations.add(isChecked ? 'checked' : 'unchecked');
-      wantsTap = true;
-    }
-    if (canBeTapped) {
-      if (!wantsTap)
-        annotations.add('button');
-    } else {
-      if (wantsTap)
-        annotations.add('disabled');
-    }
-    if (canBeLongPressed)
-      annotations.add('long-pressable');
-    if (canBeScrolledHorizontally || canBeScrolledVertically)
-      annotations.add('scrollable');
-    String message;
-    if (annotations.isEmpty) {
-      assert(label != null);
-      message = label;
-    } else {
-      if (label == '') {
-        message = annotations.join('; ');
-      } else {
-        message = '$label (${annotations.join('; ')})';
-      }
-    }
-    message = message.trim();
-    if (message != '') {
-      textPainter ??= new TextPainter();
-      textPainter.text = new StyledTextSpan(textStyles, <TextSpan>[new PlainTextSpan(message)]);
-      textPainter.maxWidth = rect.width;
-      textPainter.maxHeight = rect.height;
-      textPainter.layout();
-    } else {
-      textPainter = null;
-    }
-  }
-
-  void paint(Canvas canvas, int rank) {
-    canvas.save();
-    if (transform != null)
-      canvas.transform(transform.storage);
-    if (!rect.isEmpty) {
-      Color lineColor = new Color(0xFF000000 + new math.Random(id).nextInt(0xFFFFFF));
-      Rect innerRect = rect.deflate(rank * 1.0);
-      if (innerRect.isEmpty) {
-        Paint fill = new Paint()
-         ..color = lineColor
-         ..style = ui.PaintingStyle.fill;
-        canvas.drawRect(rect, fill);
-      } else {
-        Paint fill = new Paint()
-         ..color = const Color(0xFFFFFFFF)
-         ..style = ui.PaintingStyle.fill;
-        canvas.drawRect(rect, fill);
-        Paint line = new Paint()
-         ..strokeWidth = rank * 2.0
-         ..color = lineColor
-         ..style = ui.PaintingStyle.stroke;
-        canvas.drawRect(innerRect, line);
-      }
-      if (textPainter != null) {
-        canvas.save();
-        canvas.clipRect(rect);
-        textPainter.paint(canvas, rect.topLeft.toOffset());
-        canvas.restore();
-      }
-    }
-    for (_SemanticsDebuggerEntry child in children)
-      child.paint(canvas, rank - 1);
-    canvas.restore();
-  }
-
-  _SemanticsDebuggerEntry hitTest(Point position, _SemanticsDebuggerEntryFilter filter) {
-    if (transform != null) {
-      if (transform.determinant == 0.0)
-        return null;
-      Matrix4 invertedTransform = new Matrix4.inverted(transform);
-      position = MatrixUtils.transformPoint(invertedTransform, position);
-    }
-    if (!rect.contains(position))
-      return null;
-    _SemanticsDebuggerEntry result;
-    for (_SemanticsDebuggerEntry child in children.reversed) {
-      result = child.hitTest(position, filter);
-      if (result != null)
-        break;
-    }
-    if (result == null || !filter(result))
-      result = this;
-    return result;
-  }
-}
-
-class _SemanticsDebuggerListener implements mojom.SemanticsListener {
-  _SemanticsDebuggerListener._() {
-    Renderer.instance.setSemanticsClient(this);
-  }
-
-  static _SemanticsDebuggerListener instance;
-  static mojom.SemanticsServer _server;
-  static void ensureInstantiated({ mojom.SemanticsServer server }) {
-    _server = server ?? new SemanticsServer();
-    instance ??= new _SemanticsDebuggerListener._();
-  }
-
-  Set<VoidCallback> _listeners = new Set<VoidCallback>();
-  void addListener(VoidCallback callback) {
-    assert(!_listeners.contains(callback));
-    _listeners.add(callback);
-  }
-  void removeListener(VoidCallback callback) {
-    _listeners.remove(callback);
-  }
-
-  Map<int, _SemanticsDebuggerEntry> nodes = <int, _SemanticsDebuggerEntry>{};
-
-  _SemanticsDebuggerEntry _updateNode(mojom.SemanticsNode node) {
-    _SemanticsDebuggerEntry entry = nodes.putIfAbsent(node.id, () => new _SemanticsDebuggerEntry(node.id));
-    if (node.flags != null) {
-      entry.canBeTapped = node.flags.canBeTapped;
-      entry.canBeLongPressed = node.flags.canBeLongPressed;
-      entry.canBeScrolledHorizontally = node.flags.canBeScrolledHorizontally;
-      entry.canBeScrolledVertically = node.flags.canBeScrolledVertically;
-      entry.hasCheckedState = node.flags.hasCheckedState;
-      entry.isChecked = node.flags.isChecked;
-    }
-    if (node.strings != null) {
-      assert(node.strings.label != null);
-      entry.label = node.strings.label;
-    } else {
-      assert(entry.label != null);
-    }
-    if (node.geometry != null) {
-      if (node.geometry.transform != null) {
-        assert(node.geometry.transform.length == 16);
-        // TODO(ianh): Replace this with a cleaner call once
-        //  https://github.com/google/vector_math.dart/issues/159
-        // is fixed.
-        List<double> array = node.geometry.transform;
-        entry.transform = new Matrix4(
-          array[0],  array[1],  array[2],  array[3],
-          array[4],  array[5],  array[6],  array[7],
-          array[8],  array[9],  array[10], array[11],
-          array[12], array[13], array[14], array[15]
-        );
-      } else {
-        entry.transform = null;
-      }
-      entry.rect = new Rect.fromLTWH(node.geometry.left, node.geometry.top, node.geometry.width, node.geometry.height);
-    }
-    entry.updateMessage();
-    if (node.children != null) {
-      Set oldChildren = new Set<_SemanticsDebuggerEntry>.from(entry.children ?? const <_SemanticsDebuggerEntry>[]);
-      entry.children?.clear();
-      entry.children ??= new List<_SemanticsDebuggerEntry>();
-      for (mojom.SemanticsNode child in node.children)
-        entry.children.add(_updateNode(child));
-      Set newChildren = new Set<_SemanticsDebuggerEntry>.from(entry.children);
-      Set<_SemanticsDebuggerEntry> removedChildren = oldChildren.difference(newChildren);
-      for (_SemanticsDebuggerEntry oldChild in removedChildren)
-        nodes.remove(oldChild.id);
-    }
-    return entry;
+  @override
+  void dispose() {
+    _semanticsHandle.dispose();
+    _semanticsHandle = null;
+    super.dispose();
   }
 
   int generation = 0;
 
-  updateSemanticsTree(List<mojom.SemanticsNode> nodes) {
+  void _didUpdateSemantics() {
     generation += 1;
-    for (mojom.SemanticsNode node in nodes)
-      _updateNode(node);
-    for (VoidCallback listener in _listeners)
-      listener();
-  }
-
-  _SemanticsDebuggerEntry _hitTest(Point position, _SemanticsDebuggerEntryFilter filter) {
-    return nodes[0]?.hitTest(position, filter);
-  }
-
-  void handleTap(Point position) {
-    _server.tap(_hitTest(position, (_SemanticsDebuggerEntry entry) => entry.canBeTapped)?.id ?? 0);
-  }
-  void handleLongPress(Point position) {
-    _server.longPress(_hitTest(position, (_SemanticsDebuggerEntry entry) => entry.canBeLongPressed)?.id ?? 0);
-  }
-  void handlePanEnd(Point position, Offset velocity) {
-    if (velocity.dx.abs() == velocity.dy.abs())
-      return;
-    if (velocity.dx.abs() > velocity.dy.abs()) {
-      if (velocity.dx.sign < 0)
-        _server.scrollLeft(_hitTest(position, (_SemanticsDebuggerEntry entry) => entry.canBeScrolledHorizontally)?.id ?? 0);
-      else
-        _server.scrollRight(_hitTest(position, (_SemanticsDebuggerEntry entry) => entry.canBeScrolledHorizontally)?.id ?? 0);
-    } else {
-      if (velocity.dy.sign < 0)
-        _server.scrollUp(_hitTest(position, (_SemanticsDebuggerEntry entry) => entry.canBeScrolledVertically)?.id ?? 0);
-      else
-        _server.scrollDown(_hitTest(position, (_SemanticsDebuggerEntry entry) => entry.canBeScrolledVertically)?.id ?? 0);
-    }
+    notifyListeners();
   }
 }
 
+String _getMessage(SemanticsNode node) {
+  SemanticsData data = node.getSemanticsData();
+  List<String> annotations = <String>[];
+
+  bool wantsTap = false;
+  if (data.hasFlag(SemanticsFlags.hasCheckedState)) {
+    annotations.add(data.hasFlag(SemanticsFlags.isChecked) ? 'checked' : 'unchecked');
+    wantsTap = true;
+  }
+
+  if (data.hasAction(SemanticsAction.tap)) {
+    if (!wantsTap)
+      annotations.add('button');
+  } else {
+    if (wantsTap)
+      annotations.add('disabled');
+  }
+
+  if (data.hasAction(SemanticsAction.longPress))
+    annotations.add('long-pressable');
+
+  final bool isScrollable = data.hasAction(SemanticsAction.scrollLeft)
+                         || data.hasAction(SemanticsAction.scrollRight)
+                         || data.hasAction(SemanticsAction.scrollUp)
+                         || data.hasAction(SemanticsAction.scrollDown);
+
+  final bool isAdjustable = data.hasAction(SemanticsAction.increase)
+                         || data.hasAction(SemanticsAction.decrease);
+
+  if (isScrollable)
+    annotations.add('scrollable');
+
+  if (isAdjustable)
+    annotations.add('adjustable');
+
+  String message;
+  if (annotations.isEmpty) {
+    assert(data.label != null);
+    message = data.label;
+  } else {
+    if (data.label.isEmpty) {
+      message = annotations.join('; ');
+    } else {
+      message = '${data.label} (${annotations.join('; ')})';
+    }
+  }
+
+  return message.trim();
+}
+
+const TextStyle _messageStyle = const TextStyle(
+  color: const Color(0xFF000000),
+  fontSize: 10.0,
+  height: 0.8
+);
+
+void _paintMessage(Canvas canvas, SemanticsNode node) {
+  String message = _getMessage(node);
+  if (message.isEmpty)
+    return;
+  final Rect rect = node.rect;
+  canvas.save();
+  canvas.clipRect(rect);
+  TextPainter textPainter = new TextPainter()
+    ..text = new TextSpan(style: _messageStyle, text: message)
+    ..layout(maxWidth: rect.width);
+
+  textPainter.paint(canvas, FractionalOffset.center.inscribe(textPainter.size, rect).topLeft.toOffset());
+  canvas.restore();
+}
+
+int _findDepth(SemanticsNode node) {
+  if (!node.hasChildren || node.mergeAllDescendantsIntoThisNode)
+    return 1;
+  int childrenDepth = 0;
+  node.visitChildren((SemanticsNode child) {
+    childrenDepth = math.max(childrenDepth, _findDepth(child));
+    return true;
+  });
+  return childrenDepth + 1;
+}
+
+void _paint(Canvas canvas, SemanticsNode node, int rank) {
+  canvas.save();
+  if (node.transform != null)
+    canvas.transform(node.transform.storage);
+  Rect rect = node.rect;
+  if (!rect.isEmpty) {
+    Color lineColor = new Color(0xFF000000 + new math.Random(node.id).nextInt(0xFFFFFF));
+    Rect innerRect = rect.deflate(rank * 1.0);
+    if (innerRect.isEmpty) {
+      Paint fill = new Paint()
+       ..color = lineColor
+       ..style = PaintingStyle.fill;
+      canvas.drawRect(rect, fill);
+    } else {
+      Paint fill = new Paint()
+       ..color = const Color(0xFFFFFFFF)
+       ..style = PaintingStyle.fill;
+      canvas.drawRect(rect, fill);
+      Paint line = new Paint()
+       ..strokeWidth = rank * 2.0
+       ..color = lineColor
+       ..style = PaintingStyle.stroke;
+      canvas.drawRect(innerRect, line);
+    }
+    _paintMessage(canvas, node);
+  }
+  if (!node.mergeAllDescendantsIntoThisNode) {
+    final int childRank = rank - 1;
+    node.visitChildren((SemanticsNode child) {
+      _paint(canvas, child, childRank);
+      return true;
+    });
+  }
+  canvas.restore();
+}
+
 class _SemanticsDebuggerPainter extends CustomPainter {
-  const _SemanticsDebuggerPainter(this.generation, this.pointerPosition);
+  const _SemanticsDebuggerPainter(this.owner, this.generation, this.pointerPosition);
+
+  final PipelineOwner owner;
   final int generation;
   final Point pointerPosition;
+
+  SemanticsNode get _rootSemanticsNode {
+    return owner.semanticsOwner?.rootSemanticsNode;
+  }
+
+  @override
   void paint(Canvas canvas, Size size) {
-    _SemanticsDebuggerListener.instance.nodes[0]?.paint(
-      canvas,
-      _SemanticsDebuggerListener.instance.nodes[0].findDepth()
-    );
+    final SemanticsNode rootNode = _rootSemanticsNode;
+    if (rootNode != null)
+      _paint(canvas, rootNode, _findDepth(rootNode));
     if (pointerPosition != null) {
       Paint paint = new Paint();
       paint.color = const Color(0x7F0090FF);
       canvas.drawCircle(pointerPosition, 10.0, paint);
     }
   }
+
+  @override
   bool shouldRepaint(_SemanticsDebuggerPainter oldDelegate) {
-    return generation != oldDelegate.generation
+    return owner != oldDelegate.owner
+        || generation != oldDelegate.generation
         || pointerPosition != oldDelegate.pointerPosition;
   }
 }

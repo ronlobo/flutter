@@ -2,14 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-/// Service exposed to Flutter apps that implements a subset of Dart's
-/// http package API.
+/// A [Future]-based library for making HTTP requests.
 ///
-/// This library will probably be moved into a separate package eventually.
+/// To use, import `package:flutter/http.dart`.
 ///
-/// This library depends only on core Dart libraries as well as the `mojo`,
-/// `mojo_services`, and `sky_services` and packages.
+/// This library is based on Dart's `http` package, but differs in that it does
+/// not have a dependency on mirrors.
+///
+// TODO(chinmaygarde): The contents of `lib/src/http` will become redundant
+// once https://github.com/dart-lang/http/issues/1 is fixed (removes the use
+// of mirrors). Once that issue is addressed, we should get rid this directory
+// and use `dart-lang/http` directly.
 library http;
 
 export 'src/http/http.dart';
 export 'src/http/response.dart';
+export 'src/http/mock_client.dart';

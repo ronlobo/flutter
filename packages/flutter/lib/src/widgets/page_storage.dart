@@ -2,18 +2,24 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'package:meta/meta.dart';
+
 import 'framework.dart';
 
 class _StorageEntryIdentifier {
   Type clientType;
   List<Key> keys;
+
   void addKey(Key key) {
     assert(key != null);
     assert(key is! GlobalKey);
     keys ??= <Key>[];
     keys.add(key);
   }
+
   GlobalKey scopeKey;
+
+  @override
   bool operator ==(dynamic other) {
     if (other is! _StorageEntryIdentifier)
       return false;
@@ -30,13 +36,20 @@ class _StorageEntryIdentifier {
     }
     return true;
   }
+
+  @override
   int get hashCode => hashValues(clientType, scopeKey, hashList(keys));
 
+  @override
   String toString() {
     return 'StorageEntryIdentifier($clientType, $scopeKey, ${keys?.join(":")})';
   }
 }
 
+/// A storage bucket associated with a page in an app.
+///
+/// Useful for storing per-page state that persists across navigations from one
+/// page to another.
 class PageStorageBucket {
   _StorageEntryIdentifier _computeStorageIdentifier(BuildContext context) {
     _StorageEntryIdentifier result = new _StorageEntryIdentifier();
@@ -61,33 +74,64 @@ class PageStorageBucket {
     return result;
   }
 
-  Map<_StorageEntryIdentifier, dynamic> _storage;
-  void writeState(BuildContext context, dynamic data) {
-    _storage ??= <_StorageEntryIdentifier, dynamic>{};
-    _storage[_computeStorageIdentifier(context)] = data;
+  Map<Object, dynamic> _storage;
+
+  /// Write the given data into this page storage bucket using an identifier
+  /// computed from the given context. The identifier is based on the keys
+  /// found in the path from context to the root of the widget tree for this
+  /// page. Keys are collected until the widget tree's root is reached or
+  /// a GlobalKey is found.
+  ///
+  /// An explicit identifier can be used in cases where the list of keys
+  /// is not stable. For example if the path concludes with a GlobalKey
+  /// that's created by a stateful widget, if the stateful widget is
+  /// recreated when it's exposed by [Navigator.pop], then its storage
+  /// identifier will change.
+  void writeState(BuildContext context, dynamic data, { Object identifier }) {
+    _storage ??= <Object, dynamic>{};
+    _storage[identifier ?? _computeStorageIdentifier(context)] = data;
   }
-  dynamic readState(BuildContext context) {
-    return _storage != null ? _storage[_computeStorageIdentifier(context)] : null;
+
+  /// Read given data from into this page storage bucket using an identifier
+  /// computed from the given context. More about [identifier] in [writeState].
+  dynamic readState(BuildContext context, { Object identifier }) {
+    return _storage != null ? _storage[identifier ?? _computeStorageIdentifier(context)] : null;
   }
 }
 
-class PageStorage extends StatelessComponent {
+/// A widget that establishes a page storage bucket for this widget subtree.
+class PageStorage extends StatelessWidget {
+  /// Creates a widget that provides a storage bucket for its descendants.
+  ///
+  /// The [bucket] argument must not be null.
   PageStorage({
     Key key,
-    this.child,
-    this.bucket
-  }) : super(key: key);
+    @required this.bucket,
+    this.child
+  }) : super(key: key) {
+    assert(bucket != null);
+  }
 
+  /// The widget below this widget in the tree.
   final Widget child;
+
+  /// The page storage bucket to use for this subtree.
   final PageStorageBucket bucket;
 
   /// The bucket from the closest instance of this class that encloses the given context.
   ///
-  /// Returns null if none exists.
+  /// Returns `null` if none exists.
+  ///
+  /// Typical usage is as follows:
+  ///
+  /// ```dart
+  /// PageStorageBucket bucket = PageStorage.of(context);
+  /// ```
   static PageStorageBucket of(BuildContext context) {
     PageStorage widget = context.ancestorWidgetOfExactType(PageStorage);
     return widget?.bucket;
   }
 
+  @override
   Widget build(BuildContext context) => child;
 }

@@ -6,15 +6,27 @@ import 'dart:ui' show Color, Offset;
 
 import 'package:flutter/painting.dart';
 
-// Based on http://www.google.com/design/spec/what-is-material/elevation-shadows.html
-// Currently, only the elevation values that are bound to one or more components are
+// Based on http://material.google.com/what-is-material/elevation-shadows.html
+// Currently, only the elevation values that are bound to one or more widgets are
 // defined here.
+
+/// Map of elevation offsets used by material design to [BoxShadow] definitions.
+///
+/// The following elevations have defined shadows: 1, 2, 3, 4, 6, 8, 9, 12, 16, 24
+///
+/// Each entry has three shadows which must be combined to obtain the defined
+/// effect for that elevation.
+///
+/// See also:
+///
+///  * [Material]
+///  * <https://material.google.com/what-is-material/elevation-shadows.html>
+const Map<int, List<BoxShadow>> kElevationToShadow = _elevationToShadow; // to hide the literal from the docs
 
 const Color _kKeyUmbraOpacity = const Color(0x33000000); // alpha = 0.2
 const Color _kKeyPenumbraOpacity = const Color(0x24000000); // alpha = 0.14
 const Color _kAmbientShadowOpacity = const Color(0x1F000000); // alpha = 0.12
-
-const Map<int, List<BoxShadow>> elevationToShadow = const <int, List<BoxShadow>>{
+const Map<int, List<BoxShadow>> _elevationToShadow = const <int, List<BoxShadow>>{
   1: const <BoxShadow>[
     const BoxShadow(offset: const Offset(0.0, 2.0), blurRadius: 1.0, spreadRadius: -1.0, color: _kKeyUmbraOpacity),
     const BoxShadow(offset: const Offset(0.0, 1.0), blurRadius: 1.0, spreadRadius: 0.0, color: _kKeyPenumbraOpacity),

@@ -6,57 +6,60 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:path/path.dart' as path;
-import 'package:test/src/executable.dart' as executable;
+import 'package:test/src/executable.dart' as executable; // ignore: implementation_imports
 
-import '../artifacts.dart';
-import '../base/context.dart';
-import '../build_configuration.dart';
+import '../base/logger.dart';
+import '../base/os.dart';
+import '../cache.dart';
+import '../dart/package_map.dart';
+import '../globals.dart';
 import '../runner/flutter_command.dart';
-import '../test/loader.dart' as loader;
+import '../test/coverage_collector.dart';
+import '../test/flutter_platform.dart' as loader;
+import '../toolchain.dart';
 
 class TestCommand extends FlutterCommand {
-  String get name => 'test';
-  String get description => 'Runs Flutter unit tests for the current project.';
-
-  bool get requiresProjectRoot => false;
-
-  String get projectRootValidationErrorMessage {
-    return 'Error: No pubspec.yaml file found.\n'
-      'If you wish to run the tests in the Flutter repository\'s \'flutter\' package,\n'
-      'pass --flutter-repo before any test paths. Otherwise, run this command from the\n'
-      'root of your project. Test files must be called *_test.dart and must reside in\n'
-      'the package\'s \'test\' directory (or one of its subdirectories).';
-  }
-
-  Future<String> _getShellPath(BuildConfiguration config) async {
-    if (config.type == BuildType.prebuilt) {
-      Artifact artifact = ArtifactStore.getArtifact(
-        type: ArtifactType.shell, targetPlatform: config.targetPlatform);
-      return await ArtifactStore.getPath(artifact);
-    } else {
-      switch (config.targetPlatform) {
-        case TargetPlatform.linux:
-          return path.join(config.buildDir, 'sky_shell');
-        case TargetPlatform.mac:
-          return path.join(config.buildDir, 'SkyShell.app', 'Contents', 'MacOS', 'SkyShell');
-        default:
-          throw new Exception('Unsupported platform.');
-      }
-    }
-  }
-
   TestCommand() {
-    argParser.addFlag('flutter-repo', help: 'Run tests from the \'flutter\' package in the Flutter repository instead of the current directory.', defaultsTo: false);
+    usesPubOption();
+    argParser.addFlag('coverage',
+      defaultsTo: false,
+      negatable: false,
+      help: 'Whether to collect coverage information.'
+    );
+    argParser.addFlag('merge-coverage',
+      defaultsTo: false,
+      negatable: false,
+      help: 'Whether to merge converage data with "coverage/lcov.base.info". '
+            'Implies collecting coverage data. (Requires lcov)'
+    );
+    argParser.addOption('coverage-path',
+      defaultsTo: 'coverage/lcov.info',
+      help: 'Where to store coverage information (if coverage is enabled).'
+    );
+    commandValidator = () {
+      if (!FileSystemEntity.isFileSync('pubspec.yaml')) {
+        printError(
+          'Error: No pubspec.yaml file found in the current working directory.\n'
+          'Run this command from the root of your project. Test files must be\n'
+          'called *_test.dart and must reside in the package\'s \'test\'\n'
+          'directory (or one of its subdirectories).');
+        return false;
+      }
+      return true;
+    };
   }
+
+  @override
+  String get name => 'test';
+
+  @override
+  String get description => 'Run Flutter unit tests for the current project.';
 
   Iterable<String> _findTests(Directory directory) {
     return directory.listSync(recursive: true, followLinks: false)
-                    .where((FileSystemEntity entity) => entity.path.endsWith('_test.dart') && FileSystemEntity.isFileSync(entity.path))
+                    .where((FileSystemEntity entity) => entity.path.endsWith('_test.dart') &&
+                      FileSystemEntity.isFileSync(entity.path))
                     .map((FileSystemEntity entity) => path.absolute(entity.path));
-  }
-
-  Directory get _flutterUnitTestDir {
-    return new Directory(path.join(ArtifactStore.flutterRoot, 'packages', 'flutter', 'test'));
   }
 
   Directory get _currentPackageTestDir {
@@ -68,29 +71,87 @@ class TestCommand extends FlutterCommand {
   Future<int> _runTests(List<String> testArgs, Directory testDirectory) async {
     Directory currentDirectory = Directory.current;
     try {
-      Directory.current = testDirectory;
-      return await executable.main(testArgs);
+      if (testDirectory != null) {
+        printTrace('switching to directory $testDirectory to run tests');
+        PackageMap.globalPackagesPath = path.normalize(path.absolute(PackageMap.globalPackagesPath));
+        Directory.current = testDirectory;
+      }
+      printTrace('running test package with arguments: $testArgs');
+      await executable.main(testArgs);
+      printTrace('test package returned with exit code $exitCode');
+
+      return exitCode;
     } finally {
       Directory.current = currentDirectory;
     }
   }
 
+  Future<bool> _collectCoverageData(CoverageCollector collector, { bool mergeCoverageData: false }) async {
+    Status status = logger.startProgress('Collecting coverage information...');
+    String coverageData = await collector.finalizeCoverage();
+    status.stop();
+    if (coverageData == null)
+      return false;
+
+    String coveragePath = argResults['coverage-path'];
+    File coverageFile = new File(coveragePath)
+      ..createSync(recursive: true)
+      ..writeAsStringSync(coverageData, flush: true);
+    printTrace('wrote coverage data to $coveragePath (size=${coverageData.length})');
+
+    String baseCoverageData = 'coverage/lcov.base.info';
+    if (mergeCoverageData) {
+      if (!os.isLinux) {
+        printError(
+          'Merging coverage data is supported only on Linux because it '
+          'requires the "lcov" tool.'
+        );
+        return false;
+      }
+
+      if (!FileSystemEntity.isFileSync(baseCoverageData)) {
+        printError('Missing "$baseCoverageData". Unable to merge coverage data.');
+        return false;
+      }
+
+      if (os.which('lcov') == null) {
+        String installMessage = 'Please install lcov.';
+        if (os.isLinux)
+          installMessage = 'Consider running "sudo apt-get install lcov".';
+        else if (os.isMacOS)
+          installMessage = 'Consider running "brew install lcov".';
+        printError('Missing "lcov" tool. Unable to merge coverage data.\n$installMessage');
+        return false;
+      }
+
+      Directory tempDir = Directory.systemTemp.createTempSync('flutter_tools');
+      try {
+        File sourceFile = coverageFile.copySync(path.join(tempDir.path, 'lcov.source.info'));
+        ProcessResult result = Process.runSync('lcov', <String>[
+          '--add-tracefile', baseCoverageData,
+          '--add-tracefile', sourceFile.path,
+          '--output-file', coverageFile.path,
+        ]);
+        if (result.exitCode != 0)
+          return false;
+      } finally {
+        tempDir.deleteSync(recursive: true);
+      }
+    }
+    return true;
+  }
+
   @override
-  Future<int> runInProject() async {
+  Future<int> runCommand() async {
     List<String> testArgs = argResults.rest.map((String testPath) => path.absolute(testPath)).toList();
 
-    final bool runFlutterTests = argResults['flutter-repo'];
-    if (!runFlutterTests && !validateProjectRoot())
+    if (!commandValidator())
       return 1;
 
-    // If we're running the flutter tests, we want to use the packages directory
-    // from the flutter package in order to find the proper shell binary.
-    if (runFlutterTests && ArtifactStore.packageRoot == 'packages')
-      ArtifactStore.packageRoot = path.join(ArtifactStore.flutterRoot, 'packages', 'flutter', 'packages');
-
-    Directory testDir = runFlutterTests ? _flutterUnitTestDir : _currentPackageTestDir;
+    Directory testDir;
 
     if (testArgs.isEmpty) {
+      testDir = _currentPackageTestDir;
       if (!testDir.existsSync()) {
         printError("Test directory '${testDir.path}' not found.");
         return 1;
@@ -100,29 +161,31 @@ class TestCommand extends FlutterCommand {
     }
 
     testArgs.insert(0, '--');
-    if (Platform.environment['TERM'] == 'dumb')
-      testArgs.insert(0, '--no-color');
-    List<BuildConfiguration> configs = buildConfigurations;
-    bool foundOne = false;
+    if (!terminal.supportsColor)
+      testArgs.insertAll(0, <String>['--no-color', '-rexpanded']);
+
+    if (argResults['coverage'])
+      testArgs.insert(0, '--concurrency=1');
+
     loader.installHook();
-    for (BuildConfiguration config in configs) {
-      if (!config.testable)
-        continue;
-      foundOne = true;
-      loader.shellPath = path.absolute(await _getShellPath(config));
-      if (!FileSystemEntity.isFileSync(loader.shellPath)) {
-          printError('Cannot find Flutter shell at ${loader.shellPath}');
-        return 1;
-      }
-      await _runTests(testArgs, testDir);
-      if (exitCode != 0)
-        return exitCode;
-    }
-    if (!foundOne) {
-      printError('At least one of --debug or --release must be set, to specify the local build products to test.');
+    loader.shellPath = tools.getHostToolPath(HostTool.SkyShell);
+    if (!FileSystemEntity.isFileSync(loader.shellPath)) {
+        printError('Cannot find Flutter shell at ${loader.shellPath}');
       return 1;
     }
 
-    return 0;
+    Cache.releaseLockEarly();
+
+    CoverageCollector collector = CoverageCollector.instance;
+    collector.enabled = argResults['coverage'] || argResults['merge-coverage'];
+
+    int result = await _runTests(testArgs, testDir);
+
+    if (collector.enabled) {
+      if (!await _collectCoverageData(collector, mergeCoverageData: argResults['merge-coverage']))
+        return 1;
+    }
+
+    return result;
   }
 }

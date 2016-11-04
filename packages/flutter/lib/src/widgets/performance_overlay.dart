@@ -7,6 +7,19 @@ import 'package:flutter/rendering.dart';
 import 'framework.dart';
 
 /// Displays performance statistics.
+///
+/// The overlay show two time series. The first shows how much time was required
+/// on this thread to produce each frame. The second shows how much time was
+/// required on the GPU thread to produce each frame. Ideally, both these values
+/// would be less than the total frame budget for the hardware on which the app
+/// is running. For example, if the hardware has a screen that updates at 60 Hz,
+/// each thread should ideally spend less than 16ms producing each frame. This
+/// ideal condition is indicated by a green vertical line for each thread.
+/// Otherwise, the performance overlay shows a red vertical line.
+///
+/// The simplest way to show the performance overlay is to set
+/// [MaterialApp.showPerformanceOverlay] or [WidgetsApp.showPerformanceOverlay]
+/// to `true`.
 class PerformanceOverlay extends LeafRenderObjectWidget {
   // TODO(abarth): We should have a page on the web site with a screenshot and
   // an explanation of all the various readouts.
@@ -14,7 +27,11 @@ class PerformanceOverlay extends LeafRenderObjectWidget {
   /// Create a performance overlay that only displays specific statistics. The
   /// mask is created by shifting 1 by the index of the specific
   /// [StatisticOption] to enable.
-  PerformanceOverlay({ this.optionsMask, this.rasterizerThreshold: 0, Key key }) : super(key: key);
+  PerformanceOverlay({
+    Key key,
+    this.optionsMask,
+    this.rasterizerThreshold: 0
+  }) : super(key: key);
 
   /// Create a performance overlay that displays all available statistics
   PerformanceOverlay.allEnabled({ Key key, this.rasterizerThreshold: 0 })
@@ -26,6 +43,8 @@ class PerformanceOverlay extends LeafRenderObjectWidget {
       ),
       super(key: key);
 
+  /// The mask is created by shifting 1 by the index of the specific
+  /// [PerformanceOverlayOption] to enable.
   final int optionsMask;
 
   /// The rasterizer threshold is an integer specifying the number of frame
@@ -56,13 +75,16 @@ class PerformanceOverlay extends LeafRenderObjectWidget {
   /// how many frame intervals).
   final int rasterizerThreshold;
 
-  RenderPerformanceOverlay createRenderObject() => new RenderPerformanceOverlay(
+  @override
+  RenderPerformanceOverlay createRenderObject(BuildContext context) => new RenderPerformanceOverlay(
     optionsMask: optionsMask,
     rasterizerThreshold: rasterizerThreshold
   );
 
-  void updateRenderObject(RenderPerformanceOverlay renderObject, RenderObjectWidget oldWidget) {
-    renderObject.optionsMask = optionsMask;
-    renderObject.rasterizerThreshold = rasterizerThreshold;
+  @override
+  void updateRenderObject(BuildContext context, RenderPerformanceOverlay renderObject) {
+    renderObject
+      ..optionsMask = optionsMask
+      ..rasterizerThreshold = rasterizerThreshold;
   }
 }

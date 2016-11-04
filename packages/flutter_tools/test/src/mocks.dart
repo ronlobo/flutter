@@ -2,51 +2,114 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'package:flutter_tools/src/android/device_android.dart';
+import 'dart:async';
+
+import 'package:flutter_tools/src/android/android_device.dart';
 import 'package:flutter_tools/src/application_package.dart';
-import 'package:flutter_tools/src/build_configuration.dart';
+import 'package:flutter_tools/src/build_info.dart';
+import 'package:flutter_tools/src/devfs.dart';
 import 'package:flutter_tools/src/device.dart';
-import 'package:flutter_tools/src/ios/device_ios.dart';
+import 'package:flutter_tools/src/ios/devices.dart';
+import 'package:flutter_tools/src/ios/simulators.dart';
 import 'package:flutter_tools/src/runner/flutter_command.dart';
-import 'package:flutter_tools/src/toolchain.dart';
 import 'package:mockito/mockito.dart';
 
 class MockApplicationPackageStore extends ApplicationPackageStore {
   MockApplicationPackageStore() : super(
-    android: new AndroidApk(localPath: '/mock/path/to/android/SkyShell.apk'),
-    iOS: new IOSApp(localPath: '/mock/path/to/iOS/SkyShell.app'),
-    iOSSimulator: new IOSApp(localPath: '/mock/path/to/iOSSimulator/SkyShell.app'));
-}
-
-class MockCompiler extends Mock implements Compiler {
-}
-
-class MockToolchain extends Toolchain {
-  MockToolchain() : super(compiler: new MockCompiler());
+    android: new AndroidApk(
+      id: 'io.flutter.android.mock',
+      apkPath: '/mock/path/to/android/SkyShell.apk',
+      launchActivity: 'io.flutter.android.mock.MockActivity'
+    ),
+    iOS: new BuildableIOSApp(
+      appDirectory: '/mock/path/to/iOS/SkyShell.app',
+      projectBundleId: 'io.flutter.ios.mock'
+    )
+  );
 }
 
 class MockAndroidDevice extends Mock implements AndroidDevice {
-  TargetPlatform get platform => TargetPlatform.android;
+  @override
+  TargetPlatform get platform => TargetPlatform.android_arm;
+
+  @override
+  bool isSupported() => true;
 }
 
 class MockIOSDevice extends Mock implements IOSDevice {
-  TargetPlatform get platform => TargetPlatform.iOS;
+  @override
+  TargetPlatform get platform => TargetPlatform.ios;
+
+  @override
+  bool isSupported() => true;
 }
 
 class MockIOSSimulator extends Mock implements IOSSimulator {
-  TargetPlatform get platform => TargetPlatform.iOSSimulator;
+  @override
+  TargetPlatform get platform => TargetPlatform.ios;
+
+  @override
+  bool isSupported() => true;
 }
 
-class MockDeviceStore extends DeviceStore {
-  MockDeviceStore() : super(
-    android: new MockAndroidDevice(),
-    iOS: new MockIOSDevice(),
-    iOSSimulator: new MockIOSSimulator());
+class MockDeviceLogReader extends DeviceLogReader {
+  @override
+  String get name => 'MockLogReader';
+
+  final StreamController<String> _linesController = new StreamController<String>.broadcast();
+
+  @override
+  Stream<String> get logLines => _linesController.stream;
+
+  void addLine(String line) => _linesController.add(line);
+
+  void dispose() {
+    _linesController.close();
+  }
 }
 
 void applyMocksToCommand(FlutterCommand command) {
   command
     ..applicationPackages = new MockApplicationPackageStore()
-    ..toolchain = new MockToolchain()
-    ..devices = new MockDeviceStore();
+    ..commandValidator = () => true;
+}
+
+class MockDevFSOperations implements DevFSOperations {
+  final List<String> messages = new List<String>();
+
+  bool contains(String match) {
+    print('Checking for `$match` in:');
+    print(messages);
+    bool result = messages.contains(match);
+    messages.clear();
+    return result;
+  }
+
+  @override
+  Future<Uri> create(String fsName) async {
+    messages.add('create $fsName');
+    return Uri.parse('file:///$fsName');
+  }
+
+  @override
+  Future<dynamic> destroy(String fsName) async {
+    messages.add('destroy $fsName');
+  }
+
+  @override
+  Future<dynamic> writeFile(String fsName, DevFSEntry entry) async {
+    messages.add('writeFile $fsName ${entry.devicePath}');
+  }
+
+  @override
+  Future<dynamic> deleteFile(String fsName, DevFSEntry entry) async {
+    messages.add('deleteFile $fsName ${entry.devicePath}');
+  }
+
+  @override
+  Future<dynamic> writeSource(String fsName,
+                              String devicePath,
+                              String contents) async {
+    messages.add('writeSource $fsName $devicePath');
+  }
 }

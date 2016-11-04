@@ -2,7 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-part of stocks;
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
 
 class StockArrowPainter extends CustomPainter {
   StockArrowPainter({ this.color, this.percentChange });
@@ -10,6 +12,7 @@ class StockArrowPainter extends CustomPainter {
   final Color color;
   final double percentChange;
 
+  @override
   void paint(Canvas canvas, Size size) {
     Paint paint = new Paint()..color = color;
     paint.strokeWidth = 1.0;
@@ -34,21 +37,22 @@ class StockArrowPainter extends CustomPainter {
     path.lineTo(centerX + w, arrowY + h);
     path.lineTo(centerX - w, arrowY + h);
     path.close();
-    paint.style = ui.PaintingStyle.fill;
+    paint.style = PaintingStyle.fill;
     canvas.drawPath(path, paint);
 
     // Draw a circle that circumscribes the arrow.
-    paint.style = ui.PaintingStyle.stroke;
+    paint.style = PaintingStyle.stroke;
     canvas.drawCircle(new Point(centerX, centerY), r, paint);
   }
 
+  @override
   bool shouldRepaint(StockArrowPainter oldPainter) {
     return oldPainter.color != color
         || oldPainter.percentChange != percentChange;
   }
 }
 
-class StockArrow extends StatelessComponent {
+class StockArrow extends StatelessWidget {
   StockArrow({ Key key, this.percentChange }) : super(key: key);
 
   final double percentChange;
@@ -65,11 +69,12 @@ class StockArrow extends StatelessComponent {
     return Colors.red[_colorIndexForPercentChange(percentChange)];
   }
 
+  @override
   Widget build(BuildContext context) {
     return new Container(
       width: 40.0,
       height: 40.0,
-      margin: const EdgeDims.symmetric(horizontal: 5.0),
+      margin: const EdgeInsets.symmetric(horizontal: 5.0),
       child: new CustomPaint(
         painter: new StockArrowPainter(
           // TODO(jackson): This should change colors with the theme

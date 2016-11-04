@@ -2,13 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'dart:typed_data';
-import 'dart:ui' as ui;
+import 'dart:async';
+import 'dart:collection';
+import 'dart:ui' as ui show window, PointerDataPacket;
 
-import 'package:flutter/services.dart';
-import 'package:mojo/bindings.dart' as mojo_bindings;
-import 'package:mojo/core.dart' as mojo_core;
-import 'package:sky_services/pointer/pointer.mojom.dart';
+import 'package:flutter/foundation.dart';
 
 import 'arena.dart';
 import 'converter.dart';
@@ -16,29 +14,40 @@ import 'events.dart';
 import 'hit_test.dart';
 import 'pointer_router.dart';
 
-typedef void GesturerExceptionHandler(PointerEvent event, HitTestTarget target, dynamic exception, StackTrace stack);
+/// A binding for the gesture subsystem.
+abstract class GestureBinding extends BindingBase implements HitTestable, HitTestDispatcher, HitTestTarget {
 
-abstract class Gesturer extends BindingBase implements HitTestTarget, HitTestable {
-
+  @override
   void initInstances() {
     super.initInstances();
     _instance = this;
-    ui.window.onPointerPacket = _handlePointerPacket;
+    ui.window.onPointerDataPacket = _handlePointerDataPacket;
   }
 
-  static Gesturer _instance;
-  static Gesturer get instance => _instance;
+  /// The singleton instance of this object.
+  static GestureBinding get instance => _instance;
+  static GestureBinding _instance;
 
-  void _handlePointerPacket(ByteData serializedPacket) {
-    final mojo_bindings.Message message = new mojo_bindings.Message(
-      serializedPacket,
-      <mojo_core.MojoHandle>[],
-      serializedPacket.lengthInBytes,
-      0
-    );
-    final PointerPacket packet = PointerPacket.deserialize(message);
-    for (PointerEvent event in PointerEventConverter.expand(packet.pointers))
-      _handlePointerEvent(event);
+  void _handlePointerDataPacket(ui.PointerDataPacket packet) {
+    _pendingPointerEvents.addAll(PointerEventConverter.expand(packet.pointers, ui.window.devicePixelRatio));
+    _flushPointerEventQueue();
+  }
+
+  final Queue<PointerEvent> _pendingPointerEvents = new Queue<PointerEvent>();
+
+  void _flushPointerEventQueue() {
+    while (_pendingPointerEvents.isNotEmpty)
+      _handlePointerEvent(_pendingPointerEvents.removeFirst());
+  }
+
+  /// Dispatch a [PointerCancelEvent] for the given pointer soon.
+  ///
+  /// The pointer event will be dispatch before the next pointer event and
+  /// before the end of the microtask but not within this function call.
+  void cancelPointer(int pointer) {
+    if (_pendingPointerEvents.isEmpty)
+      scheduleMicrotask(_flushPointerEventQueue);
+    _pendingPointerEvents.addFirst(new PointerCancelEvent(pointer: pointer));
   }
 
   /// A router that routes all pointer events received from the engine.
@@ -46,7 +55,7 @@ abstract class Gesturer extends BindingBase implements HitTestTarget, HitTestabl
 
   /// The gesture arenas used for disambiguating the meaning of sequences of
   /// pointer events.
-  final GestureArena gestureArena = new GestureArena();
+  final GestureArenaManager gestureArena = new GestureArenaManager();
 
   /// State for all pointers which are currently down.
   ///
@@ -55,62 +64,60 @@ abstract class Gesturer extends BindingBase implements HitTestTarget, HitTestabl
   Map<int, HitTestResult> _hitTests = <int, HitTestResult>{};
 
   void _handlePointerEvent(PointerEvent event) {
+    HitTestResult result;
     if (event is PointerDownEvent) {
       assert(!_hitTests.containsKey(event.pointer));
-      HitTestResult result = new HitTestResult();
+      result = new HitTestResult();
       hitTest(result, event.position);
       _hitTests[event.pointer] = result;
-    } else if (event is! PointerUpEvent) {
-      assert(event.down == _hitTests.containsKey(event.pointer));
-      if (!event.down)
-        return; // we currently ignore add, remove, and hover move events
+    } else if (event is PointerUpEvent || event is PointerCancelEvent) {
+      result = _hitTests.remove(event.pointer);
+    } else if (event.down) {
+      result = _hitTests[event.pointer];
+    } else {
+      return;  // We currently ignore add, remove, and hover move events.
     }
-    assert(_hitTests[event.pointer] != null);
-    dispatchEvent(event, _hitTests[event.pointer]);
-    if (event is PointerUpEvent) {
-      assert(_hitTests.containsKey(event.pointer));
-      _hitTests.remove(event.pointer);
-    }
+    if (result != null)
+      dispatchEvent(event, result);
   }
 
   /// Determine which [HitTestTarget] objects are located at a given position.
+  @override // from HitTestable
   void hitTest(HitTestResult result, Point position) {
     result.add(new HitTestEntry(this));
   }
 
-  /// This callback is invoked whenever an exception is caught by the Gesturer
-  /// binding. The 'event' argument is the pointer event that was being routed.
-  /// The 'target' argument is the class whose handleEvent function threw the
-  /// exception. The 'exception' argument contains the object that was thrown,
-  /// and the 'stack' argument contains the stack trace. If no handler is
-  /// registered, then the information will be printed to the console instead.
-  GesturerExceptionHandler debugGesturerExceptionHandler;
-
-  /// Dispatch the given event to the path of the given hit test result
+  /// Dispatch an event to a hit test result's path.
+  ///
+  /// This sends the given event to every [HitTestTarget] in the entries
+  /// of the given [HitTestResult], and catches exceptions that any of
+  /// the handlers might throw. The `result` argument must not be null.
+  @override // from HitTestDispatcher
   void dispatchEvent(PointerEvent event, HitTestResult result) {
     assert(result != null);
     for (HitTestEntry entry in result.path) {
       try {
         entry.target.handleEvent(event, entry);
       } catch (exception, stack) {
-        if (debugGesturerExceptionHandler != null) {
-          debugGesturerExceptionHandler(event, entry.target, exception, stack);
-        } else {
-          debugPrint('-- EXCEPTION CAUGHT BY GESTURE LIBRARY ---------------------------------');
-          debugPrint('The following exception was raised while dispatching a pointer event:');
-          debugPrint('$exception');
-          debugPrint('Event:');
-          debugPrint('$event');
-          debugPrint('Target:');
-          debugPrint('${entry.target}');
-          debugPrint('Stack trace:');
-          debugPrint('$stack');
-          debugPrint('------------------------------------------------------------------------');
-        }
+        FlutterError.reportError(new FlutterErrorDetailsForPointerEventDispatcher(
+          exception: exception,
+          stack: stack,
+          library: 'gesture library',
+          context: 'while dispatching a pointer event',
+          event: event,
+          hitTestEntry: entry,
+          informationCollector: (StringBuffer information) {
+            information.writeln('Event:');
+            information.writeln('  $event');
+            information.writeln('Target:');
+            information.write('  ${entry.target}');
+          }
+        ));
       }
     }
   }
 
+  @override // from HitTestTarget
   void handleEvent(PointerEvent event, HitTestEntry entry) {
     pointerRouter.route(event);
     if (event is PointerDownEvent) {
@@ -119,4 +126,44 @@ abstract class Gesturer extends BindingBase implements HitTestTarget, HitTestabl
       gestureArena.sweep(event.pointer);
     }
   }
+}
+
+/// Variant of [FlutterErrorDetails] with extra fields for the gesture
+/// library's binding's pointer event dispatcher ([GestureBinding.dispatchEvent]).
+///
+/// See also [FlutterErrorDetailsForPointerRouter], which is also used by the
+/// gesture library.
+class FlutterErrorDetailsForPointerEventDispatcher extends FlutterErrorDetails {
+  /// Creates a [FlutterErrorDetailsForPointerEventDispatcher] object with the given
+  /// arguments setting the object's properties.
+  ///
+  /// The gesture library calls this constructor when catching an exception
+  /// that will subsequently be reported using [FlutterError.onError].
+  const FlutterErrorDetailsForPointerEventDispatcher({
+    dynamic exception,
+    StackTrace stack,
+    String library,
+    String context,
+    this.event,
+    this.hitTestEntry,
+    InformationCollector informationCollector,
+    bool silent: false
+  }) : super(
+    exception: exception,
+    stack: stack,
+    library: library,
+    context: context,
+    informationCollector: informationCollector,
+    silent: silent
+  );
+
+  /// The pointer event that was being routed when the exception was raised.
+  final PointerEvent event;
+
+  /// The hit test result entry for the object whose handleEvent method threw
+  /// the exception.
+  ///
+  /// The target object itself is given by the [HitTestEntry.target] property of
+  /// the hitTestEntry object.
+  final HitTestEntry hitTestEntry;
 }

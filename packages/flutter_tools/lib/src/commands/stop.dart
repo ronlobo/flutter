@@ -5,32 +5,39 @@
 import 'dart:async';
 
 import '../application_package.dart';
+import '../build_info.dart';
 import '../device.dart';
+import '../globals.dart';
 import '../runner/flutter_command.dart';
 
 class StopCommand extends FlutterCommand {
+  @override
   final String name = 'stop';
-  final String description = 'Stop your Flutter app on all attached devices.';
 
   @override
-  Future<int> runInProject() async {
-    await downloadApplicationPackagesAndConnectToDevices();
-    return await stop() ? 0 : 2;
+  final String description = 'Stop your Flutter app on an attached device.';
+
+  Device device;
+
+  @override
+  Future<int> verifyThenRunCommand() async {
+    if (!commandValidator())
+      return 1;
+    device = await findTargetDevice();
+    if (device == null)
+      return 1;
+    return super.verifyThenRunCommand();
   }
 
-  Future<bool> stop() => stopAll(devices, applicationPackages);
-}
-
-Future<bool> stopAll(DeviceStore devices, ApplicationPackageStore applicationPackages) async {
-  bool stoppedSomething = false;
-
-  for (Device device in devices.all) {
-    ApplicationPackage package = applicationPackages.getPackageForPlatform(device.platform);
-    if (package == null || !device.isConnected())
-      continue;
-    if (await device.stopApp(package))
-      stoppedSomething = true;
+  @override
+  Future<int> runCommand() async {
+    ApplicationPackage app = applicationPackages.getPackageForPlatform(device.platform);
+    if (app == null) {
+      String platformName = getNameForTargetPlatform(device.platform);
+      printError('No Flutter application for $platformName found in the current directory.');
+      return 1;
+    }
+    printStatus('Stopping apps on ${device.name}.');
+    return await device.stopApp(app) ? 0 : 1;
   }
-
-  return stoppedSomething;
 }

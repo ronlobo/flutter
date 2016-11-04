@@ -4,28 +4,36 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/widgets.dart';
-import 'package:test/test.dart';
 
 class Item {
   GlobalKey key1 = new GlobalKey();
   GlobalKey key2 = new GlobalKey();
+
+  @override
   String toString() => "Item($key1, $key2)";
 }
 List<Item> items = <Item>[new Item(), new Item()];
 
-class StatefulLeaf extends StatefulComponent {
+class StatefulLeaf extends StatefulWidget {
   StatefulLeaf({ GlobalKey key }) : super(key: key);
+
+  @override
   StatefulLeafState createState() => new StatefulLeafState();
 }
 
 class StatefulLeafState extends State<StatefulLeaf> {
   void test() { setState(() { }); }
+
+  @override
   Widget build(BuildContext context) => new Text('leaf');
 }
 
-class KeyedWrapper extends StatelessComponent {
+class KeyedWrapper extends StatelessWidget {
   KeyedWrapper(this.key1, this.key2);
+
   Key key1, key2;
+
+  @override
   Widget build(BuildContext context) {
     return new Container(
       key: key1,
@@ -46,16 +54,14 @@ Widget builder() {
 }
 
 void main() {
-  test('duplicate key smoke test', () {
-    testWidgets((WidgetTester tester) {
-      tester.pumpWidget(builder());
-      StatefulLeafState leaf = tester.findStateOfType(StatefulLeafState);
-      leaf.test();
-      tester.pump();
-      Item lastItem = items[1];
-      items.remove(lastItem);
-      items.insert(0, lastItem);
-      tester.pumpWidget(builder()); // this marks the app dirty and rebuilds it
-    });
+  testWidgets('duplicate key smoke test', (WidgetTester tester) async {
+    await tester.pumpWidget(builder());
+    StatefulLeafState leaf = tester.firstState(find.byType(StatefulLeaf));
+    leaf.test();
+    await tester.pump();
+    Item lastItem = items[1];
+    items.remove(lastItem);
+    items.insert(0, lastItem);
+    await tester.pumpWidget(builder()); // this marks the app dirty and rebuilds it
   });
 }

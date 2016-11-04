@@ -6,19 +6,24 @@ import 'basic.dart';
 import 'framework.dart';
 
 /// A widget whose child can be mutated.
-class Placeholder extends StatefulComponent {
+class Placeholder extends StatefulWidget {
+  /// Creates a widget whose child can be mutated.
   Placeholder({ Key key }) : super(key: key);
 
+  @override
   PlaceholderState createState() => new PlaceholderState();
 }
 
+/// State for a [Placeholder] widget.
+///
+/// Useful for setting the child currently displayed by this placeholder widget.
 class PlaceholderState extends State<Placeholder> {
   /// The child that this widget builds.
   ///
   /// Mutating this field will cause this widget to rebuild with the new child.
   Widget get child => _child;
   Widget _child;
-  void set child(Widget child) {
+  set child(Widget child) {
     if (_child == child)
       return;
     setState(() {
@@ -26,6 +31,7 @@ class PlaceholderState extends State<Placeholder> {
     });
   }
 
+  @override
   Widget build(BuildContext context) {
     if (_child != null)
       return child;

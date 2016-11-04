@@ -5,13 +5,17 @@
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
-/// Controls the description of this app in the operating system.
-class Title extends StatelessComponent {
-  Title({ this.title, this.child, this.color }) {
+/// A widget that describes this app in the operating system.
+class Title extends StatelessWidget {
+  /// Creates a widget that describes this app to the operating system.
+  Title({
+    Key key,
+    this.title,
+    this.color,
+    this.child
+  }) : super(key: key) {
     assert(color == null || color.alpha == 0xFF);
   }
-
-  final Widget child;
 
   /// A one-line description of this app for use in the window manager.
   final String title;
@@ -19,11 +23,21 @@ class Title extends StatelessComponent {
   /// A color that the window manager should use to identify this app.
   final Color color;
 
+  /// The widget below this widget in the tree.
+  final Widget child;
+
+  @override
   Widget build(BuildContext context) {
-    updateTaskDescription(label: title, color: color);
+    SystemChrome.setApplicationSwitcherDescription(
+      new ApplicationSwitcherDescription(
+        label: title,
+        primaryColor: color.value,
+      )
+    );
     return child;
   }
 
+  @override
   void debugFillDescription(List<String> description) {
     super.debugFillDescription(description);
     if (title != null)

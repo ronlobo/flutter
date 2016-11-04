@@ -2,9 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-/// The Flutter animation engine.
+/// The Flutter animation system.
 ///
-/// This library depends only on core Dart libraries and the `newton` package.
+/// To use, import `package:flutter/animation.dart`.
+///
+/// See [flutter.io/animations](https://flutter.io/animations/) for an overview.
+///
+/// This library depends only on core Dart libraries and the `physics.dart` library.
 library animation;
 
 export 'src/animation/animation.dart';
@@ -13,5 +17,4 @@ export 'src/animation/animations.dart';
 export 'src/animation/curves.dart';
 export 'src/animation/forces.dart';
 export 'src/animation/listener_helpers.dart';
-export 'src/animation/ticker.dart';
 export 'src/animation/tween.dart';

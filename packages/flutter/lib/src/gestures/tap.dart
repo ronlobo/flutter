@@ -5,40 +5,89 @@
 import 'arena.dart';
 import 'constants.dart';
 import 'events.dart';
-import 'pointer_router.dart';
 import 'recognizer.dart';
 
-typedef void GestureTapDownCallback(Point globalPosition);
-typedef void GestureTapUpCallback(Point globalPosition);
+/// Details for [GestureTapDownCallback], such as position.
+class TapDownDetails {
+  /// Creates details for a [GestureTapDownCallback].
+  ///
+  /// The [globalPosition] argument must not be null.
+  TapDownDetails({ this.globalPosition: Point.origin }) {
+    assert(globalPosition != null);
+  }
+
+  /// The global position at which the pointer contacted the screen.
+  final Point globalPosition;
+}
+
+/// Signature for when a pointer that might cause a tap has contacted the
+/// screen.
+///
+/// The position at which the pointer contacted the screen is available in the
+/// `details`.
+typedef void GestureTapDownCallback(TapDownDetails details);
+
+/// Details for [GestureTapUpCallback], such as position.
+class TapUpDetails {
+  /// Creates details for a [GestureTapUpCallback].
+  ///
+  /// The [globalPosition] argument must not be null.
+  TapUpDetails({ this.globalPosition: Point.origin }) {
+    assert(globalPosition != null);
+  }
+
+  /// The global position at which the pointer contacted the screen.
+  final Point globalPosition;
+}
+
+/// Signature for when a pointer that will trigger a tap has stopped contacting
+/// the screen.
+///
+/// The position at which the pointer stopped contacting the screen is available
+/// in the `details`.
+typedef void GestureTapUpCallback(TapUpDetails details);
+
+/// Signature for when a tap has occurred.
 typedef void GestureTapCallback();
+
+/// Signature for when the pointer that previously triggered a
+/// [GestureTapDownCallback] will not end up causing a tap.
 typedef void GestureTapCancelCallback();
 
-/// TapGestureRecognizer is a tap recognizer that tracks only one primary
-/// pointer per gesture. That is, during tap recognition, extra pointer events
-/// are ignored: down-1, down-2, up-1, up-2 produces only one tap on up-1.
+/// Recognizes taps.
+///
+/// [TapGestureRecognizer] considers all the pointers involved in the pointer
+/// event sequence as contributing to one gesture. For this reason, extra
+/// pointer interactions during a tap sequence are not recognized as additional
+/// taps. For example, down-1, down-2, up-1, up-2 produces only one tap on up-1.
+///
+/// See also:
+///
+///  * [MultiTapGestureRecognizer]
 class TapGestureRecognizer extends PrimaryPointerGestureRecognizer {
-  TapGestureRecognizer({
-    PointerRouter router,
-    GestureArena gestureArena,
-    this.onTapDown,
-    this.onTapUp,
-    this.onTap,
-    this.onTapCancel
-  }) : super(
-    router: router,
-    gestureArena: gestureArena,
-    deadline: kPressTimeout
-  );
+  /// Creates a tap gesture recognizer.
+  TapGestureRecognizer() : super(deadline: kPressTimeout);
 
+  /// A pointer that might cause a tap has contacted the screen at a particular
+  /// location.
   GestureTapDownCallback onTapDown;
+
+  /// A pointer that will trigger a tap has stopped contacting the screen at a
+  /// particular location.
   GestureTapUpCallback onTapUp;
+
+  /// A tap has occurred.
   GestureTapCallback onTap;
+
+  /// The pointer that previously triggered [onTapDown] will not end up causing
+  /// a tap.
   GestureTapCancelCallback onTapCancel;
 
   bool _sentTapDown = false;
-  bool _wonArena = false;
+  bool _wonArenaForPrimaryPointer = false;
   Point _finalPosition;
 
+  @override
   void handlePrimaryPointer(PointerEvent event) {
     if (event is PointerUpEvent) {
       _finalPosition = event.position;
@@ -46,34 +95,38 @@ class TapGestureRecognizer extends PrimaryPointerGestureRecognizer {
     }
   }
 
+  @override
   void resolve(GestureDisposition disposition) {
-    if (_wonArena && disposition == GestureDisposition.rejected) {
+    if (_wonArenaForPrimaryPointer && disposition == GestureDisposition.rejected) {
       if (onTapCancel != null)
-        onTapCancel();
+        invokeCallback/*<Null>*/('onTapCancel', onTapCancel);
       _reset();
     }
     super.resolve(disposition);
   }
 
+  @override
   void didExceedDeadline() {
     _checkDown();
   }
 
+  @override
   void acceptGesture(int pointer) {
     super.acceptGesture(pointer);
     if (pointer == primaryPointer) {
       _checkDown();
-      _wonArena = true;
+      _wonArenaForPrimaryPointer = true;
       _checkUp();
     }
   }
 
+  @override
   void rejectGesture(int pointer) {
     super.rejectGesture(pointer);
     if (pointer == primaryPointer) {
       assert(state == GestureRecognizerState.defunct);
       if (onTapCancel != null)
-        onTapCancel();
+        invokeCallback/*<Null>*/('onTapCancel', onTapCancel);
       _reset();
     }
   }
@@ -81,25 +134,28 @@ class TapGestureRecognizer extends PrimaryPointerGestureRecognizer {
   void _checkDown() {
     if (!_sentTapDown) {
       if (onTapDown != null)
-        onTapDown(initialPosition);
+        invokeCallback/*<Null>*/('onTapDown', () => onTapDown(new TapDownDetails(globalPosition: initialPosition)));
       _sentTapDown = true;
     }
   }
 
   void _checkUp() {
-    if (_wonArena && _finalPosition != null) {
+    if (_wonArenaForPrimaryPointer && _finalPosition != null) {
       resolve(GestureDisposition.accepted);
       if (onTapUp != null)
-        onTapUp(_finalPosition);
+        invokeCallback/*<Null>*/('onTapUp', () => onTapUp(new TapUpDetails(globalPosition: _finalPosition)));
       if (onTap != null)
-        onTap();
+        invokeCallback/*<Null>*/('onTap', onTap);
       _reset();
     }
   }
 
   void _reset() {
     _sentTapDown = false;
-    _wonArena = false;
+    _wonArenaForPrimaryPointer = false;
     _finalPosition = null;
   }
+
+  @override
+  String toStringShort() => 'tap';
 }

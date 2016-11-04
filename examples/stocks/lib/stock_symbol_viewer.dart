@@ -2,38 +2,38 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-part of stocks;
+import 'package:flutter/material.dart';
 
-class StockSymbolView extends StatelessComponent {
-  StockSymbolView({ this.stock });
+import 'stock_data.dart';
+import 'stock_arrow.dart';
+
+class _StockSymbolView extends StatelessWidget {
+  _StockSymbolView({ this.stock, this.arrow });
 
   final Stock stock;
+  final Widget arrow;
 
+  @override
   Widget build(BuildContext context) {
     String lastSale = "\$${stock.lastSale.toStringAsFixed(2)}";
     String changeInPrice = "${stock.percentChange.toStringAsFixed(2)}%";
     if (stock.percentChange > 0)
       changeInPrice = "+" + changeInPrice;
 
-    TextStyle headings = Theme.of(context).text.body2;
+    TextStyle headings = Theme.of(context).textTheme.body2;
     return new Container(
-      padding: new EdgeDims.all(20.0),
+      padding: new EdgeInsets.all(20.0),
       child: new Column(
         children: <Widget>[
           new Row(
             children: <Widget>[
               new Text(
                 '${stock.symbol}',
-                style: Theme.of(context).text.display2
+                style: Theme.of(context).textTheme.display2
               ),
-              new Hero(
-                key: new ObjectKey(stock),
-                tag: StockRowPartKind.arrow,
-                turns: 2,
-                child: new StockArrow(percentChange: stock.percentChange)
-              ),
+              arrow,
             ],
-            justifyContent: FlexJustifyContent.spaceBetween
+            mainAxisAlignment: MainAxisAlignment.spaceBetween
           ),
           new Text('Last Sale', style: headings),
           new Text('$lastSale ($changeInPrice)'),
@@ -42,28 +42,51 @@ class StockSymbolView extends StatelessComponent {
           ),
           new Text('Market Cap', style: headings),
           new Text('${stock.marketCap}'),
+          new Container(
+            height: 8.0
+          ),
+          new RichText(
+            text: new TextSpan(
+              style: DefaultTextStyle.of(context).style.merge(new TextStyle(fontSize: 8.0)),
+              text: 'Prices may be delayed by ',
+              children: <TextSpan>[
+                new TextSpan(text: 'several', style: new TextStyle(fontStyle: FontStyle.italic)),
+                new TextSpan(text: ' years.'),
+              ]
+            )
+          ),
         ],
-        justifyContent: FlexJustifyContent.collapse
+        mainAxisSize: MainAxisSize.min
       )
     );
   }
 }
 
-class StockSymbolPage extends StatelessComponent {
+class StockSymbolPage extends StatelessWidget {
   StockSymbolPage({ this.stock });
 
   final Stock stock;
 
+  @override
   Widget build(BuildContext context) {
     return new Scaffold(
-      toolBar: new ToolBar(
-        center: new Text(stock.name)
+      appBar: new AppBar(
+        title: new Text(stock.name)
       ),
       body: new Block(
         children: <Widget>[
           new Container(
-            margin: new EdgeDims.all(20.0),
-            child: new Card(child: new StockSymbolView(stock: stock))
+            margin: new EdgeInsets.all(20.0),
+            child: new Card(
+              child: new _StockSymbolView(
+                stock: stock,
+                arrow: new Hero(
+                  tag: stock,
+                  turns: 2,
+                  child: new StockArrow(percentChange: stock.percentChange)
+                )
+              )
+            )
           )
         ]
       )
@@ -71,18 +94,22 @@ class StockSymbolPage extends StatelessComponent {
   }
 }
 
-class StockSymbolBottomSheet extends StatelessComponent {
+class StockSymbolBottomSheet extends StatelessWidget {
   StockSymbolBottomSheet({ this.stock });
 
   final Stock stock;
 
+  @override
   Widget build(BuildContext context) {
     return new Container(
-      padding: new EdgeDims.all(10.0),
+      padding: new EdgeInsets.all(10.0),
       decoration: new BoxDecoration(
-        border: new Border(top: new BorderSide(color: Colors.black26, width: 1.0))
+        border: new Border(top: new BorderSide(color: Colors.black26))
       ),
-      child: new StockSymbolView(stock: stock)
+      child: new _StockSymbolView(
+        stock: stock,
+        arrow: new StockArrow(percentChange: stock.percentChange)
+      )
    );
   }
 }

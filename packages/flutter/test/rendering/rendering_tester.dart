@@ -7,60 +7,56 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
-const Size _kTestViewSize = const Size(800.0, 600.0);
-
-class TestRenderView extends RenderView {
-  TestRenderView() {
-    configuration = new ViewConfiguration(size: _kTestViewSize);
-  }
-  void scheduleInitialFrame() {
-    scheduleInitialLayout();
-    scheduleInitialPaint(new TransformLayer(transform: new Matrix4.identity()));
-  }
-}
-
 enum EnginePhase {
   layout,
   compositingBits,
   paint,
-  composite
+  composite,
+  flushSemantics
 }
 
-class TestRenderingFlutterBinding extends BindingBase with Scheduler, Renderer, Gesturer {
-  void initRenderView() {
-    if (renderView == null) {
-      renderView = new TestRenderView();
-      renderView.scheduleInitialFrame();
-    }
-  }
-
+class TestRenderingFlutterBinding extends BindingBase with SchedulerBinding, ServicesBinding, RendererBinding, GestureBinding {
   EnginePhase phase = EnginePhase.composite;
 
+  @override
   void beginFrame() {
-    RenderObject.flushLayout();
+    pipelineOwner.flushLayout();
     if (phase == EnginePhase.layout)
       return;
-    RenderObject.flushCompositingBits();
+    pipelineOwner.flushCompositingBits();
     if (phase == EnginePhase.compositingBits)
       return;
-    RenderObject.flushPaint();
+    pipelineOwner.flushPaint();
     if (phase == EnginePhase.paint)
       return;
-    renderer.renderView.compositeFrame();
+    renderView.compositeFrame();
+    if (phase == EnginePhase.composite)
+      return;
+    pipelineOwner.flushSemantics();
+    assert(phase == EnginePhase.flushSemantics);
   }
 }
 
 TestRenderingFlutterBinding _renderer;
-TestRenderingFlutterBinding get renderer => _renderer;
-
-void layout(RenderBox box, { BoxConstraints constraints, EnginePhase phase: EnginePhase.layout }) {
-  assert(box != null); // if you want to just repump the last box, call pumpFrame().
-
+TestRenderingFlutterBinding get renderer {
   _renderer ??= new TestRenderingFlutterBinding();
+  return _renderer;
+}
 
-  renderer.renderView.child = null; 
+/// Place the box in the render tree, at the given size and with the given
+/// alignment on the screen.
+void layout(RenderBox box, {
+  BoxConstraints constraints,
+  FractionalOffset alignment: FractionalOffset.center,
+  EnginePhase phase: EnginePhase.layout
+}) {
+  assert(box != null); // If you want to just repump the last box, call pumpFrame().
+  assert(box.parent == null); // We stick the box in another, so you can't reuse it easily, sorry.
+
+  renderer.renderView.child = null;
   if (constraints != null) {
     box = new RenderPositionedBox(
+      alignment: alignment,
       child: new RenderConstrainedBox(
         additionalConstraints: constraints,
         child: box
@@ -83,9 +79,49 @@ class TestCallbackPainter extends CustomPainter {
 
   final VoidCallback onPaint;
 
+  @override
   void paint(Canvas canvas, Size size) {
     onPaint();
   }
 
+  @override
   bool shouldRepaint(TestCallbackPainter oldPainter) => true;
+}
+
+
+class RenderSizedBox extends RenderBox {
+  RenderSizedBox(this._size);
+
+  final Size _size;
+
+  @override
+  double computeMinIntrinsicWidth(double height) {
+    return _size.width;
+  }
+
+  @override
+  double computeMaxIntrinsicWidth(double height) {
+    return _size.width;
+  }
+
+  @override
+  double computeMinIntrinsicHeight(double width) {
+    return _size.height;
+  }
+
+  @override
+  double computeMaxIntrinsicHeight(double width) {
+    return _size.height;
+  }
+
+  @override
+  bool get sizedByParent => true;
+
+  @override
+  void performResize() {
+    size = constraints.constrain(_size);
+  }
+
+  @override
+  void performLayout() { }
 }

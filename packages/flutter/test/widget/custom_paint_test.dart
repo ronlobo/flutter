@@ -4,7 +4,6 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/widgets.dart';
-import 'package:test/test.dart';
 
 class TestCustomPainter extends CustomPainter {
   TestCustomPainter({ this.log, this.name });
@@ -12,35 +11,35 @@ class TestCustomPainter extends CustomPainter {
   List<String> log;
   String name;
 
+  @override
   void paint(Canvas canvas, Size size) {
     log.add(name);
   }
 
+  @override
   bool shouldRepaint(TestCustomPainter oldPainter) => true;
 }
 
 void main() {
-  test('Control test for custom painting', () {
-    testWidgets((WidgetTester tester) {
-      List<String> log = <String>[];
-      tester.pumpWidget(new CustomPaint(
+  testWidgets('Control test for custom painting', (WidgetTester tester) async {
+    List<String> log = <String>[];
+    await tester.pumpWidget(new CustomPaint(
+      painter: new TestCustomPainter(
+        log: log,
+        name: 'background'
+      ),
+      foregroundPainter: new TestCustomPainter(
+        log: log,
+        name: 'foreground'
+      ),
+      child: new CustomPaint(
         painter: new TestCustomPainter(
           log: log,
-          name: 'background'
-        ),
-        foregroundPainter: new TestCustomPainter(
-          log: log,
-          name: 'foreground'
-        ),
-        child: new CustomPaint(
-          painter: new TestCustomPainter(
-            log: log,
-            name: 'child'
-          )
+          name: 'child'
         )
-      ));
+      )
+    ));
 
-      expect(log, equals(['background', 'child', 'foreground']));
-    });
+    expect(log, equals(<String>['background', 'child', 'foreground']));
   });
 }

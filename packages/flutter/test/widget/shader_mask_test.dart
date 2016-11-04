@@ -2,29 +2,24 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'dart:ui' as ui;
+import 'dart:ui' show Shader;
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter/painting.dart';
 import 'package:flutter/widgets.dart';
-import 'package:test/test.dart';
 
-ui.Shader createShader(Rect bounds) {
+Shader createShader(Rect bounds) {
   return new LinearGradient(
-      begin: bounds.topLeft,
-      end: bounds.bottomLeft,
-      colors: <Color>[const Color(0x00FFFFFF), const Color(0xFFFFFFFF)],
-      stops: <double>[0.1, 0.35]
-  )
-  .createShader();
+    begin: FractionalOffset.topLeft,
+    end: FractionalOffset.bottomLeft,
+    colors: <Color>[const Color(0x00FFFFFF), const Color(0xFFFFFFFF)],
+    stops: <double>[0.1, 0.35]
+  ).createShader(bounds);
 }
 
 
 void main() {
-  test('Can be constructed', () {
-    testWidgets((WidgetTester tester) {
-      Widget child = new Container(width: 100.0, height: 100.0);
-      tester.pumpWidget(new ShaderMask(child: child, shaderCallback: createShader));
-    });
+  testWidgets('Can be constructed', (WidgetTester tester) async {
+    Widget child = new Container(width: 100.0, height: 100.0);
+    await tester.pumpWidget(new ShaderMask(child: child, shaderCallback: createShader));
   });
 }

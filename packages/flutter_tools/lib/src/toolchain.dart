@@ -2,56 +2,92 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'dart:async';
 import 'dart:io';
 
 import 'package:path/path.dart' as path;
 
-import 'artifacts.dart';
-import 'base/process.dart';
-import 'build_configuration.dart';
+import 'base/context.dart';
+import 'build_info.dart';
+import 'cache.dart';
+import 'globals.dart';
 
-class Compiler {
-  Compiler(this._path);
-
-  String _path;
-
-  Future<int> compile({
-    String mainPath,
-    String snapshotPath
-  }) {
-    return runCommandAndStreamOutput([
-      _path,
-      mainPath,
-      '--package-root=${ArtifactStore.packageRoot}',
-      '--snapshot=$snapshotPath'
-    ]);
-  }
+enum HostTool {
+  SkySnapshot,
+  SkyShell,
 }
 
-Future<String> _getCompilerPath(BuildConfiguration config) async {
-  if (config.type != BuildType.prebuilt) {
-    String compilerPath = path.join(config.buildDir, 'clang_x64', 'sky_snapshot');
-    if (FileSystemEntity.isFileSync(compilerPath))
-      return compilerPath;
-    return null;
+const Map<HostTool, String> _kHostToolFileName = const <HostTool, String>{
+  HostTool.SkySnapshot: 'sky_snapshot',
+  HostTool.SkyShell: 'sky_shell',
+};
+
+/// A ToolConfiguration can return the tools directory for the current host platform
+/// and the engine artifact directory for a given target platform. It is configurable
+/// via command-line arguments in order to support local engine builds.
+class ToolConfiguration {
+  /// [overrideCache] is configurable for testing.
+  ToolConfiguration({ Cache overrideCache }) {
+    _cache = overrideCache ?? cache;
   }
-  Artifact artifact = ArtifactStore.getArtifact(
-    type: ArtifactType.snapshot, hostPlatform: config.hostPlatform);
-  return await ArtifactStore.getPath(artifact);
-}
 
-class Toolchain {
-  Toolchain({ this.compiler });
+  Cache _cache;
 
-  final Compiler compiler;
+  static ToolConfiguration get instance {
+    if (context[ToolConfiguration] == null)
+      context[ToolConfiguration] = new ToolConfiguration();
+    return context[ToolConfiguration];
+  }
 
-  static Future<Toolchain> forConfigs(List<BuildConfiguration> configs) async {
-    for (BuildConfiguration config in configs) {
-      String compilerPath = await _getCompilerPath(config);
-      if (compilerPath != null)
-        return new Toolchain(compiler: new Compiler(compilerPath));
+  /// Override using the artifacts from the cache directory (--engine-src-path).
+  String engineSrcPath;
+
+  /// Path to a local engine build acting as a source for artifacts (--local-engine).
+  String engineBuildPath;
+
+  bool get isLocalEngine => engineSrcPath != null;
+
+  /// Return the directory that contains engine artifacts for the given targets.
+  /// This directory might contain artifacts like `libsky_shell.so`.
+  Directory getEngineArtifactsDirectory(TargetPlatform platform, BuildMode mode) {
+    Directory dir = _getEngineArtifactsDirectory(platform, mode);
+    if (dir != null)
+      printTrace('Using engine artifacts dir: ${dir.path}');
+    return dir;
+  }
+
+  Directory _getEngineArtifactsDirectory(TargetPlatform platform, BuildMode mode) {
+    if (engineBuildPath != null) {
+      return new Directory(engineBuildPath);
+    } else {
+      String suffix = mode != BuildMode.debug ? '-${getModeName(mode)}' : '';
+
+      // Create something like `android-arm` or `android-arm-release`.
+      String dirName = getNameForTargetPlatform(platform) + suffix;
+      Directory engineDir = _cache.getArtifactDirectory('engine');
+      return new Directory(path.join(engineDir.path, dirName));
     }
-    return null;
+  }
+
+  String getHostToolPath(HostTool tool) {
+    if (engineBuildPath == null) {
+      return path.join(_cache.getArtifactDirectory('engine').path,
+                       getNameForHostPlatform(getCurrentHostPlatform()),
+                       _kHostToolFileName[tool]);
+    }
+
+    if (tool == HostTool.SkySnapshot) {
+      String clangPath = path.join(engineBuildPath, 'clang_x64', 'sky_snapshot');
+      if (FileSystemEntity.isFileSync(clangPath))
+        return clangPath;
+      return path.join(engineBuildPath, 'sky_snapshot');
+    } else if (tool == HostTool.SkyShell) {
+      if (getCurrentHostPlatform() == HostPlatform.linux_x64) {
+        return path.join(engineBuildPath, 'sky_shell');
+      } else if (getCurrentHostPlatform() == HostPlatform.darwin_x64) {
+        return path.join(engineBuildPath, 'SkyShell.app', 'Contents', 'MacOS', 'SkyShell');
+      }
+    }
+
+    throw 'Unexpected host tool: $tool';
   }
 }

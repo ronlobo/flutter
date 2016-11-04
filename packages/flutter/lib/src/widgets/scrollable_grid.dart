@@ -4,140 +4,208 @@
 
 import 'dart:math' as math;
 
+import 'package:collection/collection.dart' show lowerBound;
 import 'package:flutter/rendering.dart';
+import 'package:meta/meta.dart';
 
 import 'framework.dart';
-import 'scroll_behavior.dart';
+import 'scroll_configuration.dart';
 import 'scrollable.dart';
 import 'virtual_viewport.dart';
 
 /// A vertically scrollable grid.
 ///
-/// Requires that delegate places its children in row-major order.
-class ScrollableGrid extends Scrollable {
+/// Requires that [delegate] places its children in row-major order.
+///
+/// See also:
+///
+///  * [CustomGrid].
+///  * [ScrollableList].
+///  * [ScrollableViewport].
+class ScrollableGrid extends StatelessWidget {
+  /// Creates a vertically scrollable grid.
+  ///
+  /// The [delegate] argument must not be null.
   ScrollableGrid({
     Key key,
-    double initialScrollOffset,
-    ScrollListener onScroll,
-    SnapOffsetCallback snapOffsetCallback,
-    double snapAlignmentOffset: 0.0,
-    this.delegate,
-    this.children
-  }) : super(
-    key: key,
-    initialScrollOffset: initialScrollOffset,
-    // TODO(abarth): Support horizontal offsets. For horizontally scrolling
-    // grids. For horizontally scrolling grids, we'll probably need to use a
-    // delegate that places children in column-major order.
-    scrollDirection: Axis.vertical,
-    onScroll: onScroll,
-    snapOffsetCallback: snapOffsetCallback,
-    snapAlignmentOffset: snapAlignmentOffset
-  );
-
-  final GridDelegate delegate;
-  final Iterable<Widget> children;
-
-  ScrollableState createState() => new _ScrollableGridState();
-}
-
-class _ScrollableGridState extends ScrollableState<ScrollableGrid> {
-  ScrollBehavior createScrollBehavior() => new OverscrollBehavior();
-  ExtentScrollBehavior get scrollBehavior => super.scrollBehavior;
-
-  void _handleExtentsChanged(double contentExtent, double containerExtent) {
-    setState(() {
-      scrollTo(scrollBehavior.updateExtents(
-        contentExtent: contentExtent,
-        containerExtent: containerExtent,
-        scrollOffset: scrollOffset
-      ));
-    });
+    this.initialScrollOffset,
+    this.onScrollStart,
+    this.onScroll,
+    this.onScrollEnd,
+    this.snapOffsetCallback,
+    this.scrollableKey,
+    @required this.delegate,
+    this.children: const <Widget>[],
+  }) : super(key: key) {
+    assert(delegate != null);
   }
 
-  Widget buildContent(BuildContext context) {
+  // Warning: keep the dartdoc comments that follow in sync with the copies in
+  // Scrollable, LazyBlock, ScrollableViewport, ScrollableList, and
+  // ScrollableLazyList. And see: https://github.com/dart-lang/dartdoc/issues/1161.
+
+  /// The scroll offset this widget should use when first created.
+  final double initialScrollOffset;
+
+  /// Called whenever this widget starts to scroll.
+  final ScrollListener onScrollStart;
+
+  /// Called whenever this widget's scroll offset changes.
+  final ScrollListener onScroll;
+
+  /// Called whenever this widget stops scrolling.
+  final ScrollListener onScrollEnd;
+
+  /// Called to determine the offset to which scrolling should snap,
+  /// when handling a fling.
+  ///
+  /// This callback, if set, will be called with the offset that the
+  /// Scrollable would have scrolled to in the absence of this
+  /// callback, and a Size describing the size of the Scrollable
+  /// itself.
+  ///
+  /// The callback's return value is used as the new scroll offset to
+  /// aim for.
+  ///
+  /// If the callback simply returns its first argument (the offset),
+  /// then it is as if the callback was null.
+  final SnapOffsetCallback snapOffsetCallback;
+
+  /// The key for the Scrollable created by this widget.
+  final Key scrollableKey;
+
+  /// The delegate that controls the layout of the children.
+  ///
+  /// For example, a [FixedColumnCountGridDelegate] for grids that have a fixed
+  /// number of columns or a [MaxTileWidthGridDelegate] for grids that have a
+  /// maximum tile width.
+  final GridDelegate delegate;
+
+  /// The children that will be placed in the grid.
+  final Iterable<Widget> children;
+
+  Widget _buildViewport(BuildContext context, ScrollableState state) {
     return new GridViewport(
-      startOffset: scrollOffset,
-      delegate: config.delegate,
-      onExtentsChanged: _handleExtentsChanged,
-      children: config.children
+      scrollOffset: state.scrollOffset,
+      delegate: delegate,
+      onExtentsChanged: state.handleExtentsChanged,
+      children: children
     );
   }
+
+  @override
+  Widget build(BuildContext context) {
+    final Widget result = new Scrollable(
+      key: scrollableKey,
+      initialScrollOffset: initialScrollOffset,
+      // TODO(abarth): Support horizontal offsets. For horizontally scrolling
+      // grids. For horizontally scrolling grids, we'll probably need to use a
+      // delegate that places children in column-major order.
+      scrollDirection: Axis.vertical,
+      onScrollStart: onScrollStart,
+      onScroll: onScroll,
+      onScrollEnd: onScrollEnd,
+      snapOffsetCallback: snapOffsetCallback,
+      builder: _buildViewport,
+    );
+    return ScrollConfiguration.wrap(context, result);
+  }
 }
 
-class GridViewport extends VirtualViewport {
+/// A virtual viewport onto a grid of widgets.
+///
+/// Used by [ScrollableGrid].
+///
+/// See also:
+///
+///  * [ListViewport].
+///  * [LazyListViewport].
+class GridViewport extends VirtualViewportFromIterable {
+  /// Creates a virtual viewport onto a grid of widgets.
+  ///
+  /// The [delegate] argument must not be null.
   GridViewport({
-    Key key,
-    this.startOffset,
+    this.scrollOffset,
     this.delegate,
     this.onExtentsChanged,
-    this.children
-  });
+    this.children: const <Widget>[],
+  }) {
+    assert(delegate != null);
+  }
 
-  final double startOffset;
+  /// The [startOffset] without taking the [delegate]'s padding into account.
+  final double scrollOffset;
+
+  @override
+  double get startOffset {
+    if (delegate == null)
+      return scrollOffset;
+    return scrollOffset - delegate.padding.top;
+  }
+
+  /// The delegate that controls the layout of the children.
+  ///
+  /// For example, a [FixedColumnCountGridDelegate] for grids that have a fixed
+  /// number of columns or a [MaxTileWidthGridDelegate] for grids that have a
+  /// maximum tile width.
   final GridDelegate delegate;
+
+  /// Called when the interior or exterior dimensions of the viewport change.
   final ExtentsChangedCallback onExtentsChanged;
+
+  @override
   final Iterable<Widget> children;
 
-  // TODO(abarth): Support horizontal scrolling;
-  Axis get scrollDirection => Axis.vertical;
+  @override
+  RenderGrid createRenderObject(BuildContext context) => new RenderGrid(delegate: delegate);
 
-  RenderGrid createRenderObject() => new RenderGrid(delegate: delegate);
-
+  @override
   _GridViewportElement createElement() => new _GridViewportElement(this);
 }
 
-// TODO(abarth): This function should go somewhere more general.
-// See https://github.com/dart-lang/collection/pull/16
-int _lowerBound(List sortedList, var value, { int begin: 0 }) {
-  int current = begin;
-  int count = sortedList.length - current;
-  while (count > 0) {
-    int step = count >> 1;
-    int test = current + step;
-    if (sortedList[test] < value) {
-      current = test + 1;
-      count -= step + 1;
-    } else {
-      count = step;
-    }
-  }
-  return current;
-}
-
-class _GridViewportElement extends VirtualViewportElement<GridViewport> {
+class _GridViewportElement extends VirtualViewportElement {
   _GridViewportElement(GridViewport widget) : super(widget);
 
+  @override
+  GridViewport get widget => super.widget;
+
+  @override
   RenderGrid get renderObject => super.renderObject;
 
+  @override
   int get materializedChildBase => _materializedChildBase;
   int _materializedChildBase;
 
+  @override
   int get materializedChildCount => _materializedChildCount;
   int _materializedChildCount;
 
+  @override
   double get startOffsetBase => _startOffsetBase;
   double _startOffsetBase;
 
+  @override
   double get startOffsetLimit =>_startOffsetLimit;
   double _startOffsetLimit;
 
+  @override
   void updateRenderObject(GridViewport oldWidget) {
     renderObject.delegate = widget.delegate;
     super.updateRenderObject(oldWidget);
   }
 
-  double _contentExtent;
-  double _containerExtent;
+  double _lastReportedContentExtent;
+  double _lastReportedContainerExtent;
   GridSpecification _specification;
 
+  @override
   void layout(BoxConstraints constraints) {
     _specification = renderObject.specification;
     double contentExtent = _specification.gridSize.height;
     double containerExtent = renderObject.size.height;
 
-    int materializedRowBase = math.max(0, _lowerBound(_specification.rowOffsets, widget.startOffset) - 1);
-    int materializedRowLimit = math.min(_specification.rowCount, _lowerBound(_specification.rowOffsets, widget.startOffset + containerExtent));
+    int materializedRowBase = math.max(0, lowerBound(_specification.rowOffsets, widget.startOffset) - 1);
+    int materializedRowLimit = math.min(_specification.rowCount, lowerBound(_specification.rowOffsets, widget.startOffset + containerExtent));
 
     _materializedChildBase = (materializedRowBase * _specification.columnCount).clamp(0, renderObject.virtualChildCount);
     _materializedChildCount = (materializedRowLimit * _specification.columnCount).clamp(0, renderObject.virtualChildCount) - _materializedChildBase;
@@ -146,10 +214,10 @@ class _GridViewportElement extends VirtualViewportElement<GridViewport> {
 
     super.layout(constraints);
 
-    if (contentExtent != _contentExtent || containerExtent != _containerExtent) {
-      _contentExtent = contentExtent;
-      _containerExtent = containerExtent;
-      widget.onExtentsChanged(_contentExtent, _containerExtent);
+    if (contentExtent != _lastReportedContentExtent || containerExtent != _lastReportedContainerExtent) {
+      _lastReportedContentExtent = contentExtent;
+      _lastReportedContainerExtent = containerExtent;
+      widget.onExtentsChanged(_lastReportedContentExtent, _lastReportedContainerExtent);
     }
   }
 }

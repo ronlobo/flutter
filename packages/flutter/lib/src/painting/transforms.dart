@@ -9,30 +9,31 @@ import 'package:vector_math/vector_math_64.dart';
 
 import 'basic_types.dart';
 
+/// Utility functions for working with matrices.
 class MatrixUtils {
   MatrixUtils._();
 
   /// Returns the given [transform] matrix as Offset, if the matrix is nothing
   /// but a 2D translation.
   ///
-  /// Returns null, otherwise.
+  /// Otherwise, returns null.
   static Offset getAsTranslation(Matrix4 transform) {
     assert(transform != null);
     Float64List values = transform.storage;
     // Values are stored in column-major order.
-    if (values[0] == 1.0 &&
+    if (values[0] == 1.0 && // col 1
         values[1] == 0.0 &&
         values[2] == 0.0 &&
         values[3] == 0.0 &&
-        values[4] == 0.0 &&
+        values[4] == 0.0 && // col 2
         values[5] == 1.0 &&
         values[6] == 0.0 &&
         values[7] == 0.0 &&
-        values[8] == 0.0 &&
+        values[8] == 0.0 && // col 3
         values[9] == 0.0 &&
         values[10] == 1.0 &&
         values[11] == 0.0 &&
-        values[14] == 0.0 &&
+        values[14] == 0.0 && // bottom of col 4 (values 12 and 13 are the x and y offsets)
         values[15] == 1.0) {
       return new Offset(values[12], values[13]);
     }
@@ -68,6 +69,7 @@ class MatrixUtils {
         && a.storage[15] == b.storage[15];
   }
 
+  /// Whether the given matrix is the identity matrix.
   static bool isIdentity(Matrix4 a) {
     assert(a != null);
     return a.storage[0] == 1.0 // col 1
@@ -88,9 +90,13 @@ class MatrixUtils {
         && a.storage[15] == 1.0;
   }
 
+  /// Applies the given matrix as a perspective transform to the given point.
+  ///
+  /// This function assumes the given point has a z-coordinate of 0.0. The
+  /// z-coordinate of the result is ignored.
   static Point transformPoint(Matrix4 transform, Point point) {
     Vector3 position3 = new Vector3(point.x, point.y, 0.0);
-    Vector3 transformed3 = transform.transform3(position3);
+    Vector3 transformed3 = transform.perspectiveTransform(position3);
     return new Point(transformed3.x, transformed3.y);
   }
 
@@ -101,7 +107,13 @@ class MatrixUtils {
     return math.max(a, math.max(b, math.max(c, d)));
   }
 
-  static Rect transformRect(Rect rect, Matrix4 transform) {
+  /// Returns a rect that bounds the result of applying the inverse of the given
+  /// matrix as a perspective transform to the given rect.
+  ///
+  /// This function assumes the given rect is in the plane with z equals 0.0.
+  /// The transformed rect is then projected back into the plane with z equals
+  /// 0.0 before computing its bounding rect.
+  static Rect inverseTransformRect(Rect rect, Matrix4 transform) {
     assert(rect != null);
     assert(transform.determinant != 0.0);
     if (isIdentity(transform))

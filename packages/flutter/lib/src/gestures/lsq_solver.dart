@@ -2,22 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import "dart:math" as math;
-import "dart:typed_data";
+import 'dart:math' as math;
+import 'dart:typed_data';
 
+// TODO(abarth): Consider using vector_math.
 class _Vector {
-  _Vector(int size)
-  : _offset = 0, _length = size, _elements = new Float64List(size);
-
-  _Vector.fromValues(List<double> values)
-  : _offset = 0, _length = values.length, _elements = values;
+  _Vector(int size) : _offset = 0, _length = size, _elements = new Float64List(size);
 
   _Vector.fromVOL(List<double> values, int offset, int length)
-  : _offset = offset, _length = length, _elements = values;
+    : _offset = offset, _length = length, _elements = values;
 
   final int _offset;
 
-  int get length => _length;
   final int _length;
 
   final List<double> _elements;
@@ -35,25 +31,14 @@ class _Vector {
   }
 
   double norm() => math.sqrt(this * this);
-
-  String toString() {
-    String result = "";
-    for (int i = 0; i < _length; i++) {
-      if (i > 0)
-        result += ", ";
-        result += this[i].toString();
-    }
-    return result;
-  }
 }
 
+// TODO(abarth): Consider using vector_math.
 class _Matrix {
   _Matrix(int rows, int cols)
-  : _rows = rows,
-    _columns = cols,
+  : _columns = cols,
     _elements = new Float64List(rows * cols);
 
-  final int _rows;
   final int _columns;
   final List<double> _elements;
 
@@ -67,39 +52,44 @@ class _Matrix {
     row * _columns,
     _columns
   );
-
-  String toString() {
-    String result = "";
-    for (int i = 0; i < _rows; i++) {
-      if (i > 0)
-        result += "; ";
-      for (int j = 0; j < _columns; j++) {
-        if (j > 0)
-          result += ", ";
-        result += get(i, j).toString();
-      }
-    }
-    return result;
-  }
 }
 
+/// An nth degree polynomial fit to a dataset.
 class PolynomialFit {
+  /// Creates a polynomial fit of the given degree.
+  ///
+  /// There are n + 1 coefficients in a fit of degree n.
   PolynomialFit(int degree) : coefficients = new Float64List(degree + 1);
 
+  /// The polynomial coefficients of the fit.
   final List<double> coefficients;
+
+  /// An indicator of the quality of the fit.
+  ///
+  /// Larger values indicate greater quality.
   double confidence;
 }
 
+/// Uses the least-squares algorithm to fit a polynomial to a set of data.
 class LeastSquaresSolver {
+  /// Creates a least-squares solver.
+  ///
+  /// The [x], [y], and [w] arguments must not be null.
   LeastSquaresSolver(this.x, this.y, this.w) {
     assert(x.length == y.length);
     assert(y.length == w.length);
   }
 
+  /// The x-coordinates of each data point.
   final List<double> x;
+
+  /// The y-coordinates of each data point.
   final List<double> y;
+
+  /// The weight to use for each data point.
   final List<double> w;
 
+  /// Fits a polynomial of the given degree to the data points.
   PolynomialFit solve(int degree) {
     if (degree > x.length) // Not enough data to fit a curve.
       return null;

@@ -2,49 +2,61 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'package:flutter/animation.dart';
-
-import 'basic.dart';
-import 'framework.dart';
-
+import 'package:meta/meta.dart';
 import 'package:vector_math/vector_math_64.dart';
 
-/// An animated value that interpolates [BoxConstraint]s.
+import 'basic.dart';
+import 'container.dart';
+import 'framework.dart';
+import 'text.dart';
+import 'ticker_provider.dart';
+
+/// An interpolation between two [BoxConstraint]s.
 class BoxConstraintsTween extends Tween<BoxConstraints> {
+  /// Creates a box constraints tween.
+  ///
+  /// The [begin] and [end] arguments must not be null.
   BoxConstraintsTween({ BoxConstraints begin, BoxConstraints end }) : super(begin: begin, end: end);
 
+  @override
   BoxConstraints lerp(double t) => BoxConstraints.lerp(begin, end, t);
 }
 
-/// An animated value that interpolates [Decoration]s.
+/// An interpolation between two [Decoration]s.
 class DecorationTween extends Tween<Decoration> {
+  /// Creates a decoration tween.
+  ///
+  /// The [begin] and [end] arguments must not be null.
   DecorationTween({ Decoration begin, Decoration end }) : super(begin: begin, end: end);
 
-  Decoration lerp(double t) {
-    if (begin == null && end == null)
-      return null;
-    if (end == null)
-      return begin.lerpTo(end, t);
-    return end.lerpFrom(begin, t);
-  }
+  @override
+  Decoration lerp(double t) => Decoration.lerp(begin, end, t);
 }
 
-/// An animated value that interpolates [EdgeDims].
-class EdgeDimsTween extends Tween<EdgeDims> {
-  EdgeDimsTween({ EdgeDims begin, EdgeDims end }) : super(begin: begin, end: end);
+/// An interpolation between two [EdgeInsets]s.
+class EdgeInsetsTween extends Tween<EdgeInsets> {
+  /// Creates an edge insets tween.
+  ///
+  /// The [begin] and [end] arguments must not be null.
+  EdgeInsetsTween({ EdgeInsets begin, EdgeInsets end }) : super(begin: begin, end: end);
 
-  EdgeDims lerp(double t) => EdgeDims.lerp(begin, end, t);
+  @override
+  EdgeInsets lerp(double t) => EdgeInsets.lerp(begin, end, t);
 }
 
-/// An animated value that interpolates [Matrix4]s.
+/// An interpolation between two [Matrix4]s.
 ///
 /// Currently this class works only for translations.
 class Matrix4Tween extends Tween<Matrix4> {
+  /// Creates a [Matrix4] tween.
+  ///
+  /// The [begin] and [end] arguments must not be null.
   Matrix4Tween({ Matrix4 begin, Matrix4 end }) : super(begin: begin, end: end);
 
+  @override
   Matrix4 lerp(double t) {
-    // TODO(mpcomplete): Animate the full matrix. Will animating the cells
-    // separately work?
+    // TODO(abarth): We should use [Matrix4.decompose] and animate the
+    // decomposed parameters instead of just animating the translation.
     Vector3 beginT = begin.getTranslation();
     Vector3 endT = end.getTranslation();
     Vector3 lerpT = beginT*(1.0-t) + endT*t;
@@ -52,13 +64,29 @@ class Matrix4Tween extends Tween<Matrix4> {
   }
 }
 
-/// An abstract widget for building components that gradually change their
+/// An interpolation between two [TextStyle]s.
+///
+/// This will not work well if the styles don't set the same fields.
+class TextStyleTween extends Tween<TextStyle> {
+  /// Creates a text style tween.
+  ///
+  /// The [begin] and [end] arguments must not be null.
+  TextStyleTween({ TextStyle begin, TextStyle end }) : super(begin: begin, end: end);
+
+  @override
+  TextStyle lerp(double t) => TextStyle.lerp(begin, end, t);
+}
+
+/// An abstract widget for building widgets that gradually change their
 /// values over a period of time.
-abstract class AnimatedWidgetBase extends StatefulComponent {
-  AnimatedWidgetBase({
+abstract class ImplicitlyAnimatedWidget extends StatefulWidget {
+  /// Initializes fields for subclasses.
+  ///
+  /// The [curve] and [duration] arguments must not be null.
+  ImplicitlyAnimatedWidget({
     Key key,
     this.curve: Curves.linear,
-    this.duration
+    @required this.duration
   }) : super(key: key) {
     assert(curve != null);
     assert(duration != null);
@@ -70,39 +98,52 @@ abstract class AnimatedWidgetBase extends StatefulComponent {
   /// The duration over which to animate the parameters of this container.
   final Duration duration;
 
-  AnimatedWidgetBaseState createState();
+  @override
+  AnimatedWidgetBaseState<ImplicitlyAnimatedWidget> createState();
 
+  @override
   void debugFillDescription(List<String> description) {
     super.debugFillDescription(description);
     description.add('duration: ${duration.inMilliseconds}ms');
   }
 }
 
+/// Signature for a [Tween] factory.
+///
+/// This is the type of one of the arguments of [TweenVisitor], the signature
+/// used by [AnimatedWidgetBaseState.forEachTween].
 typedef Tween<T> TweenConstructor<T>(T targetValue);
+
+/// Signature for callbacks passed to [AnimatedWidgetBaseState.forEachTween].
 typedef Tween<T> TweenVisitor<T>(Tween<T> tween, T targetValue, TweenConstructor<T> constructor);
 
-abstract class AnimatedWidgetBaseState<T extends AnimatedWidgetBase> extends State<T> {
+/// A base class for widgets with implicit animations.
+abstract class AnimatedWidgetBaseState<T extends ImplicitlyAnimatedWidget> extends State<T> with SingleTickerProviderStateMixin {
   AnimationController _controller;
 
+  /// The animation driving this widget's implicit animations.
   Animation<double> get animation => _animation;
   Animation<double> _animation;
 
+  @override
   void initState() {
     super.initState();
     _controller = new AnimationController(
       duration: config.duration,
-      debugLabel: '${config.toStringShort()}'
+      debugLabel: '${config.toStringShort()}',
+      vsync: this,
     )..addListener(_handleAnimationChanged);
     _updateCurve();
     _constructTweens();
   }
 
+  @override
   void didUpdateConfig(T oldConfig) {
     if (config.curve != oldConfig.curve)
       _updateCurve();
     _controller.duration = config.duration;
     if (_constructTweens()) {
-      forEachTween((Tween tween, dynamic targetValue, TweenConstructor<T> constructor) {
+      forEachTween((Tween<dynamic> tween, dynamic targetValue, TweenConstructor<dynamic> constructor) {
         _updateTween(tween, targetValue);
         return tween;
       });
@@ -119,8 +160,9 @@ abstract class AnimatedWidgetBaseState<T extends AnimatedWidgetBase> extends Sta
       _animation = _controller;
   }
 
+  @override
   void dispose() {
-    _controller.stop();
+    _controller.dispose();
     super.dispose();
   }
 
@@ -128,11 +170,11 @@ abstract class AnimatedWidgetBaseState<T extends AnimatedWidgetBase> extends Sta
     setState(() { });
   }
 
-  bool _shouldAnimateTween(Tween tween, dynamic targetValue) {
+  bool _shouldAnimateTween(Tween<dynamic> tween, dynamic targetValue) {
     return targetValue != (tween.end ?? tween.begin);
   }
 
-  void _updateTween(Tween tween, dynamic targetValue) {
+  void _updateTween(Tween<dynamic> tween, dynamic targetValue) {
     if (tween == null)
       return;
     tween
@@ -142,7 +184,7 @@ abstract class AnimatedWidgetBaseState<T extends AnimatedWidgetBase> extends Sta
 
   bool _constructTweens() {
     bool shouldStartAnimation = false;
-    forEachTween((Tween tween, dynamic targetValue, TweenConstructor<T> constructor) {
+    forEachTween((Tween<dynamic> tween, dynamic targetValue, TweenConstructor<dynamic> constructor) {
       if (targetValue != null) {
         tween ??= constructor(targetValue);
         if (_shouldAnimateTween(tween, targetValue))
@@ -156,7 +198,7 @@ abstract class AnimatedWidgetBaseState<T extends AnimatedWidgetBase> extends Sta
   }
 
   /// Subclasses must implement this function by running through the following
-  /// steps for for each animatable facet in the class:
+  /// steps for each animatable facet in the class:
   ///
   /// 1. Call the visitor callback with three arguments, the first argument
   /// being the current value of the Tween<T> object that represents the
@@ -170,7 +212,7 @@ abstract class AnimatedWidgetBaseState<T extends AnimatedWidgetBase> extends Sta
   /// 2. Take the value returned from the callback, and store it. This is the
   /// value to use as the current value the next time that the forEachTween()
   /// method is called.
-  void forEachTween(TweenVisitor visitor);
+  void forEachTween(TweenVisitor<dynamic> visitor);
 }
 
 /// A container that gradually changes its values over a period of time.
@@ -179,7 +221,12 @@ abstract class AnimatedWidgetBaseState<T extends AnimatedWidgetBase> extends Sta
 /// different parameters to [Container]. For more complex animations, you'll
 /// likely want to use a subclass of [Transition] or use an
 /// [AnimationController] yourself.
-class AnimatedContainer extends AnimatedWidgetBase {
+///
+/// Properties that are null are not animated.
+class AnimatedContainer extends ImplicitlyAnimatedWidget {
+  /// Creates a container that animates its parameters implicitly.
+  ///
+  /// The [curve] and [duration] arguments must not be null.
   AnimatedContainer({
     Key key,
     this.child,
@@ -192,14 +239,16 @@ class AnimatedContainer extends AnimatedWidgetBase {
     this.width,
     this.height,
     Curve curve: Curves.linear,
-    Duration duration
+    @required Duration duration
   }) : super(key: key, curve: curve, duration: duration) {
-    assert(decoration == null || decoration.debugAssertValid());
-    assert(foregroundDecoration == null || foregroundDecoration.debugAssertValid());
+    assert(decoration == null || decoration.debugAssertIsValid());
+    assert(foregroundDecoration == null || foregroundDecoration.debugAssertIsValid());
     assert(margin == null || margin.isNonNegative);
     assert(padding == null || padding.isNonNegative);
+    assert(constraints == null || constraints.debugAssertIsValid());
   }
 
+  /// The widget below this widget in the tree.
   final Widget child;
 
   /// Additional constraints to apply to the child.
@@ -212,10 +261,10 @@ class AnimatedContainer extends AnimatedWidgetBase {
   final Decoration foregroundDecoration;
 
   /// Empty space to surround the decoration.
-  final EdgeDims margin;
+  final EdgeInsets margin;
 
   /// Empty space to inscribe inside the decoration.
-  final EdgeDims padding;
+  final EdgeInsets padding;
 
   /// The transformation matrix to apply before painting the container.
   final Matrix4 transform;
@@ -226,8 +275,10 @@ class AnimatedContainer extends AnimatedWidgetBase {
   /// If non-null, requires the decoration to have this height.
   final double height;
 
+  @override
   _AnimatedContainerState createState() => new _AnimatedContainerState();
 
+  @override
   void debugFillDescription(List<String> description) {
     super.debugFillDescription(description);
     if (constraints != null)
@@ -253,24 +304,26 @@ class _AnimatedContainerState extends AnimatedWidgetBaseState<AnimatedContainer>
   BoxConstraintsTween _constraints;
   DecorationTween _decoration;
   DecorationTween _foregroundDecoration;
-  EdgeDimsTween _margin;
-  EdgeDimsTween _padding;
+  EdgeInsetsTween _margin;
+  EdgeInsetsTween _padding;
   Matrix4Tween _transform;
   Tween<double> _width;
   Tween<double> _height;
 
-  void forEachTween(TweenVisitor visitor) {
+  @override
+  void forEachTween(TweenVisitor<dynamic> visitor) {
     // TODO(ianh): Use constructor tear-offs when it becomes possible
     _constraints = visitor(_constraints, config.constraints, (dynamic value) => new BoxConstraintsTween(begin: value));
     _decoration = visitor(_decoration, config.decoration, (dynamic value) => new DecorationTween(begin: value));
     _foregroundDecoration = visitor(_foregroundDecoration, config.foregroundDecoration, (dynamic value) => new DecorationTween(begin: value));
-    _margin = visitor(_margin, config.margin, (dynamic value) => new EdgeDimsTween(begin: value));
-    _padding = visitor(_padding, config.padding, (dynamic value) => new EdgeDimsTween(begin: value));
+    _margin = visitor(_margin, config.margin, (dynamic value) => new EdgeInsetsTween(begin: value));
+    _padding = visitor(_padding, config.padding, (dynamic value) => new EdgeInsetsTween(begin: value));
     _transform = visitor(_transform, config.transform, (dynamic value) => new Matrix4Tween(begin: value));
     _width = visitor(_width, config.width, (dynamic value) => new Tween<double>(begin: value));
     _height = visitor(_height, config.height, (dynamic value) => new Tween<double>(begin: value));
   }
 
+  @override
   Widget build(BuildContext context) {
     return new Container(
       child: config.child,
@@ -285,6 +338,7 @@ class _AnimatedContainerState extends AnimatedWidgetBaseState<AnimatedContainer>
     );
   }
 
+  @override
   void debugFillDescription(List<String> description) {
     super.debugFillDescription(description);
     if (_constraints != null)
@@ -310,7 +364,15 @@ class _AnimatedContainerState extends AnimatedWidgetBaseState<AnimatedContainer>
 /// position over a given duration whenever the given position changes.
 ///
 /// Only works if it's the child of a [Stack].
-class AnimatedPositioned extends AnimatedWidgetBase {
+class AnimatedPositioned extends ImplicitlyAnimatedWidget {
+  /// Creates a widget that animates its position implicitly.
+  ///
+  /// Only two out of the three horizontal values ([left], [right],
+  /// [width]), and only two out of the three vertical values ([top],
+  /// [bottom], [height]), can be set. In each case, at least one of
+  /// the three must be null.
+  ///
+  /// The [curve] and [duration] arguments must not be null.
   AnimatedPositioned({
     Key key,
     this.child,
@@ -321,18 +383,21 @@ class AnimatedPositioned extends AnimatedWidgetBase {
     this.width,
     this.height,
     Curve curve: Curves.linear,
-    Duration duration
+    @required Duration duration
   }) : super(key: key, curve: curve, duration: duration) {
     assert(left == null || right == null || width == null);
     assert(top == null || bottom == null || height == null);
   }
 
+  /// Creates a widget that animates the rectangle it occupies implicitly.
+  ///
+  /// The [curve] and [duration] arguments must not be null.
   AnimatedPositioned.fromRect({
     Key key,
     this.child,
     Rect rect,
     Curve curve: Curves.linear,
-    Duration duration
+    @required Duration duration
   }) : left = rect.left,
        top = rect.top,
        width = rect.width,
@@ -341,6 +406,7 @@ class AnimatedPositioned extends AnimatedWidgetBase {
        bottom = null,
        super(key: key, curve: curve, duration: duration);
 
+  /// The widget below this widget in the tree.
   final Widget child;
 
   /// The offset of the child's left edge from the left of the stack.
@@ -367,7 +433,25 @@ class AnimatedPositioned extends AnimatedWidgetBase {
   /// set. The third must be null.
   final double height;
 
+  @override
   _AnimatedPositionedState createState() => new _AnimatedPositionedState();
+
+  @override
+  void debugFillDescription(List<String> description) {
+    super.debugFillDescription(description);
+    if (left != null)
+      description.add('left: $left');
+    if (top != null)
+      description.add('top: $top');
+    if (right != null)
+      description.add('right: $right');
+    if (bottom != null)
+      description.add('bottom: $bottom');
+    if (width != null)
+      description.add('width: $width');
+    if (height != null)
+      description.add('height: $height');
+  }
 }
 
 class _AnimatedPositionedState extends AnimatedWidgetBaseState<AnimatedPositioned> {
@@ -378,7 +462,8 @@ class _AnimatedPositionedState extends AnimatedWidgetBaseState<AnimatedPositione
   Tween<double> _width;
   Tween<double> _height;
 
-  void forEachTween(TweenVisitor visitor) {
+  @override
+  void forEachTween(TweenVisitor<dynamic> visitor) {
     // TODO(ianh): Use constructor tear-offs when it becomes possible
     _left = visitor(_left, config.left, (dynamic value) => new Tween<double>(begin: value));
     _top = visitor(_top, config.top, (dynamic value) => new Tween<double>(begin: value));
@@ -388,6 +473,7 @@ class _AnimatedPositionedState extends AnimatedWidgetBaseState<AnimatedPositione
     _height = visitor(_height, config.height, (dynamic value) => new Tween<double>(begin: value));
   }
 
+  @override
   Widget build(BuildContext context) {
     return new Positioned(
       child: config.child,
@@ -400,6 +486,7 @@ class _AnimatedPositionedState extends AnimatedWidgetBaseState<AnimatedPositione
     );
   }
 
+  @override
   void debugFillDescription(List<String> description) {
     super.debugFillDescription(description);
     if (_left != null)
@@ -414,5 +501,118 @@ class _AnimatedPositionedState extends AnimatedWidgetBaseState<AnimatedPositione
       description.add('has width');
     if (_height != null)
       description.add('has height');
+  }
+}
+
+/// Animated version of [Opacity] which automatically transitions the child's
+/// opacity over a given duration whenever the given opacity changes.
+///
+/// Animating an opacity is relatively expensive.
+class AnimatedOpacity extends ImplicitlyAnimatedWidget {
+  /// Creates a widget that animates its opacity implicitly.
+  ///
+  /// The [opacity] argument must not be null and must be between 0.0 and 1.0,
+  /// inclusive. The [curve] and [duration] arguments must not be null.
+  AnimatedOpacity({
+    Key key,
+    this.child,
+    this.opacity,
+    Curve curve: Curves.linear,
+    @required Duration duration
+  }) : super(key: key, curve: curve, duration: duration) {
+    assert(opacity != null && opacity >= 0.0 && opacity <= 1.0);
+  }
+
+  /// The widget below this widget in the tree.
+  final Widget child;
+
+  /// The target opacity.
+  ///
+  /// An opacity of 1.0 is fully opaque. An opacity of 0.0 is fully transparent
+  /// (i.e., invisible).
+  ///
+  /// The opacity must not be null.
+  final double opacity;
+
+  @override
+  _AnimatedOpacityState createState() => new _AnimatedOpacityState();
+
+  @override
+  void debugFillDescription(List<String> description) {
+    super.debugFillDescription(description);
+    description.add('opacity: $opacity');
+  }
+}
+
+class _AnimatedOpacityState extends AnimatedWidgetBaseState<AnimatedOpacity> {
+  Tween<double> _opacity;
+
+  @override
+  void forEachTween(TweenVisitor<dynamic> visitor) {
+    // TODO(ianh): Use constructor tear-offs when it becomes possible
+    _opacity = visitor(_opacity, config.opacity, (dynamic value) => new Tween<double>(begin: value));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return new Opacity(
+      opacity: _opacity.evaluate(animation),
+      child: config.child
+    );
+  }
+}
+
+/// Animated version of [DefaultTextStyle] which automatically
+/// transitions the default text style (the text style to apply to
+/// descendant [Text] widgets without explicit style) over a given
+/// duration whenever the given style changes.
+class AnimatedDefaultTextStyle extends ImplicitlyAnimatedWidget {
+  /// Creates a widget that animates the default text style implicitly.
+  ///
+  /// The [child], [style], [curve], and [duration] arguments must not be null.
+  AnimatedDefaultTextStyle({
+    Key key,
+    @required this.child,
+    @required this.style,
+    Curve curve: Curves.linear,
+    @required Duration duration
+  }) : super(key: key, curve: curve, duration: duration) {
+    assert(style != null);
+    assert(child != null);
+  }
+
+  /// The widget below this widget in the tree.
+  final Widget child;
+
+  /// The target text style.
+  ///
+  /// The text style must not be null.
+  final TextStyle style;
+
+  @override
+  _AnimatedDefaultTextStyleState createState() => new _AnimatedDefaultTextStyleState();
+
+  @override
+  void debugFillDescription(List<String> description) {
+    super.debugFillDescription(description);
+    '$style'.split('\n').forEach(description.add);
+  }
+}
+
+class _AnimatedDefaultTextStyleState extends AnimatedWidgetBaseState<AnimatedDefaultTextStyle> {
+  TextStyleTween _style;
+
+  @override
+  void forEachTween(TweenVisitor<dynamic> visitor) {
+    // TODO(ianh): Use constructor tear-offs when it becomes possible
+    _style = visitor(_style, config.style, (dynamic value) => new TextStyleTween(begin: value));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return new DefaultTextStyle(
+      style: _style.evaluate(animation),
+      child: config.child
+    );
   }
 }

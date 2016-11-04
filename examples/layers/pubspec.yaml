@@ -1,0 +1,8 @@
+name: flutter_examples_layers
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter

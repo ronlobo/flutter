@@ -6,111 +6,207 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:ui' show Point, Offset;
 
+import 'package:flutter/foundation.dart';
+import 'package:meta/meta.dart';
+
 import 'arena.dart';
+import 'binding.dart';
 import 'constants.dart';
 import 'events.dart';
 import 'pointer_router.dart';
 
 export 'pointer_router.dart' show PointerRouter;
 
-abstract class GestureRecognizer extends GestureArenaMember {
+typedef T RecognizerCallback<T>();
 
-  /// Calls this with the pointerdown event of each pointer that should be
-  /// considered for this gesture.
+/// The base class that all GestureRecognizers should inherit from.
+///
+/// Provides a basic API that can be used by classes that work with
+/// gesture recognizers but don't care about the specific details of
+/// the gestures recognizers themselves.
+abstract class GestureRecognizer extends GestureArenaMember {
+  /// Registers a new pointer that might be relevant to this gesture
+  /// detector.
   ///
-  /// It's the GestureRecognizer's responsibility to then add itself to the
-  /// global pointer router to receive subsequent events for this pointer.
+  /// The owner of this gesture recognizer calls addPointer() with the
+  /// PointerDownEvent of each pointer that should be considered for
+  /// this gesture.
+  ///
+  /// It's the GestureRecognizer's responsibility to then add itself
+  /// to the global pointer router (see [PointerRouter]) to receive
+  /// subsequent events for this pointer, and to add the pointer to
+  /// the global gesture arena manager (see [GestureArenaManager]) to track
+  /// that pointer.
   void addPointer(PointerDownEvent event);
 
   /// Releases any resources used by the object.
   ///
-  /// This method is called when the object is no longer needed (e.g. a gesture
-  /// recogniser is being unregistered from a [GestureDetector]).
+  /// This method is called by the owner of this gesture recognizer
+  /// when the object is no longer needed (e.g. when a gesture
+  /// recognizer is being unregistered from a [GestureDetector], the
+  /// GestureDetector widget calls this method).
+  @mustCallSuper
   void dispose() { }
 
+  /// Returns a very short pretty description of the gesture that the
+  /// recognizer looks for, like 'tap' or 'horizontal drag'.
+  String toStringShort() => toString();
+
+  /// Invoke a callback provided by the application and log any exceptions.
+  @protected
+  dynamic/*=T*/ invokeCallback/*<T>*/(String name, RecognizerCallback<dynamic/*=T*/> callback) {
+    dynamic/*=T*/ result;
+    try {
+      result = callback();
+    } catch (exception, stack) {
+      FlutterError.reportError(new FlutterErrorDetails(
+        exception: exception,
+        stack: stack,
+        library: 'gesture',
+        context: 'while handling a gesture',
+        informationCollector: (StringBuffer information) {
+          information.writeln('Handler: $name');
+          information.writeln('Recognizer:');
+          information.writeln('  $this');
+        }
+      ));
+    }
+    return result;
+  }
 }
 
+/// Base class for gesture recognizers that can only recognize one
+/// gesture at a time. For example, a single [TapGestureRecognizer]
+/// can never recognize two taps happening simultaneously, even if
+/// multiple pointers are placed on the same widget.
+///
+/// This is in contrast to, for instance, [MultiTapGestureRecognizer],
+/// which manages each pointer independently and can consider multiple
+/// simultaneous touches to each result in a separate tap.
 abstract class OneSequenceGestureRecognizer extends GestureRecognizer {
-  OneSequenceGestureRecognizer({
-    PointerRouter router,
-    GestureArena gestureArena
-  }) : _router = router,
-       _gestureArena = gestureArena {
-    assert(_router != null);
-    assert(_gestureArena != null);
-  }
-
-  PointerRouter _router;
-  GestureArena _gestureArena;
-
-  final List<GestureArenaEntry> _entries = <GestureArenaEntry>[];
+  final Map<int, GestureArenaEntry> _entries = <int, GestureArenaEntry>{};
   final Set<int> _trackedPointers = new HashSet<int>();
 
+  /// Called when a pointer event is routed to this recognizer.
+  @protected
   void handleEvent(PointerEvent event);
+
+  @override
   void acceptGesture(int pointer) { }
+
+  @override
   void rejectGesture(int pointer) { }
+
+  /// Called when the number of pointers this recognizer is tracking changes from one to zero.
+  ///
+  /// The given pointer ID is the ID of the last pointer this recognizer was
+  /// tracking.
+  @protected
   void didStopTrackingLastPointer(int pointer);
 
+  /// Resolves this recognizer's participation in each gesture arena with the given disposition.
+  @protected
+  @mustCallSuper
   void resolve(GestureDisposition disposition) {
-    List<GestureArenaEntry> localEntries = new List<GestureArenaEntry>.from(_entries);
+    List<GestureArenaEntry> localEntries = new List<GestureArenaEntry>.from(_entries.values);
     _entries.clear();
     for (GestureArenaEntry entry in localEntries)
       entry.resolve(disposition);
   }
 
+  @override
   void dispose() {
     resolve(GestureDisposition.rejected);
     for (int pointer in _trackedPointers)
-      _router.removeRoute(pointer, handleEvent);
+      GestureBinding.instance.pointerRouter.removeRoute(pointer, handleEvent);
     _trackedPointers.clear();
     assert(_entries.isEmpty);
-    _router = null;
-    _gestureArena = null;
+    super.dispose();
   }
 
+  /// Causes events related to the given pointer ID to be routed to this recognizer.
+  ///
+  /// The pointer events are delivered to [handleEvent].
+  ///
+  /// Use [stopTrackingPointer] to remove the route added by this function.
+  @protected
   void startTrackingPointer(int pointer) {
-    _router.addRoute(pointer, handleEvent);
+    GestureBinding.instance.pointerRouter.addRoute(pointer, handleEvent);
     _trackedPointers.add(pointer);
-    _entries.add(_gestureArena.add(pointer, this));
+    assert(!_entries.containsValue(pointer));
+    _entries[pointer] = GestureBinding.instance.gestureArena.add(pointer, this);
   }
 
+  /// Stops events related to the given pointer ID from being routed to this recognizer.
+  ///
+  /// If this function reduces the number of tracked pointers to zero, it will
+  /// call [didStopTrackingLastPointer] synchronously.
+  ///
+  /// Use [startTrackingPointer] to add the routes in the first place.
+  @protected
   void stopTrackingPointer(int pointer) {
-    _router.removeRoute(pointer, handleEvent);
-    _trackedPointers.remove(pointer);
-    if (_trackedPointers.isEmpty)
-      didStopTrackingLastPointer(pointer);
+    if (_trackedPointers.contains(pointer)) {
+      GestureBinding.instance.pointerRouter.removeRoute(pointer, handleEvent);
+      _trackedPointers.remove(pointer);
+      if (_trackedPointers.isEmpty)
+        didStopTrackingLastPointer(pointer);
+    }
   }
 
+  /// Stops tracking the pointer associated with the given event if the event is
+  /// a [PointerUpEvent] or a [PointerCancelEvent] event.
+  @protected
   void stopTrackingIfPointerNoLongerDown(PointerEvent event) {
     if (event is PointerUpEvent || event is PointerCancelEvent)
       stopTrackingPointer(event.pointer);
   }
-
 }
 
+/// The possible states of a [PrimaryPointerGestureRecognizer].
+///
+/// The recognizer advances from [ready] to [possible] when starts tracking a
+/// primary pointer. When the primary pointer is resolve (either accepted or
+/// or rejected), the recognizers advances to [defunct]. Once the recognizer
+/// has stopped tracking any remaining pointers, the recognizer returns to
+/// [ready].
 enum GestureRecognizerState {
+  /// The recognizer is ready to start recognizing a gesture.
   ready,
+
+  /// The sequence of pointer events seen thus far is consistent with the
+  /// gesture the recognizer is attempting to recognize but the gesture has not
+  /// been accepted definitively.
   possible,
-  defunct
+
+  /// Further pointer events cannot cause this recognizer to recognize the
+  /// gesture until the recognizer returns to the [ready] state (typically when
+  /// all the pointers the recognizer is tracking are removed from the screen).
+  defunct,
 }
 
+/// A base class for gesture recognizers that track a single primary pointer.
 abstract class PrimaryPointerGestureRecognizer extends OneSequenceGestureRecognizer {
-  PrimaryPointerGestureRecognizer({
-    PointerRouter router,
-    GestureArena gestureArena,
-    this.deadline
-  }) : super(
-    router: router,
-    gestureArena: gestureArena
-  );
+  /// Initializes the [deadline] field during construction of subclasses.
+  PrimaryPointerGestureRecognizer({ this.deadline });
 
+  /// If non-null, the recognizer will call [didExceedDeadline] after this
+  /// amount of time has elapsed since starting to track the primary pointer.
   final Duration deadline;
 
+  /// The current state of the recognizer.
+  ///
+  /// See [GestureRecognizerState] for a description of the states.
   GestureRecognizerState state = GestureRecognizerState.ready;
+
+  /// The ID of the primary pointer this recognizer is tracking.
   int primaryPointer;
+
+  /// The global location at which the primary pointer contacted the screen.
   Point initialPosition;
+
   Timer _timer;
 
+  @override
   void addPointer(PointerDownEvent event) {
     startTrackingPointer(event.pointer);
     if (state == GestureRecognizerState.ready) {
@@ -122,6 +218,7 @@ abstract class PrimaryPointerGestureRecognizer extends OneSequenceGestureRecogni
     }
   }
 
+  @override
   void handleEvent(PointerEvent event) {
     assert(state != GestureRecognizerState.ready);
     if (state == GestureRecognizerState.possible && event.pointer == primaryPointer) {
@@ -137,15 +234,18 @@ abstract class PrimaryPointerGestureRecognizer extends OneSequenceGestureRecogni
   }
 
   /// Override to provide behavior for the primary pointer when the gesture is still possible.
+  @protected
   void handlePrimaryPointer(PointerEvent event);
 
   /// Override to be notified when [deadline] is exceeded.
   ///
-  /// You must override this function if you supply a [deadline].
+  /// You must override this method if you supply a [deadline].
+  @protected
   void didExceedDeadline() {
     assert(deadline == null);
   }
 
+  @override
   void rejectGesture(int pointer) {
     if (pointer == primaryPointer) {
       _stopTimer();
@@ -153,11 +253,13 @@ abstract class PrimaryPointerGestureRecognizer extends OneSequenceGestureRecogni
     }
   }
 
+  @override
   void didStopTrackingLastPointer(int pointer) {
     _stopTimer();
     state = GestureRecognizerState.ready;
   }
 
+  @override
   void dispose() {
     _stopTimer();
     super.dispose();

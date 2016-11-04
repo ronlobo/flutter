@@ -5,32 +5,36 @@
 import 'arena.dart';
 import 'constants.dart';
 import 'events.dart';
-import 'pointer_router.dart';
 import 'recognizer.dart';
 
+/// Signature for when a pointer has remained in contact with the screen at the
+/// same location for a long period of time.
 typedef void GestureLongPressCallback();
 
+/// Recognizes when the user has pressed down at the same location for a long
+/// period of time.
 class LongPressGestureRecognizer extends PrimaryPointerGestureRecognizer {
-  LongPressGestureRecognizer({
-    PointerRouter router,
-    GestureArena gestureArena,
-    this.onLongPress
-  }) : super(
-    router: router,
-    gestureArena: gestureArena,
-    deadline: kLongPressTimeout
-  );
+  /// Creates a long-press gesture recognizer.
+  ///
+  /// Consider assigning the [onLongPress] callback after creating this object.
+  LongPressGestureRecognizer() : super(deadline: kLongPressTimeout);
 
+  /// Called when a long-press is recongized.
   GestureLongPressCallback onLongPress;
 
+  @override
   void didExceedDeadline() {
     resolve(GestureDisposition.accepted);
     if (onLongPress != null)
-      onLongPress();
+      invokeCallback/*<Null>*/('onLongPress', onLongPress);
   }
 
+  @override
   void handlePrimaryPointer(PointerEvent event) {
     if (event is PointerUpEvent)
       resolve(GestureDisposition.rejected);
   }
+
+  @override
+  String toStringShort() => 'long press';
 }

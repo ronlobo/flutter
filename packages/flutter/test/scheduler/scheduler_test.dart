@@ -2,27 +2,25 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// This test is disabled because it triggers https://github.com/dart-lang/sdk/issues/25246
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:flutter/services.dart';
 import 'package:test/test.dart';
 
-class TestSchedulerBinding extends BindingBase with Scheduler { }
+class TestSchedulerBinding extends BindingBase with SchedulerBinding { }
 
-class TestStrategy implements SchedulingStrategy {
+class TestStrategy {
   int allowedPriority = 10000;
 
-  bool shouldRunTaskWithPriority({ int priority, Scheduler scheduler }) {
+  bool shouldRunTaskWithPriority({ int priority, SchedulerBinding scheduler }) {
     return priority >= allowedPriority;
   }
 }
 
 void main() {
   test("Tasks are executed in the right order", () {
-    Scheduler scheduler = new TestSchedulerBinding();
+    SchedulerBinding scheduler = new TestSchedulerBinding();
     TestStrategy strategy = new TestStrategy();
-    scheduler.schedulingStrategy = strategy;
+    scheduler.schedulingStrategy = strategy.shouldRunTaskWithPriority;
     List<int> input = <int>[2, 23, 23, 11, 0, 80, 3];
     List<int> executedTasks = <int>[];
 

@@ -8,19 +8,14 @@ Things you will need
 
  * Linux or Mac OS X. (Windows is not yet supported.)
  * git (used for source version control).
- * An IDE. We recommend [Atom](https://github.com/flutter/engine/wiki/Using-Atom-with-Flutter).
+ * An IDE. We recommend [Atom](http://dart-atom.github.io/dartlang/).
  * An ssh client (used to authenticate with GitHub).
  * Python (used by some of our tools).
- * The Dart SDK (see [Issue #54](https://github.com/flutter/flutter/issues/54)
-   about downloading the Dart SDK automatically). Note: If you're also
-   working on the Flutter engine, you can use the copy of the Dart SDK
-   in `.../engine/src/third_party/dart-sdk/dart-sdk`.
-   - [https://www.dartlang.org/downloads/archive/](https://www.dartlang.org/downloads/archive/)
  * The Android platform tools (see [Issue #55](https://github.com/flutter/flutter/issues/55)
    about downloading the Android platform tools automatically).
-   Note: If you're also working on the Flutter engine, you can use the
+   _If you're also working on the Flutter engine, you can use the
    copy of the Android platform tools in
-   `.../engine/src/third_party/android_tools/sdk/platform-tools`.
+   `.../engine/src/third_party/android_tools/sdk/platform-tools`._
    - Mac: `brew install android-platform-tools`
    - Linux: `sudo apt-get install android-tools-adb`
 
@@ -28,9 +23,9 @@ Getting the code and configuring your environment
 -------------------------------------------------
 
  * Ensure all the dependencies described in the previous section, in particular
-   git, ssh, and python are installed. Ensure that `dart`, `pub`, and `adb`
-   (from the Dart SDK and the Android platform tools) are in your path (e.g.,
-   that `which dart` and `which adb` print sensible output).
+   git, ssh, and python are installed. Ensure that `adb`
+   (from the Android platform tools) is in your path (e.g.,
+   that `which adb` prints sensible output).
  * Fork `https://github.com/flutter/flutter` into your own GitHub account. If
    you already have a fork, and are now installing a development environment on
    a new machine, make sure you've updated your fork so that you don't use stale
@@ -42,30 +37,28 @@ Getting the code and configuring your environment
  * `git remote add upstream git@github.com:flutter/flutter.git` (So that you
    fetch from the master repository, not your clone, when running `git fetch`
    et al.)
- * Run `dart ./dev/update_packages.dart` This will fetch all the Dart packages that
+ * Add this repository's `bin` directory to your path. That will let you use the
+   `flutter` command in this directory more easily.
+ * Run `flutter update-packages` This will fetch all the Dart packages that
    Flutter depends on. You can replicate what this script does by running
    `pub get` in each directory that contains a `pubspec.yaml` file.
- * Add this repository's `bin` directory to your path. That will let you use the
-   `flutter` command in this directory more easily. (If you have previously
-   activated the `flutter` package using `pub`, you should deactivate it and use
-   the script in `bin` instead: `pub global deactivate flutter`.)
 
 Running the examples
 --------------------
 
 To run an example with a prebuilt binary from the cloud, switch to that
 example's directory, run `pub get` to make sure its dependencies have been
-downloaded, and use `flutter start`. Make sure you have a device connected over
+downloaded, and use `flutter run`. Make sure you have a device connected over
 USB and debugging enabled on that device.
 
- * `cd examples/hello_world; flutter start`
+ * `cd examples/hello_world`
+ * `flutter run`
 
 You can also specify a particular Dart file to run if you want to run an example
 that doesn't have a `lib/main.dart` file using the `-t` command-line option. For
-example, to run the `tabs.dart` example in the [examples/widgets](examples/widgets)
+example, to run the `widgets/spinning_square.dart` example in the [examples/layers](examples/layers)
 directory on a connected Android device, from that directory you would run:
-
- * `flutter start -t tabs.dart`
+`flutter run -t widgets/spinning_square.dart`
 
 When running code from the examples directory, any changes you make to the
 example code, as well as any changes to Dart code in the
@@ -85,16 +78,16 @@ Individual tests can also be run directly, e.g. `flutter test lib/my_app_test.da
 
 Flutter tests use [package:flutter_test](https://github.com/flutter/flutter/tree/master/packages/flutter_test) which provides flutter-specific extensions on top of [package:test](https://pub.dartlang.org/packages/test).
 
-`flutter test` runs tests inside the flutter shell.  Some packages inside the flutter repository can be run inside the dart command line VM as well as the flutter shell, `packages/newton` and `packages/flutter_tools` are two such examples:
+`flutter test` runs tests inside the flutter shell.  Some packages inside the flutter repository can be run inside the dart command line VM as well as the flutter shell, `packages/flutter_tools` is one such example:
 
- * `cd packages/newton`
- * `pub run test`
+ * `cd packages/flutter_tools`
+ * `dart test/all.dart`
 
-`flutter test --flutter-repo` is a shortcut for those working on the flutter repository itself which runs all tests inside the `flutter` package regardless of the current working directory.
-To run all the tests for the entire Flutter repository, the same way that Travis runs them, run `travis/test.sh`.
+To run all the tests for the entire Flutter repository, the same way that Travis runs them, run `dev/bots/test.sh`.
 
-If you've built [your own flutter engine](#working-on-the-engine-and-the-framework-at-the-same-time), you can pass `--debug` or `--release` to change what flutter shell `flutter test` uses.
-To do this with the `travis/test.sh` script, you can use the `FLUTTER_ENGINE` environment variable.
+If you've built [your own flutter engine](#working-on-the-engine-and-the-framework-at-the-same-time), you can pass `--local-engine` to change what flutter shell `flutter test` uses. For example,
+if you built an engine in the `out/host_debug_unopt` directory, you can pass
+`--local-engine=host_debug_unopt` to run the tests in that engine.
 
 Note: Flutter tests are headless, you won't see any UI. You can use
 `print` to generate console output or you can interact with the DartVM
@@ -116,10 +109,11 @@ To start working on a patch:
 
  * `git fetch upstream`
  * `git checkout upstream/master -b name_of_your_branch`
- * Hack away. Please peruse our [style guides](https://github.com/flutter/engine/blob/master/sky/specs/style-guide.md)
- and [design principles](https://github.com/flutter/engine/blob/master/sky/specs/design.md)
- before working on anything non-trivial. These guidelines are intended to keep
- the code consistent and avoid common pitfalls.
+ * Hack away. Please peruse our
+ [style guides](https://flutter.io/style-guide/) and
+ [design principles](https://flutter.io/design-principles/) before
+ working on anything non-trivial. These guidelines are intended to
+ keep the code consistent and avoid common pitfalls.
  * `git commit -a -m "<your informative commit message>"`
  * `git push origin name_of_your_branch`
 
@@ -134,11 +128,50 @@ If you made multiple commits for a single pull request, either make sure each on
 message explaining that specific commit, or squash your commits into one single checkin with a
 detailed message before sending the pull request.
 
+Once you've gotten an LGTM from a project maintainer, submit your changes to the
+`master` branch using one of the following methods:
+
+* Wait for one of the project maintainers to submit it for you.
+* Click the green "Merge pull request" button on the GitHub UI of your pull
+  request (requires commit access)
+* `git push upstream name_of_your_branch:master` (requires commit access)
+
 You must complete the
 [Contributor License Agreement](https://cla.developers.google.com/clas).
 You can do this online, and it only takes a minute.
 If you've never submitted code before, you must add your (or your
 organization's) name and contact info to the [AUTHORS](AUTHORS) file.
+
+Tools for tracking an improving test coverage
+---------------------------------------------
+
+We strive for a high degree of test coverage for the Flutter framework. We use
+Coveralls to [track our test coverage](https://coveralls.io/github/flutter/flutter?branch=master).
+You can download our current coverage data from cloud storage and visualize it
+in Atom as follows:
+
+ * Install the [lcov-info](https://atom.io/packages/lcov-info) package for Atom.
+ * Open the `packages/flutter` folder in Atom.
+ * Open a Dart file in the `lib` directory an type `Ctrl+Alt+C` to bring up the
+   coverage data.
+
+If you don't see any coverage data, check that you have an `lcov.info` file in
+the `packages/flutter/coverage` directory. It should have been downloaded by the
+`flutter update-packages` command you ran previously.
+
+If you want to iterate quickly on improving test coverage, consider using this
+workflow:
+
+ * Open a file and observe that some line is untested.
+ * Write a test that exercises that line.
+ * Run `flutter test --merge-coverage path/to/your/test_test.dart`.
+ * After the test passes, observe that the line is now tested.
+
+This workflow merges the coverage data from this test run with the base coverage
+data downloaded by `flutter update-packages`.
+
+See [issue 4719](https://github.com/flutter/flutter/issues/4719) for ideas about
+how to improve this workflow.
 
 Working on the engine and the framework at the same time
 --------------------------------------------------------
@@ -160,23 +193,20 @@ the following steps.
    underneath the directory that contains the `.gclient` file.
 
 3. To run tests on your host machine, build one of the host configurations
-   (e.g., `out/Debug`). To run examples on Android, build one of the Android
-   configurations (e.g., `out/android_Debug`).
+   (e.g., `out/host_debug_unopt`). To run examples on Android, build one of the
+   Android configurations (e.g., `out/android_debug_unopt`).
 
 You should now be able to run the tests against your locally built
-engine using the `flutter test --debug` command. To run one of the
-examples on your device using your locally built engine, use the
-`--debug` option to the `flutter` tool:
+engine using the `flutter test --local-engine=host_debug_unopt` command. To run
+one of the examples on your device using your locally built engine, use the
+`--local-engine=android_debug_unopt` option to the `flutter` tool:
 
- * `flutter start --debug`
-
-If you want to test the release version instead of the debug version,
-use `--release` instead of `--debug`.
+ * `flutter run --local-engine=android_debug_unopt`
 
 Making a breaking change to the engine
 --------------------------------------
 
-If you make a breaking change to the engine, you'll need to land you change in a
+If you make a breaking change to the engine, you'll need to land your change in a
 few steps:
 
 1. Land your change in the engine repository.

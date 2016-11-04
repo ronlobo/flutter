@@ -3,200 +3,157 @@
 // found in the LICENSE file.
 
 import 'dart:async';
-import 'dart:math' as math;
 
-import 'package:mojo_services/keyboard/keyboard.mojom.dart';
-import 'package:flutter/painting.dart';
-import 'package:flutter/rendering.dart';
+import 'package:flutter/rendering.dart' show RenderEditable, SelectionChangedHandler, RenderEditablePaintOffsetNeededCallback;
+import 'package:flutter/services.dart';
+import 'package:meta/meta.dart';
 
 import 'basic.dart';
+import 'focus.dart';
 import 'framework.dart';
-import 'scrollable.dart';
+import 'media_query.dart';
 import 'scroll_behavior.dart';
+import 'scrollable.dart';
+import 'text_selection.dart';
 
 export 'package:flutter/painting.dart' show TextSelection;
+export 'package:flutter/services.dart' show TextInputType;
 
 const Duration _kCursorBlinkHalfPeriod = const Duration(milliseconds: 500);
 
-class _KeyboardClientImpl implements KeyboardClient {
-  _KeyboardClientImpl({
-    String text: '',
-    TextSelection selection,
-    this.onUpdated,
-    this.onSubmitted
-  }) : text = text, selection = selection ?? new TextSelection.collapsed(offset: text.length) {
-    assert(onUpdated != null);
-    assert(onSubmitted != null);
-  }
-
-  /// The current text being edited.
-  String text;
-
-  /// Called whenever the text changes.
-  final VoidCallback onUpdated;
-
-  /// Called whenever the user indicates they are done editing the string.
-  final VoidCallback onSubmitted;
-
-  // The range of text that is still being composed.
-  TextRange composing = TextRange.empty;
-
-  /// The range of text that is currently selected.
-  TextSelection selection;
-
-  /// A keyboard client stub that can be attached to a keyboard service.
-  KeyboardClientStub createStub() {
-    return new KeyboardClientStub.unbound()..impl = this;
-  }
-
-  void _delete(TextRange range) {
-    if (range.isCollapsed || !range.isValid) return;
-    text = range.textBefore(text) + range.textAfter(text);
-  }
-
-  TextRange _append(String newText) {
-    int start = text.length;
-    text += newText;
-    return new TextRange(start: start, end: start + newText.length);
-  }
-
-  TextRange _replace(TextRange range, String newText) {
-    assert(range.isValid);
-
-    String before = range.textBefore(text);
-    String after = range.textAfter(text);
-
-    text = before + newText + after;
-    return new TextRange(
-        start: before.length, end: before.length + newText.length);
-  }
-
-  TextRange _replaceOrAppend(TextRange range, String newText) {
-    if (!range.isValid) return _append(newText);
-    return _replace(range, newText);
-  }
-
-  void commitCompletion(CompletionData completion) {
-    // TODO(abarth): Not implemented.
-  }
-
-  void commitCorrection(CorrectionData correction) {
-    // TODO(abarth): Not implemented.
-  }
-
-  void commitText(String text, int newCursorPosition) {
-    // TODO(abarth): Why is |newCursorPosition| always 1?
-    TextRange committedRange = _replaceOrAppend(composing, text);
-    selection = new TextSelection.collapsed(offset: committedRange.end);
-    composing = TextRange.empty;
-    onUpdated();
-  }
-
-  void deleteSurroundingText(int beforeLength, int afterLength) {
-    TextRange beforeRange = new TextRange(
-        start: selection.start - beforeLength, end: selection.start);
-    int afterRangeEnd = math.min(selection.end + afterLength, text.length);
-    TextRange afterRange =
-        new TextRange(start: selection.end, end: afterRangeEnd);
-    _delete(afterRange);
-    _delete(beforeRange);
-    selection = new TextSelection(
-      baseOffset: math.max(selection.start - beforeLength, 0),
-      extentOffset: math.max(selection.end - beforeLength, 0)
-    );
-    onUpdated();
-  }
-
-  void setComposingRegion(int start, int end) {
-    composing = new TextRange(start: start, end: end);
-    onUpdated();
-  }
-
-  void setComposingText(String text, int newCursorPosition) {
-    // TODO(abarth): Why is |newCursorPosition| always 1?
-    composing = _replaceOrAppend(composing, text);
-    selection = new TextSelection.collapsed(offset: composing.end);
-    onUpdated();
-  }
-
-  void setSelection(int start, int end) {
-    selection = new TextSelection(baseOffset: start, extentOffset: end);
-    onUpdated();
-  }
-
-  void submit(SubmitAction action) {
-    composing = TextRange.empty;
-    onSubmitted();
-  }
+TextSelection _getTextSelectionFromEditingState(TextEditingState state) {
+  return new TextSelection(
+    baseOffset: state.selectionBase,
+    extentOffset: state.selectionExtent,
+    affinity: state.selectionAffinity,
+    isDirectional: state.selectionIsDirectional,
+  );
 }
 
-/// A string that can be manipulated by a keyboard.
+InputValue _getInputValueFromEditingState(TextEditingState state) {
+  return new InputValue(
+    text: state.text,
+    selection: _getTextSelectionFromEditingState(state),
+    composing: new TextRange(start: state.composingBase, end: state.composingExtent),
+  );
+}
+
+TextEditingState _getTextEditingStateFromInputValue(InputValue value) {
+  return new TextEditingState(
+    text: value.text,
+    selectionBase: value.selection.baseOffset,
+    selectionExtent: value.selection.extentOffset,
+    selectionAffinity: value.selection.affinity,
+    selectionIsDirectional: value.selection.isDirectional,
+    composingBase: value.composing.start,
+    composingExtent: value.composing.end,
+  );
+}
+
+/// Configuration information for an input field.
 ///
-/// Can be displayed with [RawEditableLine]. For a more featureful input widget,
-/// consider using [Input].
-class EditableString {
-  EditableString({
-    String text: '',
-    TextSelection selection,
-    VoidCallback onUpdated,
-    VoidCallback onSubmitted
-  }) : _client = new _KeyboardClientImpl(
-      text: text,
-      selection: selection,
-      onUpdated: onUpdated,
-      onSubmitted: onSubmitted
-    );
+/// An [InputValue] contains the text for the input field as well as the
+/// selection extent and the composing range.
+class InputValue {
+  // TODO(abarth): This class is really the same as TextEditingState.
+  // We should merge them into one object.
 
-  final _KeyboardClientImpl _client;
+  /// Creates configuration information for an input field
+  ///
+  /// The selection and composing range must be within the text.
+  ///
+  /// The [text], [selection], and [composing] arguments must not be null but
+  /// each have default values.
+  const InputValue({
+    this.text: '',
+    this.selection: const TextSelection.collapsed(offset: -1),
+    this.composing: TextRange.empty
+  });
 
   /// The current text being edited.
-  String get text => _client.text;
-
-  // The range of text that is still being composed.
-  TextRange get composing => _client.composing;
+  final String text;
 
   /// The range of text that is currently selected.
-  TextSelection get selection => _client.selection;
+  final TextSelection selection;
 
-  void setSelection(TextSelection selection) {
-    _client.selection = selection;
+  /// The range of text that is still being composed.
+  final TextRange composing;
+
+  /// An input value that corresponds to the empty string with no selection and no composing range.
+  static const InputValue empty = const InputValue();
+
+  @override
+  String toString() => '$runtimeType(text: \u2524$text\u251C, selection: $selection, composing: $composing)';
+
+  @override
+  bool operator ==(dynamic other) {
+    if (identical(this, other))
+      return true;
+    if (other is! InputValue)
+      return false;
+    InputValue typedOther = other;
+    return typedOther.text == text
+        && typedOther.selection == selection
+        && typedOther.composing == composing;
   }
 
-  /// A keyboard client stub that can be attached to a keyboard service.
-  ///
-  /// See [Keyboard].
-  KeyboardClientStub createStub() => _client.createStub();
+  @override
+  int get hashCode => hashValues(
+    text.hashCode,
+    selection.hashCode,
+    composing.hashCode
+  );
 
-  void didDetachKeyboard() {
-    _client.composing = TextRange.empty;
+  /// Creates a copy of this input value but with the given fields replaced with the new values.
+  InputValue copyWith({
+    String text,
+    TextSelection selection,
+    TextRange composing
+  }) {
+    return new InputValue (
+      text: text ?? this.text,
+      selection: selection ?? this.selection,
+      composing: composing ?? this.composing
+    );
   }
 }
 
-/// A basic single-line input control.
+/// A basic text input control.
 ///
 /// This control is not intended to be used directly. Instead, consider using
 /// [Input], which provides focus management and material design.
-class RawEditableLine extends Scrollable {
-  RawEditableLine({
+class RawInput extends Scrollable {
+  /// Creates a basic text input control.
+  ///
+  /// The [value] argument must not be null.
+  RawInput({
     Key key,
-    this.value,
-    this.focused: false,
+    @required this.value,
+    this.focusKey,
     this.hideText: false,
     this.style,
     this.cursorColor,
+    this.textScaleFactor,
+    int maxLines: 1,
     this.selectionColor,
-    this.onSelectionChanged
-  }) : super(
+    this.selectionControls,
+    @required this.platform,
+    this.keyboardType,
+    this.onChanged,
+    this.onSubmitted
+  }) : maxLines = maxLines, super(
     key: key,
     initialScrollOffset: 0.0,
-    scrollDirection: Axis.horizontal
-  );
+    scrollDirection: maxLines > 1 ? Axis.vertical : Axis.horizontal
+  ) {
+    assert(value != null);
+  }
 
-  /// The editable string being displayed in this widget.
-  final EditableString value;
+  /// The string being displayed in this widget.
+  final InputValue value;
 
-  /// Whether this widget is focused.
-  final bool focused;
+  /// Key of the enclosing widget that holds the focus.
+  final GlobalKey focusKey;
 
   /// Whether to hide the text being edited (e.g., for passwords).
   final bool hideText;
@@ -204,45 +161,214 @@ class RawEditableLine extends Scrollable {
   /// The text style to use for the editable text.
   final TextStyle style;
 
+  /// The number of font pixels for each logical pixel.
+  ///
+  /// For example, if the text scale factor is 1.5, text will be 50% larger than
+  /// the specified font size.
+  ///
+  /// Defaults to [MediaQuery.textScaleFactor].
+  final double textScaleFactor;
+
   /// The color to use when painting the cursor.
   final Color cursorColor;
+
+  /// The maximum number of lines for the text to span, wrapping if necessary.
+  /// If this is 1 (the default), the text will not wrap, but will scroll
+  /// horizontally instead.
+  final int maxLines;
 
   /// The color to use when painting the selection.
   final Color selectionColor;
 
-  /// Called when the user requests a change to the selection.
-  final ValueChanged<TextSelection> onSelectionChanged;
+  /// Optional delegate for building the text selection handles and toolbar.
+  final TextSelectionControls selectionControls;
 
-  RawEditableTextState createState() => new RawEditableTextState();
+  /// The platform whose behavior should be approximated, in particular
+  /// for scroll physics. (See [ScrollBehavior.platform].)
+  ///
+  /// Must not be null.
+  final TargetPlatform platform;
+
+  /// The type of keyboard to use for editing the text.
+  final TextInputType keyboardType;
+
+  /// Called when the text being edited changes.
+  final ValueChanged<InputValue> onChanged;
+
+  /// Called when the user indicates that they are done editing the text in the field.
+  final ValueChanged<InputValue> onSubmitted;
+
+  @override
+  RawInputState createState() => new RawInputState();
 }
 
-class RawEditableTextState extends ScrollableState<RawEditableLine> {
+/// State for a [RawInput].
+class RawInputState extends ScrollableState<RawInput> implements TextInputClient {
   Timer _cursorTimer;
   bool _showCursor = false;
 
-  double _contentWidth = 0.0;
-  double _containerWidth = 0.0;
+  InputValue _currentValue;
+  TextInputConnection _textInputConnection;
+  TextSelectionOverlay _selectionOverlay;
 
-  ScrollBehavior createScrollBehavior() => new BoundedBehavior();
+  @override
+  ExtentScrollBehavior createScrollBehavior() => new BoundedBehavior(platform: config.platform);
+
+  @override
   BoundedBehavior get scrollBehavior => super.scrollBehavior;
 
-  void _handleContainerSizeChanged(Size newSize) {
-    _containerWidth = newSize.width;
-    _updateScrollBehavior();
+  @override
+  void initState() {
+    super.initState();
+    _currentValue = config.value;
   }
 
-  void _handleContentSizeChanged(Size newSize) {
-    _contentWidth = newSize.width;
-    _updateScrollBehavior();
+  @override
+  void didUpdateConfig(RawInput oldConfig) {
+    if (_currentValue != config.value) {
+      _currentValue = config.value;
+      if (_isAttachedToKeyboard)
+        _textInputConnection.setEditingState(_getTextEditingStateFromInputValue(_currentValue));
+    }
   }
 
-  void _updateScrollBehavior() {
-    // Set the scroll offset to match the content width so that the cursor
-    // (which is always at the end of the text) will be visible.
-    scrollTo(scrollBehavior.updateExtents(
-      contentExtent: _contentWidth,
-      containerExtent: _containerWidth,
-      scrollOffset: _contentWidth
+  bool get _isAttachedToKeyboard => _textInputConnection != null && _textInputConnection.attached;
+
+  bool get _isMultiline => config.maxLines > 1;
+
+  double _contentExtent = 0.0;
+  double _containerExtent = 0.0;
+
+  Offset _handlePaintOffsetUpdateNeeded(ViewportDimensions dimensions, Rect caretRect) {
+    // We make various state changes here but don't have to do so in a
+    // setState() callback because we are called during layout and all
+    // we're updating is the new offset, which we are providing to the
+    // render object via our return value.
+    _contentExtent = _isMultiline ?
+      dimensions.contentSize.height :
+      dimensions.contentSize.width;
+    _containerExtent = _isMultiline ?
+      dimensions.containerSize.height :
+      dimensions.containerSize.width;
+    didUpdateScrollBehavior(scrollBehavior.updateExtents(
+      contentExtent: _contentExtent,
+      containerExtent: _containerExtent,
+      // TODO(ianh): We should really only do this when text is added,
+      // not generally any time the size changes.
+      scrollOffset: _getScrollOffsetForCaret(caretRect, _containerExtent)
+    ));
+    updateGestureDetector();
+    return scrollOffsetToPixelDelta(scrollOffset);
+  }
+
+  // Calculate the new scroll offset so the cursor remains visible.
+  double _getScrollOffsetForCaret(Rect caretRect, double containerExtent) {
+    double caretStart = _isMultiline ? caretRect.top : caretRect.left;
+    double caretEnd = _isMultiline ? caretRect.bottom : caretRect.right;
+    double newScrollOffset = scrollOffset;
+    if (caretStart < 0.0)  // cursor before start of bounds
+      newScrollOffset += pixelOffsetToScrollOffset(-caretStart);
+    else if (caretEnd >= containerExtent)  // cursor after end of bounds
+      newScrollOffset += pixelOffsetToScrollOffset(-(caretEnd - containerExtent));
+    return newScrollOffset;
+  }
+
+  void _attachOrDetachKeyboard(bool focused) {
+    if (focused && !_isAttachedToKeyboard) {
+      _textInputConnection = TextInput.attach(
+          this, new TextInputConfiguration(inputType: config.keyboardType))
+        ..setEditingState(_getTextEditingStateFromInputValue(_currentValue))
+        ..show();
+    } else if (!focused) {
+      if (_isAttachedToKeyboard) {
+        _textInputConnection.close();
+        _textInputConnection = null;
+      }
+      _clearComposing();
+    }
+  }
+
+  void _clearComposing() {
+    // TODO(abarth): We should call config.onChanged to notify our parent of
+    // this change in our composing range.
+    _currentValue = _currentValue.copyWith(composing: TextRange.empty);
+  }
+
+  /// Express interest in interacting with the keyboard.
+  ///
+  /// If this control is already attached to the keyboard, this function will
+  /// request that the keyboard become visible. Otherwise, this function will
+  /// ask the focus system that it become focused. If successful in acquiring
+  /// focus, the control will then attach to the keyboard and request that the
+  /// keyboard become visible.
+  void requestKeyboard() {
+    if (_isAttachedToKeyboard) {
+      _textInputConnection.show();
+    } else {
+      Focus.moveTo(config.focusKey);
+    }
+  }
+
+  @override
+  void updateEditingState(TextEditingState state) {
+    _currentValue = _getInputValueFromEditingState(state);
+    if (config.onChanged != null)
+      config.onChanged(_currentValue);
+    if (_currentValue.text != config.value.text) {
+      _selectionOverlay?.hide();
+      _selectionOverlay = null;
+    }
+  }
+
+  @override
+  void performAction(TextInputAction action) {
+    _clearComposing();
+    Focus.clear(context);
+    if (config.onSubmitted != null)
+      config.onSubmitted(_currentValue);
+  }
+
+  void _handleSelectionChanged(TextSelection selection, RenderEditable renderObject, bool longPress) {
+    // Note that this will show the keyboard for all selection changes on the
+    // EditableWidget, not just changes triggered by user gestures.
+    requestKeyboard();
+
+    InputValue newInput = _currentValue.copyWith(selection: selection, composing: TextRange.empty);
+    if (config.onChanged != null)
+      config.onChanged(newInput);
+
+    if (_selectionOverlay != null) {
+      _selectionOverlay.hide();
+      _selectionOverlay = null;
+    }
+
+    if (config.selectionControls != null) {
+      _selectionOverlay = new TextSelectionOverlay(
+        input: newInput,
+        context: context,
+        debugRequiredFor: config,
+        renderObject: renderObject,
+        onSelectionOverlayChanged: _handleSelectionOverlayChanged,
+        selectionControls: config.selectionControls,
+      );
+      if (newInput.text.isNotEmpty || longPress)
+        _selectionOverlay.showHandles();
+      if (longPress)
+        _selectionOverlay.showToolbar();
+    }
+  }
+
+  void _handleSelectionOverlayChanged(InputValue newInput, Rect caretRect) {
+    assert(!newInput.composing.isValid);  // composing range must be empty while selecting
+    if (config.onChanged != null)
+      config.onChanged(newInput);
+
+    didUpdateScrollBehavior(scrollBehavior.updateExtents(
+      // TODO(mpcomplete): should just be able to pass
+      // scrollBehavior.containerExtent here (and remove the member var), but
+      // scrollBehavior gets re-created too often, and is sometimes
+      // uninitialized here. Investigate if this is a bug.
+      scrollOffset: _getScrollOffsetForCaret(caretRect, _containerExtent)
     ));
   }
 
@@ -266,9 +392,15 @@ class RawEditableTextState extends ScrollableState<RawEditableLine> {
     _cursorTimer = new Timer.periodic(_kCursorBlinkHalfPeriod, _cursorTick);
   }
 
+  @override
   void dispose() {
+    if (_isAttachedToKeyboard) {
+      _textInputConnection.close();
+      _textInputConnection = null;
+    }
     if (_cursorTimer != null)
       _stopCursorTimer();
+    _selectionOverlay?.dispose();
     super.dispose();
   }
 
@@ -278,101 +410,127 @@ class RawEditableTextState extends ScrollableState<RawEditableLine> {
     _showCursor = false;
   }
 
+  @override
   Widget buildContent(BuildContext context) {
     assert(config.style != null);
-    assert(config.focused != null);
+    assert(config.focusKey != null);
     assert(config.cursorColor != null);
 
-    if (_cursorTimer == null && config.focused && config.value.selection.isCollapsed)
+    bool focused = Focus.at(config.focusKey.currentContext);
+    _attachOrDetachKeyboard(focused);
+
+    if (_cursorTimer == null && focused && config.value.selection.isCollapsed)
       _startCursorTimer();
-    else if (_cursorTimer != null && (!config.focused || !config.value.selection.isCollapsed))
+    else if (_cursorTimer != null && (!focused || !config.value.selection.isCollapsed))
       _stopCursorTimer();
 
-    return new SizeObserver(
-      onSizeChanged: _handleContainerSizeChanged,
-      child: new _EditableLineWidget(
-        value: config.value,
+    if (_selectionOverlay != null) {
+      if (focused) {
+        _selectionOverlay.update(config.value);
+      } else {
+        _selectionOverlay?.dispose();
+        _selectionOverlay = null;
+      }
+    }
+
+    return new ClipRect(
+      child: new _Editable(
+        value: _currentValue,
         style: config.style,
         cursorColor: config.cursorColor,
         showCursor: _showCursor,
+        maxLines: config.maxLines,
         selectionColor: config.selectionColor,
+        textScaleFactor: config.textScaleFactor ?? MediaQuery.of(context).textScaleFactor,
         hideText: config.hideText,
-        onContentSizeChanged: _handleContentSizeChanged,
-        onSelectionChanged: config.onSelectionChanged,
-        paintOffset: new Offset(-scrollOffset, 0.0)
+        onSelectionChanged: _handleSelectionChanged,
+        paintOffset: scrollOffsetToPixelDelta(scrollOffset),
+        onPaintOffsetUpdateNeeded: _handlePaintOffsetUpdateNeeded
       )
     );
   }
 }
 
-class _EditableLineWidget extends LeafRenderObjectWidget {
-  _EditableLineWidget({
+class _Editable extends LeafRenderObjectWidget {
+  _Editable({
     Key key,
     this.value,
     this.style,
     this.cursorColor,
     this.showCursor,
+    this.maxLines,
     this.selectionColor,
+    this.textScaleFactor,
     this.hideText,
-    this.onContentSizeChanged,
     this.onSelectionChanged,
-    this.paintOffset
+    this.paintOffset,
+    this.onPaintOffsetUpdateNeeded
   }) : super(key: key);
 
-  final EditableString value;
+  final InputValue value;
   final TextStyle style;
   final Color cursorColor;
   final bool showCursor;
+  final int maxLines;
   final Color selectionColor;
+  final double textScaleFactor;
   final bool hideText;
-  final ValueChanged<Size> onContentSizeChanged;
-  final ValueChanged<TextSelection> onSelectionChanged;
+  final SelectionChangedHandler onSelectionChanged;
   final Offset paintOffset;
+  final RenderEditablePaintOffsetNeededCallback onPaintOffsetUpdateNeeded;
 
-  RenderEditableLine createRenderObject() {
-    return new RenderEditableLine(
+  @override
+  RenderEditable createRenderObject(BuildContext context) {
+    return new RenderEditable(
       text: _styledTextSpan,
       cursorColor: cursorColor,
       showCursor: showCursor,
+      maxLines: maxLines,
       selectionColor: selectionColor,
+      textScaleFactor: textScaleFactor,
       selection: value.selection,
-      onContentSizeChanged: onContentSizeChanged,
       onSelectionChanged: onSelectionChanged,
-      paintOffset: paintOffset
+      paintOffset: paintOffset,
+      onPaintOffsetUpdateNeeded: onPaintOffsetUpdateNeeded
     );
   }
 
-  void updateRenderObject(RenderEditableLine renderObject,
-                          _EditableLineWidget oldWidget) {
+  @override
+  void updateRenderObject(BuildContext context, RenderEditable renderObject) {
     renderObject
       ..text = _styledTextSpan
       ..cursorColor = cursorColor
       ..showCursor = showCursor
+      ..maxLines = maxLines
       ..selectionColor = selectionColor
+      ..textScaleFactor = textScaleFactor
       ..selection = value.selection
-      ..onContentSizeChanged = onContentSizeChanged
       ..onSelectionChanged = onSelectionChanged
-      ..paintOffset = paintOffset;
+      ..paintOffset = paintOffset
+      ..onPaintOffsetUpdateNeeded = onPaintOffsetUpdateNeeded;
   }
 
-  StyledTextSpan get _styledTextSpan {
+  TextSpan get _styledTextSpan {
     if (!hideText && value.composing.isValid) {
       TextStyle composingStyle = style.merge(
         const TextStyle(decoration: TextDecoration.underline)
       );
 
-      return new StyledTextSpan(style, <TextSpan>[
-        new PlainTextSpan(value.composing.textBefore(value.text)),
-        new StyledTextSpan(composingStyle, <TextSpan>[
-          new PlainTextSpan(value.composing.textInside(value.text))
-        ]),
-        new PlainTextSpan(value.composing.textAfter(value.text))
+      return new TextSpan(
+        style: style,
+        children: <TextSpan>[
+          new TextSpan(text: value.composing.textBefore(value.text)),
+          new TextSpan(
+            style: composingStyle,
+            text: value.composing.textInside(value.text)
+          ),
+          new TextSpan(text: value.composing.textAfter(value.text))
       ]);
     }
 
     String text = value.text;
     if (hideText)
       text = new String.fromCharCodes(new List<int>.filled(text.length, 0x2022));
-    return new StyledTextSpan(style, <TextSpan>[ new PlainTextSpan(text) ]);
+    return new TextSpan(style: style, text: text);
   }
 }

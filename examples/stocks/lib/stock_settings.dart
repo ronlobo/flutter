@@ -2,14 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-part of stocks;
+import 'package:flutter/material.dart';
 
-class StockSettings extends StatefulComponent {
+import 'stock_types.dart';
+
+class StockSettings extends StatefulWidget {
   const StockSettings(this.configuration, this.updater);
 
   final StockConfiguration configuration;
   final ValueChanged<StockConfiguration> updater;
 
+  @override
   StockSettingsState createState() => new StockSettingsState();
 }
 
@@ -31,6 +34,23 @@ class StockSettingsState extends State<StockSettings> {
     sendUpdates(config.configuration.copyWith(debugShowSizes: value));
   }
 
+  void _handleShowBaselinesChanged(bool value) {
+    sendUpdates(config.configuration.copyWith(debugShowBaselines: value));
+  }
+
+  void _handleShowLayersChanged(bool value) {
+    sendUpdates(config.configuration.copyWith(debugShowLayers: value));
+  }
+
+  void _handleShowPointersChanged(bool value) {
+    sendUpdates(config.configuration.copyWith(debugShowPointers: value));
+  }
+
+  void _handleShowRainbowChanged(bool value) {
+    sendUpdates(config.configuration.copyWith(debugShowRainbow: value));
+  }
+
+
   void _handleShowPerformanceOverlayChanged(bool value) {
     sendUpdates(config.configuration.copyWith(showPerformanceOverlay: value));
   }
@@ -47,7 +67,7 @@ class StockSettingsState extends State<StockSettings> {
       case StockMode.pessimistic:
         showDialog(
           context: context,
-          child: new Dialog(
+          child: new AlertDialog(
             title: new Text("Change mode?"),
             content: new Text("Optimistic mode means everything is awesome. Are you sure you can handle that?"),
             actions: <Widget>[
@@ -75,16 +95,16 @@ class StockSettingsState extends State<StockSettings> {
       config.updater(value);
   }
 
-  Widget buildToolBar(BuildContext context) {
-    return new ToolBar(
-      center: new Text('Settings')
+  Widget buildAppBar(BuildContext context) {
+    return new AppBar(
+      title: new Text('Settings')
     );
   }
 
   Widget buildSettingsPane(BuildContext context) {
     List<Widget> rows = <Widget>[
       new DrawerItem(
-        icon: 'action/thumb_up',
+        icon: new Icon(Icons.thumb_up),
         onPressed: () => _confirmOptimismChange(),
         child: new Row(
           children: <Widget>[
@@ -97,7 +117,7 @@ class StockSettingsState extends State<StockSettings> {
         )
       ),
       new DrawerItem(
-        icon: 'action/backup',
+        icon: new Icon(Icons.backup),
         onPressed: () { _handleBackupChanged(!(config.configuration.backupMode == BackupMode.enabled)); },
         child: new Row(
           children: <Widget>[
@@ -110,7 +130,7 @@ class StockSettingsState extends State<StockSettings> {
         )
       ),
       new DrawerItem(
-        icon: 'action/picture_in_picture',
+        icon: new Icon(Icons.picture_in_picture),
         onPressed: () { _handleShowPerformanceOverlayChanged(!config.configuration.showPerformanceOverlay); },
         child: new Row(
           children: <Widget>[
@@ -123,7 +143,7 @@ class StockSettingsState extends State<StockSettings> {
         )
       ),
       new DrawerItem(
-        icon: 'action/accessibility',
+        icon: new Icon(Icons.accessibility),
         onPressed: () { _handleShowSemanticsDebuggerChanged(!config.configuration.showSemanticsDebugger); },
         child: new Row(
           children: <Widget>[
@@ -138,9 +158,9 @@ class StockSettingsState extends State<StockSettings> {
     ];
     assert(() {
       // material grid and size construction lines are only available in checked mode
-      rows.addAll([
+      rows.addAll(<Widget>[
         new DrawerItem(
-          icon: 'editor/border_clear',
+          icon: new Icon(Icons.border_clear),
           onPressed: () { _handleShowGridChanged(!config.configuration.debugShowGrid); },
           child: new Row(
             children: <Widget>[
@@ -153,7 +173,7 @@ class StockSettingsState extends State<StockSettings> {
           )
         ),
         new DrawerItem(
-          icon: 'editor/border_all',
+          icon: new Icon(Icons.border_all),
           onPressed: () { _handleShowSizesChanged(!config.configuration.debugShowSizes); },
           child: new Row(
             children: <Widget>[
@@ -164,19 +184,72 @@ class StockSettingsState extends State<StockSettings> {
               ),
             ]
           )
-        )
+        ),
+        new DrawerItem(
+          icon: new Icon(Icons.format_color_text),
+          onPressed: () { _handleShowBaselinesChanged(!config.configuration.debugShowBaselines); },
+          child: new Row(
+            children: <Widget>[
+              new Flexible(child: new Text('Show baselines (for debugging)')),
+              new Switch(
+                value: config.configuration.debugShowBaselines,
+                onChanged: _handleShowBaselinesChanged
+              ),
+            ]
+          )
+        ),
+        new DrawerItem(
+          icon: new Icon(Icons.filter_none),
+          onPressed: () { _handleShowLayersChanged(!config.configuration.debugShowLayers); },
+          child: new Row(
+            children: <Widget>[
+              new Flexible(child: new Text('Show layer boundaries (for debugging)')),
+              new Switch(
+                value: config.configuration.debugShowLayers,
+                onChanged: _handleShowLayersChanged
+              ),
+            ]
+          )
+        ),
+        new DrawerItem(
+          icon: new Icon(Icons.mouse),
+          onPressed: () { _handleShowPointersChanged(!config.configuration.debugShowPointers); },
+          child: new Row(
+            children: <Widget>[
+              new Flexible(child: new Text('Show pointer hit-testing (for debugging)')),
+              new Switch(
+                value: config.configuration.debugShowPointers,
+                onChanged: _handleShowPointersChanged
+              ),
+            ]
+          )
+        ),
+        new DrawerItem(
+          icon: new Icon(Icons.gradient),
+          onPressed: () { _handleShowRainbowChanged(!config.configuration.debugShowRainbow); },
+          child: new Row(
+            children: <Widget>[
+              new Flexible(child: new Text('Show repaint rainbow (for debugging)')),
+              new Switch(
+                value: config.configuration.debugShowRainbow,
+                onChanged: _handleShowRainbowChanged
+              ),
+            ]
+          )
+        ),
       ]);
       return true;
     });
     return new Block(
       children: rows,
-      padding: const EdgeDims.symmetric(vertical: 20.0)
+      padding: const EdgeInsets.symmetric(vertical: 20.0)
     );
   }
 
+  @override
   Widget build(BuildContext context) {
     return new Scaffold(
-      toolBar: buildToolBar(context),
+      appBar: buildAppBar(context),
       body: buildSettingsPane(context)
     );
   }

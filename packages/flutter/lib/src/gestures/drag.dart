@@ -8,77 +8,202 @@ import 'constants.dart';
 import 'events.dart';
 import 'velocity_tracker.dart';
 
-enum DragState {
+enum _DragState {
   ready,
   possible,
-  accepted
+  accepted,
 }
 
-typedef void GestureDragStartCallback(Point globalPosition);
-typedef void GestureDragUpdateCallback(double delta);
-typedef void GestureDragEndCallback(Offset velocity);
+/// Details for [GestureDragDownCallback].
+class DragDownDetails {
+  /// Creates details for a [GestureDragDownCallback].
+  ///
+  /// The [globalPosition] argument must not be null.
+  DragDownDetails({ this.globalPosition: Point.origin }) {
+    assert(globalPosition != null);
+  }
 
-typedef void GesturePanStartCallback(Point globalPosition);
-typedef void GesturePanUpdateCallback(Offset delta);
-typedef void GesturePanEndCallback(Offset velocity);
+  /// The global position at which the pointer contacted the screen.
+  final Point globalPosition;
+}
 
-typedef void _GesturePolymorphicUpdateCallback<T>(T delta);
+/// Signature for when a pointer has contacted the screen and might begin to move.
+///
+/// See [DragGestureRecognizer.onDown].
+typedef void GestureDragDownCallback(DragDownDetails details);
 
-bool _isFlingGesture(Offset velocity) {
+/// Details for [GestureDragStartCallback].
+class DragStartDetails {
+  /// Creates details for a [GestureDragStartCallback].
+  ///
+  /// The [globalPosition] argument must not be null.
+  DragStartDetails({ this.globalPosition: Point.origin }) {
+    assert(globalPosition != null);
+  }
+
+  /// The global position at which the pointer contacted the screen.
+  final Point globalPosition;
+}
+
+/// Signature for when a pointer has contacted the screen and has begun to move.
+///
+/// See [DragGestureRecognizer.onStart].
+typedef void GestureDragStartCallback(DragStartDetails details);
+
+/// Details for [GestureDragUpdateCallback].
+class DragUpdateDetails {
+  /// Creates details for a [DragUpdateDetails].
+  ///
+  /// The [delta] argument must not be null.
+  ///
+  /// If [primaryDelta] is non-null, then its value must match one of the
+  /// coordinates of [delta] and the other coordinate must be zero.
+  DragUpdateDetails({
+    this.delta: Offset.zero,
+    this.primaryDelta,
+    this.globalPosition
+  }) {
+    assert(primaryDelta == null
+        || (primaryDelta == delta.dx && delta.dy == 0.0)
+        || (primaryDelta == delta.dy && delta.dx == 0.0));
+  }
+
+  /// The amount the pointer has moved since the previous update.
+  ///
+  /// If the [GestureDragUpdateCallback] is for a one-dimensional drag (e.g.,
+  /// a horizontal or vertical drag), then this offset contains only the delta
+  /// in that direction (i.e., the coordinate in the other direction is zero).
+  final Offset delta;
+
+  /// The amount the pointer has moved along the primary axis since the previous
+  /// update.
+  ///
+  /// If the [GestureDragUpdateCallback] is for a one-dimensional drag (e.g.,
+  /// a horizontal or vertical drag), then this value contains the component of
+  /// [delta] along the primary axis (e.g., horizontal or vertical,
+  /// respectively). Otherwise, if the [GestureDragUpdateCallback] is for a
+  /// two-dimensional drag (e.g., a pan), then this value is null.
+  final double primaryDelta;
+
+  /// The pointer's global position.
+  final Point globalPosition;
+}
+
+/// Signature for when a pointer that is in contact with the screen and moving
+/// has moved again.
+///
+/// See [DragGestureRecognizer.onUpdate].
+typedef void GestureDragUpdateCallback(DragUpdateDetails details);
+
+/// Details for [GestureDragEndCallback].
+class DragEndDetails {
+  /// Creates details for a [GestureDragEndCallback].
+  ///
+  /// The [velocity] argument must not be null.
+  DragEndDetails({ this.velocity: Velocity.zero }) {
+    assert(velocity != null);
+  }
+
+  /// The velocity the pointer was moving when it stopped contacting the screen.
+  final Velocity velocity;
+}
+
+/// Signature for when a pointer that was previously in contact with the screen
+/// and moving is no longer in contact with the screen.
+///
+/// The velocity at which the pointer was moving when it stopped contacting
+/// the screen is available in the `details`.
+///
+/// See [DragGestureRecognizer.onEnd].
+typedef void GestureDragEndCallback(DragEndDetails details);
+
+/// Signature for when the pointer that previously triggered a
+/// [GestureDragDownCallback] did not complete.
+///
+/// See [DragGestureRecognizer.onCancel].
+typedef void GestureDragCancelCallback();
+
+bool _isFlingGesture(Velocity velocity) {
   assert(velocity != null);
-  double velocitySquared = velocity.dx * velocity.dx + velocity.dy * velocity.dy;
-  return velocitySquared > kMinFlingVelocity * kMinFlingVelocity
-      && velocitySquared < kMaxFlingVelocity * kMaxFlingVelocity;
+  final double speedSquared = velocity.pixelsPerSecond.distanceSquared;
+  return speedSquared > kMinFlingVelocity * kMinFlingVelocity;
 }
 
-abstract class _DragGestureRecognizer<T extends dynamic> extends OneSequenceGestureRecognizer {
-  _DragGestureRecognizer({
-    PointerRouter router,
-    GestureArena gestureArena,
-    this.onStart,
-    this.onUpdate,
-    this.onEnd
-  }) : super(
-    router: router,
-    gestureArena: gestureArena
-  );
+/// Recognizes movement.
+///
+/// In contrast to [MultiDragGestureRecognizer], [DragGestureRecognizer]
+/// recognizes a single gesture sequence for all the pointers it watches, which
+/// means that the recognizer has at most one drag sequence active at any given
+/// time regardless of how many pointers are in contact with the screen.
+///
+/// [DragGestureRecognizer] is not intended to be used directly. Instead,
+/// consider using one of its subclasses to recognize specific types for drag
+/// gestures.
+///
+/// See also:
+///
+///  * [HorizontalDragGestureRecognizer]
+///  * [VerticalDragGestureRecognizer]
+///  * [PanGestureRecognizer]
+abstract class DragGestureRecognizer extends OneSequenceGestureRecognizer {
+  /// A pointer has contacted the screen and might begin to move.
+  GestureDragDownCallback onDown;
 
+  /// A pointer has contacted the screen and has begun to move.
   GestureDragStartCallback onStart;
-  _GesturePolymorphicUpdateCallback<T> onUpdate;
+
+  /// A pointer that is in contact with the screen and moving has moved again.
+  GestureDragUpdateCallback onUpdate;
+
+  /// A pointer that was previously in contact with the screen and moving is no
+  /// longer in contact with the screen and was moving at a specific velocity
+  /// when it stopped contacting the screen.
   GestureDragEndCallback onEnd;
 
-  DragState _state = DragState.ready;
-  Point _initialPosition;
-  T _pendingDragDelta;
+  /// The pointer that previously triggered [onDown] did not complete.
+  GestureDragCancelCallback onCancel;
 
-  T get _initialPendingDragDelta;
-  T _getDragDelta(PointerEvent event);
+  _DragState _state = _DragState.ready;
+  Point _initialPosition;
+  Offset _pendingDragOffset;
+
+  Offset _getDeltaForDetails(Offset delta);
+  double _getPrimaryDeltaForDetails(Offset delta);
   bool get _hasSufficientPendingDragDeltaToAccept;
 
   Map<int, VelocityTracker> _velocityTrackers = new Map<int, VelocityTracker>();
 
+  @override
   void addPointer(PointerEvent event) {
     startTrackingPointer(event.pointer);
     _velocityTrackers[event.pointer] = new VelocityTracker();
-    if (_state == DragState.ready) {
-      _state = DragState.possible;
+    if (_state == _DragState.ready) {
+      _state = _DragState.possible;
       _initialPosition = event.position;
-      _pendingDragDelta = _initialPendingDragDelta;
+      _pendingDragOffset = Offset.zero;
+      if (onDown != null)
+        invokeCallback/*<Null>*/('onDown', () => onDown(new DragDownDetails(globalPosition: _initialPosition)));
     }
   }
 
+  @override
   void handleEvent(PointerEvent event) {
-    assert(_state != DragState.ready);
+    assert(_state != _DragState.ready);
     if (event is PointerMoveEvent) {
       VelocityTracker tracker = _velocityTrackers[event.pointer];
       assert(tracker != null);
       tracker.addPosition(event.timeStamp, event.position);
-      T delta = _getDragDelta(event);
-      if (_state == DragState.accepted) {
-        if (onUpdate != null)
-          onUpdate(delta);
+      Offset delta = event.delta;
+      if (_state == _DragState.accepted) {
+        if (onUpdate != null) {
+          invokeCallback/*<Null>*/('onUpdate', () => onUpdate(new DragUpdateDetails(
+            delta: _getDeltaForDetails(delta),
+            primaryDelta: _getPrimaryDeltaForDetails(delta),
+            globalPosition: event.position
+          )));
+        }
       } else {
-        _pendingDragDelta += delta;
+        _pendingDragOffset += delta;
         if (_hasSufficientPendingDragDeltaToAccept)
           resolve(GestureDisposition.accepted);
       }
@@ -86,103 +211,123 @@ abstract class _DragGestureRecognizer<T extends dynamic> extends OneSequenceGest
     stopTrackingIfPointerNoLongerDown(event);
   }
 
+  @override
   void acceptGesture(int pointer) {
-    if (_state != DragState.accepted) {
-      _state = DragState.accepted;
-      T delta = _pendingDragDelta;
-      _pendingDragDelta = _initialPendingDragDelta;
+    if (_state != _DragState.accepted) {
+      _state = _DragState.accepted;
+      Offset delta = _pendingDragOffset;
+      _pendingDragOffset = Offset.zero;
       if (onStart != null)
-        onStart(_initialPosition);
-      if (delta != _initialPendingDragDelta && onUpdate != null)
-        onUpdate(delta);
+        invokeCallback/*<Null>*/('onStart', () => onStart(new DragStartDetails(globalPosition: _initialPosition)));
+      if (delta != Offset.zero && onUpdate != null) {
+        invokeCallback/*<Null>*/('onUpdate', () => onUpdate(new DragUpdateDetails(
+          delta: _getDeltaForDetails(delta),
+          primaryDelta: _getPrimaryDeltaForDetails(delta)
+        )));
+      }
     }
   }
 
+  @override
+  void rejectGesture(int pointer) {
+    stopTrackingPointer(pointer);
+  }
+
+  @override
   void didStopTrackingLastPointer(int pointer) {
-    if (_state == DragState.possible) {
+    if (_state == _DragState.possible) {
       resolve(GestureDisposition.rejected);
-      _state = DragState.ready;
+      _state = _DragState.ready;
+      if (onCancel != null)
+        invokeCallback/*<Null>*/('onCancel', onCancel);
       return;
     }
-    bool wasAccepted = (_state == DragState.accepted);
-    _state = DragState.ready;
+    bool wasAccepted = (_state == _DragState.accepted);
+    _state = _DragState.ready;
     if (wasAccepted && onEnd != null) {
       VelocityTracker tracker = _velocityTrackers[pointer];
       assert(tracker != null);
 
-      Offset velocity = tracker.getVelocity();
-      if (velocity != null && _isFlingGesture(velocity))
-        onEnd(velocity);
-      else
-        onEnd(Offset.zero);
+      Velocity velocity = tracker.getVelocity();
+      if (velocity != null && _isFlingGesture(velocity)) {
+        final Offset pixelsPerSecond = velocity.pixelsPerSecond;
+        if (pixelsPerSecond.distanceSquared > kMaxFlingVelocity * kMaxFlingVelocity)
+          velocity = new Velocity(pixelsPerSecond: (pixelsPerSecond / pixelsPerSecond.distance) * kMaxFlingVelocity);
+        invokeCallback/*<Null>*/('onEnd', () => onEnd(new DragEndDetails(velocity: velocity)));
+      } else {
+        invokeCallback/*<Null>*/('onEnd', () => onEnd(new DragEndDetails(velocity: Velocity.zero)));
+      }
     }
     _velocityTrackers.clear();
   }
 
+  @override
   void dispose() {
     _velocityTrackers.clear();
     super.dispose();
   }
 }
 
-class VerticalDragGestureRecognizer extends _DragGestureRecognizer<double> {
-  VerticalDragGestureRecognizer({
-    PointerRouter router,
-    GestureArena gestureArena,
-    GestureDragStartCallback onStart,
-    GestureDragUpdateCallback onUpdate,
-    GestureDragEndCallback onEnd
-  }) : super(
-    router: router,
-    gestureArena: gestureArena,
-    onStart: onStart,
-    onUpdate: onUpdate,
-    onEnd: onEnd
-  );
+/// Recognizes movement in the vertical direction.
+///
+/// Used for vertical scrolling.
+///
+/// See also:
+///
+///  * [VerticalMultiDragGestureRecognizer]
+class VerticalDragGestureRecognizer extends DragGestureRecognizer {
+  @override
+  bool get _hasSufficientPendingDragDeltaToAccept => _pendingDragOffset.dy.abs() > kTouchSlop;
 
-  double get _initialPendingDragDelta => 0.0;
-  double _getDragDelta(PointerEvent event) => event.delta.dy;
-  bool get _hasSufficientPendingDragDeltaToAccept => _pendingDragDelta.abs() > kTouchSlop;
+  @override
+  Offset _getDeltaForDetails(Offset delta) => new Offset(0.0, delta.dy);
+
+  @override
+  double _getPrimaryDeltaForDetails(Offset delta) => delta.dy;
+
+  @override
+  String toStringShort() => 'vertical drag';
 }
 
-class HorizontalDragGestureRecognizer extends _DragGestureRecognizer<double> {
-  HorizontalDragGestureRecognizer({
-    PointerRouter router,
-    GestureArena gestureArena,
-    GestureDragStartCallback onStart,
-    GestureDragUpdateCallback onUpdate,
-    GestureDragEndCallback onEnd
-  }) : super(
-    router: router,
-    gestureArena: gestureArena,
-    onStart: onStart,
-    onUpdate: onUpdate,
-    onEnd: onEnd
-  );
+/// Recognizes movement in the horizontal direction.
+///
+/// Used for horizontal scrolling.
+///
+/// See also:
+///
+///  * [HorizontalMultiDragGestureRecognizer]
+class HorizontalDragGestureRecognizer extends DragGestureRecognizer {
+  @override
+  bool get _hasSufficientPendingDragDeltaToAccept => _pendingDragOffset.dx.abs() > kTouchSlop;
 
-  double get _initialPendingDragDelta => 0.0;
-  double _getDragDelta(PointerEvent event) => event.delta.dx;
-  bool get _hasSufficientPendingDragDeltaToAccept => _pendingDragDelta.abs() > kTouchSlop;
+  @override
+  Offset _getDeltaForDetails(Offset delta) => new Offset(delta.dx, 0.0);
+
+  @override
+  double _getPrimaryDeltaForDetails(Offset delta) => delta.dx;
+
+  @override
+  String toStringShort() => 'horizontal drag';
 }
 
-class PanGestureRecognizer extends _DragGestureRecognizer<Offset> {
-  PanGestureRecognizer({
-    PointerRouter router,
-    GestureArena gestureArena,
-    GesturePanStartCallback onStart,
-    GesturePanUpdateCallback onUpdate,
-    GesturePanEndCallback onEnd
-  }) : super(
-    router: router,
-    gestureArena: gestureArena,
-    onStart: onStart,
-    onUpdate: onUpdate,
-    onEnd: onEnd
-  );
-
-  Offset get _initialPendingDragDelta => Offset.zero;
-  Offset _getDragDelta(PointerEvent event) => event.delta;
+/// Recognizes movement both horizontally and vertically.
+///
+/// See also:
+///
+///  * [ImmediateMultiDragGestureRecognizer]
+///  * [DelayedMultiDragGestureRecognizer]
+class PanGestureRecognizer extends DragGestureRecognizer {
+  @override
   bool get _hasSufficientPendingDragDeltaToAccept {
-    return _pendingDragDelta.distance > kPanSlop;
+    return _pendingDragOffset.distance > kPanSlop;
   }
+
+  @override
+  Offset _getDeltaForDetails(Offset delta) => delta;
+
+  @override
+  double _getPrimaryDeltaForDetails(Offset delta) => null;
+
+  @override
+  String toStringShort() => 'pan';
 }

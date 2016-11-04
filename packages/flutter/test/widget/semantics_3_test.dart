@@ -2,151 +2,119 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'dart:ui' show SemanticsFlags;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:test/test.dart';
 
-import 'test_semantics.dart';
+import 'semantics_tester.dart';
 
 void main() {
-  test('Semantics 3', () {
-    testWidgets((WidgetTester tester) {
-      TestSemanticsListener client = new TestSemanticsListener();
+  testWidgets('Semantics 3', (WidgetTester tester) async {
+    SemanticsTester semantics = new SemanticsTester(tester);
 
-      // implicit annotators
-      tester.pumpWidget(
-        new Container(
-          child: new Semantics(
-            label: 'test',
-            child: new Container(
-              child: new Semantics(
-                checked: true
-              )
-            )
-          )
-        )
-      );
-      expect(client.updates.length, equals(2));
-      expect(client.updates[0].id, equals(0));
-      expect(client.updates[0].flags.canBeTapped, isFalse);
-      expect(client.updates[0].flags.canBeLongPressed, isFalse);
-      expect(client.updates[0].flags.canBeScrolledHorizontally, isFalse);
-      expect(client.updates[0].flags.canBeScrolledVertically, isFalse);
-      expect(client.updates[0].flags.hasCheckedState, isTrue);
-      expect(client.updates[0].flags.isChecked, isTrue);
-      expect(client.updates[0].strings.label, equals('test'));
-      expect(client.updates[0].geometry.transform, isNull);
-      expect(client.updates[0].geometry.left, equals(0.0));
-      expect(client.updates[0].geometry.top, equals(0.0));
-      expect(client.updates[0].geometry.width, equals(800.0));
-      expect(client.updates[0].geometry.height, equals(600.0));
-      expect(client.updates[0].children.length, equals(0));
-      expect(client.updates[1], isNull);
-      client.updates.clear();
-
-      // remove one
-      tester.pumpWidget(
-        new Container(
+    // implicit annotators
+    await tester.pumpWidget(
+      new Container(
+        child: new Semantics(
+          label: 'test',
           child: new Container(
             child: new Semantics(
               checked: true
             )
           )
         )
-      );
-      expect(client.updates.length, equals(2));
-      expect(client.updates[0].id, equals(0));
-      expect(client.updates[0].flags.canBeTapped, isFalse);
-      expect(client.updates[0].flags.canBeLongPressed, isFalse);
-      expect(client.updates[0].flags.canBeScrolledHorizontally, isFalse);
-      expect(client.updates[0].flags.canBeScrolledVertically, isFalse);
-      expect(client.updates[0].flags.hasCheckedState, isTrue);
-      expect(client.updates[0].flags.isChecked, isTrue);
-      expect(client.updates[0].strings.label, equals(''));
-      expect(client.updates[0].geometry.transform, isNull);
-      expect(client.updates[0].geometry.left, equals(0.0));
-      expect(client.updates[0].geometry.top, equals(0.0));
-      expect(client.updates[0].geometry.width, equals(800.0));
-      expect(client.updates[0].geometry.height, equals(600.0));
-      expect(client.updates[0].children.length, equals(0));
-      expect(client.updates[1], isNull);
-      client.updates.clear();
+      )
+    );
 
-      // change what it says
-      tester.pumpWidget(
-        new Container(
+    expect(semantics, hasSemantics(
+      new TestSemantics(
+        id: 0,
+        flags: SemanticsFlags.hasCheckedState.index | SemanticsFlags.isChecked.index,
+        label: 'test',
+      )
+    ));
+
+    // remove one
+    await tester.pumpWidget(
+      new Container(
+        child: new Container(
+          child: new Semantics(
+            checked: true
+          )
+        )
+      )
+    );
+
+    expect(semantics, hasSemantics(
+      new TestSemantics(
+        id: 0,
+        flags: SemanticsFlags.hasCheckedState.index | SemanticsFlags.isChecked.index,
+      )
+    ));
+
+    // change what it says
+    await tester.pumpWidget(
+      new Container(
+        child: new Container(
+          child: new Semantics(
+            label: 'test'
+          )
+        )
+      )
+    );
+
+    expect(semantics, hasSemantics(
+      new TestSemantics(
+        id: 0,
+        label: 'test',
+      )
+    ));
+
+    // add a node
+    await tester.pumpWidget(
+      new Container(
+        child: new Semantics(
+          checked: true,
           child: new Container(
             child: new Semantics(
               label: 'test'
             )
           )
         )
-      );
-      expect(client.updates.length, equals(2));
-      expect(client.updates[0].id, equals(0));
-      expect(client.updates[0].flags.canBeTapped, isFalse);
-      expect(client.updates[0].flags.canBeLongPressed, isFalse);
-      expect(client.updates[0].flags.canBeScrolledHorizontally, isFalse);
-      expect(client.updates[0].flags.canBeScrolledVertically, isFalse);
-      expect(client.updates[0].flags.hasCheckedState, isFalse);
-      expect(client.updates[0].flags.isChecked, isFalse);
-      expect(client.updates[0].strings.label, equals('test'));
-      expect(client.updates[0].geometry.transform, isNull);
-      expect(client.updates[0].geometry.left, equals(0.0));
-      expect(client.updates[0].geometry.top, equals(0.0));
-      expect(client.updates[0].geometry.width, equals(800.0));
-      expect(client.updates[0].geometry.height, equals(600.0));
-      expect(client.updates[0].children.length, equals(0));
-      expect(client.updates[1], isNull);
-      client.updates.clear();
+      )
+    );
 
-      // add a node
-      tester.pumpWidget(
-        new Container(
-          child: new Semantics(
-            checked: true,
-            child: new Container(
-              child: new Semantics(
-                label: 'test'
-              )
-            )
-          )
-        )
-      );
-      expect(client.updates.length, equals(2));
-      expect(client.updates[0].id, equals(0));
-      expect(client.updates[0].flags.canBeTapped, isFalse);
-      expect(client.updates[0].flags.canBeLongPressed, isFalse);
-      expect(client.updates[0].flags.canBeScrolledHorizontally, isFalse);
-      expect(client.updates[0].flags.canBeScrolledVertically, isFalse);
-      expect(client.updates[0].flags.hasCheckedState, isTrue);
-      expect(client.updates[0].flags.isChecked, isTrue);
-      expect(client.updates[0].strings.label, equals('test'));
-      expect(client.updates[0].geometry.transform, isNull);
-      expect(client.updates[0].geometry.left, equals(0.0));
-      expect(client.updates[0].geometry.top, equals(0.0));
-      expect(client.updates[0].geometry.width, equals(800.0));
-      expect(client.updates[0].geometry.height, equals(600.0));
-      expect(client.updates[0].children.length, equals(0));
-      expect(client.updates[1], isNull);
-      client.updates.clear();
+    expect(semantics, hasSemantics(
+      new TestSemantics(
+        id: 0,
+        flags: SemanticsFlags.hasCheckedState.index | SemanticsFlags.isChecked.index,
+        label: 'test',
+      )
+    ));
 
-      // make no changes
-      tester.pumpWidget(
-        new Container(
-          child: new Semantics(
-            checked: true,
-            child: new Container(
-              child: new Semantics(
-                label: 'test'
-              )
-            )
-          )
-        )
-      );
-      expect(client.updates.length, equals(0));
-
+    int changeCount = 0;
+    tester.binding.pipelineOwner.semanticsOwner.addListener(() {
+      changeCount += 1;
     });
+
+    // make no changes
+    await tester.pumpWidget(
+      new Container(
+        child: new Semantics(
+          checked: true,
+          child: new Container(
+            child: new Semantics(
+              label: 'test'
+            )
+          )
+        )
+      )
+    );
+
+    expect(changeCount, 0);
+
+    semantics.dispose();
   });
 }

@@ -2,13 +2,28 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'dart:ui' show Color, hashValues, hashList, lerpDouble;
+import 'dart:ui' show Color, hashValues;
+
+import 'package:flutter/foundation.dart';
 
 import 'colors.dart';
 import 'icon_theme_data.dart';
 import 'typography.dart';
 
-enum ThemeBrightness { dark, light }
+/// Describes the contrast needs of a color.
+enum Brightness {
+  /// The color is dark and will require a light text color to achieve readable
+  /// contrast.
+  ///
+  /// For example, the color might be dark grey, requiring white text.
+  dark,
+
+  /// The color is light and will require a dark text color to achieve readable
+  /// contrast.
+  ///
+  /// For example, the color might be bright white, requiring black text.
+  light,
+}
 
 // Deriving these values is black magic. The spec claims that pressed buttons
 // have a highlight of 0x66999999, but that's clearly wrong. The videos in the
@@ -27,190 +42,364 @@ const Color _kLightThemeSplashColor = const Color(0x66C8C8C8);
 const Color _kDarkThemeHighlightColor = const Color(0x40CCCCCC);
 const Color _kDarkThemeSplashColor = const Color(0x40CCCCCC);
 
+/// Holds the color and typography values for a material design theme.
+///
+/// Use this class to configure a [Theme] widget.
+///
+/// To obtain the current theme, use [Theme.of].
 class ThemeData {
-
-  ThemeData.raw({
-    this.brightness,
-    this.primarySwatch,
-    this.primaryColor,
-    this.primaryColorBrightness,
-    this.canvasColor,
-    this.cardColor,
-    this.dividerColor,
-    this.highlightColor,
-    this.splashColor,
-    this.unselectedColor,
-    this.disabledColor,
-    this.accentColor,
-    this.accentColorBrightness,
-    this.indicatorColor,
-    this.hintColor,
-    this.hintOpacity,
-    this.errorColor,
-    this.text,
-    this.primaryTextTheme,
-    this.primaryIconTheme
-  }) {
-    assert(brightness != null);
-    // primarySwatch can be null; TODO(ianh): see https://github.com/flutter/flutter/issues/1277
-    assert(primaryColor != null);
-    assert(primaryColorBrightness != null);
-    assert(canvasColor != null);
-    assert(cardColor != null);
-    assert(dividerColor != null);
-    assert(highlightColor != null);
-    assert(splashColor != null);
-    assert(unselectedColor != null);
-    assert(disabledColor != null);
-    assert(accentColor != null);
-    assert(accentColorBrightness != null);
-    assert(indicatorColor != null);
-    assert(hintColor != null);
-    assert(hintOpacity != null);
-    assert(errorColor != null);
-    assert(text != null);
-    assert(primaryTextTheme != null);
-    assert(primaryIconTheme != null);
-  }
-
+  /// Create a ThemeData given a set of preferred values.
+  ///
+  /// Default values will be derived for arguments that are omitted.
+  ///
+  /// The most useful values to give are, in order of importance:
+  ///
+  ///  * The desired theme [brightness].
+  ///
+  ///  * The primary color palette (the [primarySwatch]), chosen from
+  ///    one of the swatches defined by the material design spec. This
+  ///    should be one of the maps from the [Colors] class that do not
+  ///    have "accent" in their name.
+  ///
+  ///  * The [accentColor], sometimes called the secondary color, and,
+  ///    if the accent color is specified, its brightness
+  ///    ([accentColorBrightness]), so that the right contrasting text
+  ///    color will be used over the accent color.
+  ///
+  /// See <https://material.google.com/style/color.html> for
+  /// more discussion on how to pick the right colors.
   factory ThemeData({
-    ThemeBrightness brightness: ThemeBrightness.light,
+    Brightness brightness,
     Map<int, Color> primarySwatch,
     Color primaryColor,
-    ThemeBrightness primaryColorBrightness,
+    Brightness primaryColorBrightness,
+    Color accentColor,
+    Brightness accentColorBrightness,
     Color canvasColor,
     Color cardColor,
     Color dividerColor,
     Color highlightColor,
     Color splashColor,
-    Color unselectedColor,
+    Color selectedRowColor,
+    Color unselectedWidgetColor,
     Color disabledColor,
-    Color accentColor,
-    ThemeBrightness accentColorBrightness: ThemeBrightness.dark,
+    Color buttonColor,
+    Color secondaryHeaderColor,
+    Color textSelectionColor,
+    Color textSelectionHandleColor,
+    Color backgroundColor,
     Color indicatorColor,
     Color hintColor,
-    double hintOpacity,
     Color errorColor,
-    TextTheme text,
+    TextTheme textTheme,
     TextTheme primaryTextTheme,
-    IconThemeData primaryIconTheme
+    IconThemeData iconTheme,
+    IconThemeData primaryIconTheme,
+    TargetPlatform platform
   }) {
-    // brightness default is in the arguments list
-    bool isDark = brightness == ThemeBrightness.dark;
-    primaryColor ??= primarySwatch == null ? isDark ? Colors.grey[900] : Colors.grey[100] : primarySwatch[500];
-    primaryColorBrightness ??= primarySwatch == null ? brightness : ThemeBrightness.dark /* swatch[500] is always dark */;
+    brightness ??= Brightness.light;
+    final bool isDark = brightness == Brightness.dark;
+    primarySwatch ??= Colors.blue;
+    primaryColor ??= isDark ? Colors.grey[900] : primarySwatch[500];
+    primaryColorBrightness ??= Brightness.dark;
+    final bool primaryIsDark = primaryColorBrightness == Brightness.dark;
+    accentColor ??= isDark ? Colors.tealAccent[200] : primarySwatch[500];
+    accentColorBrightness ??= Brightness.dark;
     canvasColor ??= isDark ? Colors.grey[850] : Colors.grey[50];
     cardColor ??= isDark ? Colors.grey[800] : Colors.white;
     dividerColor ??= isDark ? const Color(0x1FFFFFFF) : const Color(0x1F000000);
     highlightColor ??= isDark ? _kDarkThemeHighlightColor : _kLightThemeHighlightColor;
     splashColor ??= isDark ? _kDarkThemeSplashColor : _kLightThemeSplashColor;
-    unselectedColor ??= isDark ? Colors.white70 : Colors.black54;
+    selectedRowColor ??= Colors.grey[100];
+    unselectedWidgetColor ??= isDark ? Colors.white70 : Colors.black54;
     disabledColor ??= isDark ? Colors.white30 : Colors.black26;
-    accentColor ??= primarySwatch == null ? Colors.blue[500] : primarySwatch[500];
-    // accentColorBrightness default is in the arguments list
+    buttonColor ??= isDark ? primarySwatch[600] : Colors.grey[300];
+    // Spec doesn't specify a dark theme secondaryHeaderColor, this is a guess.
+    secondaryHeaderColor ??= isDark ? Colors.grey[700] : primarySwatch[50];
+    textSelectionColor ??= isDark ? accentColor : primarySwatch[200];
+    textSelectionHandleColor ??= isDark ? Colors.tealAccent[400] : primarySwatch[300];
+    backgroundColor ??= isDark ? Colors.grey[700] : primarySwatch[200];
     indicatorColor ??= accentColor == primaryColor ? Colors.white : accentColor;
     hintColor ??= isDark ? const Color(0x42FFFFFF) : const Color(0x4C000000);
-    hintOpacity ??= hintColor != null ? hintColor.alpha / 0xFF : isDark ? 0.26 : 0.30;
     errorColor ??= Colors.red[700];
-    text ??= isDark ? Typography.white : Typography.black;
-    primaryTextTheme ??= primaryColorBrightness == ThemeBrightness.dark ? Typography.white : Typography.black;
-    primaryIconTheme ??= primaryColorBrightness == ThemeBrightness.dark ? const IconThemeData(color: IconThemeColor.white) : const IconThemeData(color: IconThemeColor.black);
+    iconTheme ??= isDark ? const IconThemeData(color: Colors.white) : const IconThemeData(color: Colors.black);
+    primaryIconTheme ??= primaryIsDark ? const IconThemeData(color: Colors.white) : const IconThemeData(color: Colors.black);
+    platform ??= defaultTargetPlatform;
+
+    final Typography typography = new Typography(platform: platform);
+    primaryTextTheme ??= primaryIsDark ? typography.white : typography.black;
+    textTheme ??= isDark ? typography.white : typography.black;
     return new ThemeData.raw(
       brightness: brightness,
-      primarySwatch: primarySwatch,
       primaryColor: primaryColor,
       primaryColorBrightness: primaryColorBrightness,
+      accentColor: accentColor,
+      accentColorBrightness: accentColorBrightness,
       canvasColor: canvasColor,
       cardColor: cardColor,
       dividerColor: dividerColor,
       highlightColor: highlightColor,
       splashColor: splashColor,
-      unselectedColor: unselectedColor,
+      selectedRowColor: selectedRowColor,
+      unselectedWidgetColor: unselectedWidgetColor,
       disabledColor: disabledColor,
-      accentColor: accentColor,
-      accentColorBrightness: accentColorBrightness,
+      buttonColor: buttonColor,
+      secondaryHeaderColor: secondaryHeaderColor,
+      textSelectionColor: textSelectionColor,
+      textSelectionHandleColor: textSelectionHandleColor,
+      backgroundColor: backgroundColor,
       indicatorColor: indicatorColor,
       hintColor: hintColor,
-      hintOpacity: hintOpacity,
       errorColor: errorColor,
-      text: text,
+      textTheme: textTheme,
       primaryTextTheme: primaryTextTheme,
-      primaryIconTheme: primaryIconTheme
+      iconTheme: iconTheme,
+      primaryIconTheme: primaryIconTheme,
+      platform: platform
     );
   }
 
-  factory ThemeData.light() => new ThemeData(primarySwatch: Colors.blue, brightness: ThemeBrightness.light);
-  factory ThemeData.dark() => new ThemeData(brightness: ThemeBrightness.dark);
+  /// Create a ThemeData given a set of exact values. All the values
+  /// must be specified.
+  ///
+  /// This will rarely be used directly. It is used by [lerp] to
+  /// create intermediate themes based on two themes created with the
+  /// [new ThemeData] constructor.
+  ThemeData.raw({
+    this.brightness,
+    this.primaryColor,
+    this.primaryColorBrightness,
+    this.accentColor,
+    this.accentColorBrightness,
+    this.canvasColor,
+    this.cardColor,
+    this.dividerColor,
+    this.highlightColor,
+    this.splashColor,
+    this.selectedRowColor,
+    this.unselectedWidgetColor,
+    this.disabledColor,
+    this.buttonColor,
+    this.secondaryHeaderColor,
+    this.textSelectionColor,
+    this.textSelectionHandleColor,
+    this.backgroundColor,
+    this.indicatorColor,
+    this.hintColor,
+    this.errorColor,
+    this.textTheme,
+    this.primaryTextTheme,
+    this.iconTheme,
+    this.primaryIconTheme,
+    this.platform
+  }) {
+    assert(brightness != null);
+    assert(primaryColor != null);
+    assert(primaryColorBrightness != null);
+    assert(accentColor != null);
+    assert(accentColorBrightness != null);
+    assert(canvasColor != null);
+    assert(cardColor != null);
+    assert(dividerColor != null);
+    assert(highlightColor != null);
+    assert(splashColor != null);
+    assert(selectedRowColor != null);
+    assert(unselectedWidgetColor != null);
+    assert(disabledColor != null);
+    assert(buttonColor != null);
+    assert(secondaryHeaderColor != null);
+    assert(textSelectionColor != null);
+    assert(textSelectionHandleColor != null);
+    assert(disabledColor != null);
+    assert(indicatorColor != null);
+    assert(hintColor != null);
+    assert(errorColor != null);
+    assert(textTheme != null);
+    assert(primaryTextTheme != null);
+    assert(iconTheme != null);
+    assert(primaryIconTheme != null);
+    assert(platform != null);
+  }
+
+  /// A default light blue theme.
+  factory ThemeData.light() => new ThemeData(brightness: Brightness.light);
+
+  /// A default dark theme with a teal accent color.
+  factory ThemeData.dark() => new ThemeData(brightness: Brightness.dark);
+
+  /// The default theme. Same as [new ThemeData.light].
+  ///
+  /// This is used by [Theme.of] when no theme has been specified.
   factory ThemeData.fallback() => new ThemeData.light();
 
   /// The brightness of the overall theme of the application. Used by widgets
   /// like buttons to determine what color to pick when not using the primary or
   /// accent color.
   ///
-  /// When the ThemeBrightness is dark, the canvas, card, and primary colors are
-  /// all dark. When the ThemeBrightness is light, the canvas and card colors
+  /// When the [Brightness] is dark, the canvas, card, and primary colors are
+  /// all dark. When the [Brightness] is light, the canvas and card colors
   /// are bright, and the primary color's darkness varies as described by
   /// primaryColorBrightness. The primaryColor does not contrast well with the
   /// card and canvas colors when the brightness is dark; when the brightness is
   /// dark, use Colors.white or the accentColor for a contrasting color.
-  final ThemeBrightness brightness;
+  final Brightness brightness;
 
-  final Map<int, Color> primarySwatch;
-
-  /// The background colour for major parts of the app (toolbars, tab bars, etc)
+  /// The background color for major parts of the app (toolbars, tab bars, etc)
   final Color primaryColor;
 
-  /// The brightness of the primaryColor. Used to determine the colour of text and
+  /// The brightness of the primaryColor. Used to determine the color of text and
   /// icons placed on top of the primary color (e.g. toolbar text).
-  final ThemeBrightness primaryColorBrightness;
-
-  final Color canvasColor;
-  final Color cardColor;
-  final Color dividerColor;
-  final Color highlightColor;
-  final Color splashColor;
-  final Color unselectedColor;
-  final Color disabledColor;
+  final Brightness primaryColorBrightness;
 
   /// The foreground color for widgets (knobs, text, etc)
   final Color accentColor;
 
-  /// The brightness of the accentColor. Used to determine the colour of text
+  /// The brightness of the accentColor. Used to determine the color of text
   /// and icons placed on top of the accent color (e.g. the icons on a floating
   /// action button).
-  final ThemeBrightness accentColorBrightness;
+  final Brightness accentColorBrightness;
 
-  /// The color of the selected tab indicator in a tab strip.
+  /// The color of [Material] when it is of infinite extent, e.g. the
+  /// body of a [Scaffold].
+  final Color canvasColor;
+
+  /// The color of [Material] when it is used as a [Card].
+  final Color cardColor;
+
+  /// The color of [Divider]s and [PopupMenuDivider]s, also used
+  /// between [ListItem]s, between rows in [DataTable]s, and so forth.
+  final Color dividerColor;
+
+  /// The highlight color used during ink splash animations or to
+  /// indicate an item in a menu is selected.
+  final Color highlightColor;
+
+  /// The color of ink splashes. See [InkWell].
+  final Color splashColor;
+
+  /// The color used to highlight selected rows.
+  final Color selectedRowColor;
+
+  /// The color used for widgets in their inactive (but enabled)
+  /// state. For example, an unchecked checkbox. Usually contrasted
+  /// with the [accentColor]. See also [disabledColor].
+  final Color unselectedWidgetColor;
+
+  /// The color used for widgets that are inoperative, regardless of
+  /// their state. For example, a disabled checkbox (which may be
+  /// checked or unchecked).
+  final Color disabledColor;
+
+  /// The default color of the [Material] used in [RaisedButton]s.
+  final Color buttonColor;
+
+  /// The color of the header of a [PaginatedDataTable] when there are selected rows.
+  // According to the spec for data tables:
+  // https://material.google.com/components/data-tables.html#data-tables-tables-within-cards
+  // ...this should be the "50-value of secondary app color".
+  final Color secondaryHeaderColor;
+
+  /// The color of text selections in text fields, such as [Input].
+  final Color textSelectionColor;
+
+  /// The color of the handles used to adjust what part of the text is currently selected.
+  final Color textSelectionHandleColor;
+
+  /// A color that contrasts with the [primaryColor], e.g. used as the
+  /// remaining part of a progress bar.
+  final Color backgroundColor;
+
+  /// The color of the selected tab indicator in a tab bar.
   final Color indicatorColor;
 
-  // Some users want the pre-multiplied color, others just want the opacity.
+  /// The color to use for hint text or placeholder text, e.g. in
+  /// [Input] fields.
   final Color hintColor;
-  final double hintOpacity;
 
-  /// The color to use for input validation errors.
+  /// The color to use for input validation errors, e.g. in [Input] fields.
   final Color errorColor;
 
   /// Text with a color that contrasts with the card and canvas colors.
-  final TextTheme text;
+  final TextTheme textTheme;
 
   /// A text theme that contrasts with the primary color.
   final TextTheme primaryTextTheme;
 
+  /// An icon theme that contrasts with the card and canvas colors.
+  final IconThemeData iconTheme;
+
+  /// An icon theme that contrasts with the primary color.
   final IconThemeData primaryIconTheme;
 
+  /// The platform the material widgets should adapt to target.
+  ///
+  /// Defaults to the current platform.
+  final TargetPlatform platform;
+
+  /// Creates a copy of this theme but with the given fields replaced with the new values.
+  ThemeData copyWith({
+    Brightness brightness,
+    Map<int, Color> primarySwatch,
+    Color primaryColor,
+    Brightness primaryColorBrightness,
+    Color accentColor,
+    Brightness accentColorBrightness,
+    Color canvasColor,
+    Color cardColor,
+    Color dividerColor,
+    Color highlightColor,
+    Color splashColor,
+    Color selectedRowColor,
+    Color unselectedWidgetColor,
+    Color disabledColor,
+    Color buttonColor,
+    Color secondaryHeaderColor,
+    Color textSelectionColor,
+    Color textSelectionHandleColor,
+    Color backgroundColor,
+    Color indicatorColor,
+    Color hintColor,
+    Color errorColor,
+    TextTheme textTheme,
+    TextTheme primaryTextTheme,
+    IconThemeData iconTheme,
+    IconThemeData primaryIconTheme,
+    TargetPlatform platform,
+  }) {
+    return new ThemeData(
+      brightness: brightness ?? this.brightness,
+      primaryColor: primaryColor ?? this.primaryColor,
+      primaryColorBrightness: primaryColorBrightness ?? this.primaryColorBrightness,
+      accentColor: accentColor ?? this.accentColor,
+      accentColorBrightness: accentColorBrightness ?? this.accentColorBrightness,
+      canvasColor: canvasColor ?? this.canvasColor,
+      cardColor: cardColor ?? this.cardColor,
+      dividerColor: dividerColor ?? this.dividerColor,
+      highlightColor: highlightColor ?? this.highlightColor,
+      splashColor: splashColor ?? this.splashColor,
+      selectedRowColor: selectedRowColor ?? this.selectedRowColor,
+      unselectedWidgetColor: unselectedWidgetColor ?? this.unselectedWidgetColor,
+      disabledColor: disabledColor ?? this.disabledColor,
+      buttonColor: buttonColor ?? this.buttonColor,
+      secondaryHeaderColor: secondaryHeaderColor ?? this.secondaryHeaderColor,
+      textSelectionColor: textSelectionColor ?? this.textSelectionColor,
+      textSelectionHandleColor: textSelectionHandleColor ?? this.textSelectionHandleColor,
+      backgroundColor: backgroundColor ?? this.backgroundColor,
+      indicatorColor: indicatorColor ?? this.indicatorColor,
+      hintColor: hintColor ?? this.hintColor,
+      errorColor: errorColor ?? this.errorColor,
+      textTheme: textTheme ?? this.textTheme,
+      primaryTextTheme: primaryTextTheme ?? this.primaryTextTheme,
+      iconTheme: iconTheme ?? this.iconTheme,
+      primaryIconTheme: primaryIconTheme ?? this.primaryIconTheme,
+      platform: platform ?? this.platform,
+    );
+  }
+
+  /// Linearly interpolate between two themes.
   static ThemeData lerp(ThemeData begin, ThemeData end, double t) {
-    Map<int, Color> primarySwatch;
-    if (begin.primarySwatch != null && end.primarySwatch != null) {
-      primarySwatch = <int, Color>{};
-      for (int index in begin.primarySwatch.keys) {
-        if (!end.primarySwatch.containsKey(index))
-          continue;
-        primarySwatch[index] = Color.lerp(begin.primarySwatch[index], end.primarySwatch[index], t);
-      }
-    }
     return new ThemeData.raw(
       brightness: t < 0.5 ? begin.brightness : end.brightness,
-      primarySwatch: primarySwatch,
       primaryColor: Color.lerp(begin.primaryColor, end.primaryColor, t),
       primaryColorBrightness: t < 0.5 ? begin.primaryColorBrightness : end.primaryColorBrightness,
       canvasColor: Color.lerp(begin.canvasColor, end.canvasColor, t),
@@ -218,26 +407,33 @@ class ThemeData {
       dividerColor: Color.lerp(begin.dividerColor, end.dividerColor, t),
       highlightColor: Color.lerp(begin.highlightColor, end.highlightColor, t),
       splashColor: Color.lerp(begin.splashColor, end.splashColor, t),
-      unselectedColor: Color.lerp(begin.unselectedColor, end.unselectedColor, t),
+      selectedRowColor: Color.lerp(begin.selectedRowColor, end.selectedRowColor, t),
+      unselectedWidgetColor: Color.lerp(begin.unselectedWidgetColor, end.unselectedWidgetColor, t),
       disabledColor: Color.lerp(begin.disabledColor, end.disabledColor, t),
+      buttonColor: Color.lerp(begin.buttonColor, end.buttonColor, t),
+      secondaryHeaderColor: Color.lerp(begin.secondaryHeaderColor, end.secondaryHeaderColor, t),
+      textSelectionColor: Color.lerp(begin.textSelectionColor, end.textSelectionColor, t),
+      textSelectionHandleColor: Color.lerp(begin.textSelectionHandleColor, end.textSelectionHandleColor, t),
+      backgroundColor: Color.lerp(begin.backgroundColor, end.backgroundColor, t),
       accentColor: Color.lerp(begin.accentColor, end.accentColor, t),
       accentColorBrightness: t < 0.5 ? begin.accentColorBrightness : end.accentColorBrightness,
       indicatorColor: Color.lerp(begin.indicatorColor, end.indicatorColor, t),
       hintColor: Color.lerp(begin.hintColor, end.hintColor, t),
-      hintOpacity: lerpDouble(begin.hintOpacity, end.hintOpacity, t),
       errorColor: Color.lerp(begin.errorColor, end.errorColor, t),
-      text: TextTheme.lerp(begin.text, end.text, t),
+      textTheme: TextTheme.lerp(begin.textTheme, end.textTheme, t),
       primaryTextTheme: TextTheme.lerp(begin.primaryTextTheme, end.primaryTextTheme, t),
-      primaryIconTheme: IconThemeData.lerp(begin.primaryIconTheme, end.primaryIconTheme, t)
+      iconTheme: IconThemeData.lerp(begin.iconTheme, end.iconTheme, t),
+      primaryIconTheme: IconThemeData.lerp(begin.primaryIconTheme, end.primaryIconTheme, t),
+      platform: t < 0.5 ? begin.platform : end.platform
     );
   }
 
-  bool operator==(Object other) {
+  @override
+  bool operator ==(Object other) {
     if (other.runtimeType != runtimeType)
       return false;
     ThemeData otherData = other;
     return (otherData.brightness == brightness) &&
-           (otherData.primarySwatch == primarySwatch) &&
            (otherData.primaryColor == primaryColor) &&
            (otherData.primaryColorBrightness == primaryColorBrightness) &&
            (otherData.canvasColor == canvasColor) &&
@@ -245,23 +441,30 @@ class ThemeData {
            (otherData.dividerColor == dividerColor) &&
            (otherData.highlightColor == highlightColor) &&
            (otherData.splashColor == splashColor) &&
-           (otherData.unselectedColor == unselectedColor) &&
+           (otherData.selectedRowColor == selectedRowColor) &&
+           (otherData.unselectedWidgetColor == unselectedWidgetColor) &&
            (otherData.disabledColor == disabledColor) &&
+           (otherData.buttonColor == buttonColor) &&
+           (otherData.secondaryHeaderColor == secondaryHeaderColor) &&
+           (otherData.textSelectionColor == textSelectionColor) &&
+           (otherData.textSelectionHandleColor == textSelectionHandleColor) &&
+           (otherData.backgroundColor == backgroundColor) &&
            (otherData.accentColor == accentColor) &&
            (otherData.accentColorBrightness == accentColorBrightness) &&
            (otherData.indicatorColor == indicatorColor) &&
            (otherData.hintColor == hintColor) &&
-           (otherData.hintOpacity == hintOpacity) &&
            (otherData.errorColor == errorColor) &&
-           (otherData.text == text) &&
+           (otherData.textTheme == textTheme) &&
            (otherData.primaryTextTheme == primaryTextTheme) &&
-           (otherData.primaryIconTheme == primaryIconTheme);
+           (otherData.iconTheme == iconTheme) &&
+           (otherData.primaryIconTheme == primaryIconTheme) &&
+           (otherData.platform == platform);
   }
+
+  @override
   int get hashCode {
     return hashValues(
       brightness,
-      hashList(primarySwatch.keys),
-      hashList(primarySwatch.values),
       primaryColor,
       primaryColorBrightness,
       canvasColor,
@@ -269,21 +472,29 @@ class ThemeData {
       dividerColor,
       highlightColor,
       splashColor,
-      unselectedColor,
+      selectedRowColor,
+      unselectedWidgetColor,
       disabledColor,
+      buttonColor,
+      secondaryHeaderColor,
+      textSelectionColor,
+      textSelectionHandleColor,
+      backgroundColor,
       accentColor,
       accentColorBrightness,
+      indicatorColor,
       hashValues( // Too many values.
-        indicatorColor,
         hintColor,
-        hintOpacity,
         errorColor,
-        text,
+        textTheme,
         primaryTextTheme,
-        primaryIconTheme
+        iconTheme,
+        primaryIconTheme,
+        platform,
       )
     );
   }
 
-  String toString() => '$primaryColor $brightness etc...';
+  @override
+  String toString() => '$runtimeType($brightness $primaryColor etc...)';
 }

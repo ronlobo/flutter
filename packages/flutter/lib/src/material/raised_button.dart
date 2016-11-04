@@ -3,76 +3,137 @@
 // found in the LICENSE file.
 
 import 'package:flutter/widgets.dart';
+import 'package:meta/meta.dart';
 
+import 'button.dart';
 import 'colors.dart';
-import 'material_button.dart';
 import 'theme.dart';
 
-class RaisedButton extends MaterialButton {
+/// A material design "raised button".
+///
+/// A raised button consists of a rectangular piece of material that hovers over
+/// the interface.
+///
+/// Use raised buttons to add dimension to otherwise mostly flat layouts, e.g.
+/// in long busy lists of content, or in wide spaces. Avoid using raised buttons
+/// on already-raised content such as dialogs or cards.
+///
+/// If the [onPressed] callback is not specified or null, then the button will
+/// be disabled and by default will appear like a flat button in the
+/// [disabledColor]. If you are trying to change the button's [color] and it is
+/// not having any effect, check that you are passing a non-null [onPressed]
+/// handler.
+///
+/// Requires one of its ancestors to be a [Material] widget.
+///
+/// See also:
+///
+///  * [FlatButton]
+///  * [DropdownButton]
+///  * [FloatingActionButton]
+///  * <https://material.google.com/components/buttons.html>
+class RaisedButton extends StatelessWidget {
+  /// Creates a raised button.
+  ///
+  /// The [child] argument is required and is typically a [Text] widget in all
+  /// caps.
   RaisedButton({
     Key key,
-    Widget child,
+    @required this.onPressed,
     this.color,
-    this.colorBrightness,
     this.disabledColor,
     this.elevation: 2,
     this.highlightElevation: 8,
     this.disabledElevation: 0,
-    VoidCallback onPressed
-  }) : super(key: key,
-             child: child,
-             onPressed: onPressed);
+    this.colorBrightness,
+    this.child
+  }) : super(key: key);
 
+  /// The callback that is called when the button is tapped or otherwise activated.
+  ///
+  /// If this is set to null, the button will be disabled.
+  final VoidCallback onPressed;
+
+  /// The color of the button, as printed on the [Material]. Defaults to null,
+  /// meaning that the color is automatically derived from the [Theme].
+  ///
+  /// ```dart
+  ///  new RaisedButton(
+  ///    color: Colors.blue[500],
+  ///    onPressed: _handleTap,
+  ///    child: new Text('DEMO'),
+  ///  ),
+  /// ```
   final Color color;
+
+  /// The color of the button when the button is disabled. Buttons are disabled
+  /// by default. To enable a button, set its [onPressed] property to a non-null
+  /// value.
   final Color disabledColor;
 
-  /// Controls the default text color if the text color isn't explicit set.
-  final ThemeBrightness colorBrightness;
-
+  /// The z-coordinate at which to place this button.
+  ///
+  /// The following elevations have defined shadows: 1, 2, 3, 4, 6, 8, 9, 12, 16, 24
+  ///
+  /// Defaults to 2, the appropriate elevation for raised buttons.
   final int elevation;
+
+  /// The z-coordinate at which to place this button when highlighted.
+  ///
+  /// The following elevations have defined shadows: 1, 2, 3, 4, 6, 8, 9, 12, 16, 24
+  ///
+  /// Defaults to 8, the appropriate elevation for raised buttons while they are
+  /// being touched.
   final int highlightElevation;
+
+  /// The z-coordinate at which to place this button when disabled.
+  ///
+  /// The following elevations have defined shadows: 1, 2, 3, 4, 6, 8, 9, 12, 16, 24
+  ///
+  /// Defaults to 0, the appropriate elevation for disabled raised buttons.
   final int disabledElevation;
 
-  _RaisedButtonState createState() => new _RaisedButtonState();
-}
+  /// The theme brightness to use for this button.
+  ///
+  /// Defaults to the brightness from [ThemeData.brightness].
+  final Brightness colorBrightness;
 
-class _RaisedButtonState extends MaterialButtonState<RaisedButton> {
+  /// The widget below this widget in the tree.
+  ///
+  /// Typically a [Text] widget in all caps.
+  final Widget child;
 
-  int get elevation {
-    if (config.enabled) {
-      if (highlight)
-        return config.highlightElevation;
-      return config.elevation;
+  /// Whether the button is enabled or disabled. Buttons are disabled by default. To
+  /// enable a button, set its [onPressed] property to a non-null value.
+  bool get enabled => onPressed != null;
+
+  Color _getColor(BuildContext context) {
+    if (enabled) {
+      return color ?? Theme.of(context).buttonColor;
     } else {
-      return config.disabledElevation;
-    }
-  }
-
-  Color getColor(BuildContext context) {
-    if (config.enabled) {
-      if (config.color != null)
-        return config.color;
-      switch (Theme.of(context).brightness) {
-        case ThemeBrightness.light:
-          return Colors.grey[300];
-        case ThemeBrightness.dark:
-          Map<int, Color> swatch = Theme.of(context).primarySwatch ?? Colors.blue;
-          return swatch[600];
-      }
-    } else {
-      if (config.disabledColor != null)
-        return config.disabledColor;
-      switch (Theme.of(context).brightness) {
-        case ThemeBrightness.light:
+      if (disabledColor != null)
+        return disabledColor;
+      Brightness brightness = Theme.of(context).brightness;
+      switch (brightness) {
+        case Brightness.light:
           return Colors.black12;
-        case ThemeBrightness.dark:
+        case Brightness.dark:
           return Colors.white12;
       }
+      assert(brightness != null);
+      return null;
     }
   }
 
-  ThemeBrightness getColorBrightness(BuildContext context) {
-    return config.colorBrightness ?? Theme.of(context).brightness;
+  @override
+  Widget build(BuildContext context) {
+    return new MaterialButton(
+      onPressed: onPressed,
+      color: _getColor(context),
+      elevation: enabled ? elevation : disabledElevation,
+      highlightElevation: enabled ? highlightElevation : disabledElevation,
+      colorBrightness: colorBrightness,
+      child: child
+    );
   }
-
 }

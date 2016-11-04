@@ -4,6 +4,8 @@
 
 /// The Flutter Scheduler library.
 ///
+/// To use, import `package:flutter/scheduler.dart`.
+///
 /// This library is responsible for scheduler frame callbacks, and tasks at
 /// given priorities.
 ///
@@ -11,4 +13,7 @@
 /// For example, an idle-task is only executed when no animation is running.
 library scheduler;
 
-export 'src/scheduler/scheduler.dart';
+export 'src/scheduler/binding.dart';
+export 'src/scheduler/debug.dart';
+export 'src/scheduler/priority.dart';
+export 'src/scheduler/ticker.dart';

@@ -3,6 +3,8 @@
 // found in the LICENSE file.
 
 /// The Flutter gesture recognizers.
+/// 
+/// To use, import `package:flutter/gestures.dart`.
 library gestures;
 
 export 'src/gestures/arena.dart';
@@ -14,6 +16,7 @@ export 'src/gestures/events.dart';
 export 'src/gestures/hit_test.dart';
 export 'src/gestures/long_press.dart';
 export 'src/gestures/lsq_solver.dart';
+export 'src/gestures/multidrag.dart';
 export 'src/gestures/multitap.dart';
 export 'src/gestures/pointer_router.dart';
 export 'src/gestures/recognizer.dart';

@@ -4,6 +4,7 @@
 
 import 'box.dart';
 import 'object.dart';
+import 'layer.dart';
 
 /// The options that control whether the performance overlay displays certain
 /// aspects of the compositor.
@@ -41,68 +42,105 @@ enum PerformanceOverlayOption {
   visualizeEngineStatistics,
 }
 
+/// Displays performance statistics.
+///
+/// The overlay show two time series. The first shows how much time was required
+/// on this thread to produce each frame. The second shows how much time was
+/// required on the GPU thread to produce each frame. Ideally, both these values
+/// would be less than the total frame budget for the hardware on which the app
+/// is running. For example, if the hardware has a screen that updates at 60 Hz,
+/// each thread should ideally spend less than 16ms producing each frame. This
+/// ideal condition is indicated by a green vertical line for each thread.
+/// Otherwise, the performance overlay shows a red vertical line.
+///
+/// The simplest way to show the performance overlay is to set
+/// [MaterialApp.showPerformanceOverlay] or [WidgetsApp.showPerformanceOverlay]
+/// to `true`.
 class RenderPerformanceOverlay extends RenderBox {
-  RenderPerformanceOverlay({ int optionsMask: 0, int rasterizerThreshold: 0 })
-    : _optionsMask = optionsMask,
+  /// Creates a performance overlay render object.
+  ///
+  /// The [optionsMask] and [rasterizerThreshold] arguments must not be null.
+  RenderPerformanceOverlay({
+    int optionsMask: 0,
+    int rasterizerThreshold: 0
+  }) : _optionsMask = optionsMask,
       _rasterizerThreshold = rasterizerThreshold;
 
   /// The mask is created by shifting 1 by the index of the specific
-  /// PerformanceOverlayOption to enable.
+  /// [PerformanceOverlayOption] to enable.
   int get optionsMask => _optionsMask;
   int _optionsMask;
-  void set optionsMask(int mask) {
+  set optionsMask(int mask) {
+    assert(mask != null);
     if (mask == _optionsMask)
       return;
     _optionsMask = mask;
     markNeedsPaint();
   }
 
+  /// The rasterizer threshold is an integer specifying the number of frame
+  /// intervals that the rasterizer must miss before it decides that the frame
+  /// is suitable for capturing an SkPicture trace for further analysis.
   int get rasterizerThreshold => _rasterizerThreshold;
   int _rasterizerThreshold;
-  void set rasterizerThreshold (int threshold) {
+  set rasterizerThreshold (int threshold) {
+    assert(threshold != null);
     if (threshold == _rasterizerThreshold)
       return;
     _rasterizerThreshold = threshold;
     markNeedsPaint();
   }
 
+  @override
   bool get sizedByParent => true;
+
+  @override
   bool get alwaysNeedsCompositing => true;
 
-  double getMinIntrinsicWidth(BoxConstraints constraints) {
-    return constraints.constrainWidth(0.0);
+  @override
+  double computeMinIntrinsicWidth(double height) {
+    return 0.0;
   }
 
-  double getMaxIntrinsicWidth(BoxConstraints constraints) {
-    return constraints.constrainWidth(0.0);
+  @override
+  double computeMaxIntrinsicWidth(double height) {
+    return 0.0;
   }
 
-  double get intrinsicHeight {
-    const double kGraphHeight = 80.0; // must match value in performance_overlay_layer.cc
+  double get _intrinsicHeight {
+    const double kDefaultGraphHeight = 80.0;
     double result = 0.0;
     if ((optionsMask | (1 << PerformanceOverlayOption.displayRasterizerStatistics.index) > 0) ||
         (optionsMask | (1 << PerformanceOverlayOption.visualizeRasterizerStatistics.index) > 0))
-      result += kGraphHeight;
+      result += kDefaultGraphHeight;
     if ((optionsMask | (1 << PerformanceOverlayOption.displayEngineStatistics.index) > 0) ||
         (optionsMask | (1 << PerformanceOverlayOption.visualizeEngineStatistics.index) > 0))
-      result += kGraphHeight;
+      result += kDefaultGraphHeight;
     return result;
   }
 
-  double getMinIntrinsicHeight(BoxConstraints constraints) {
-    return constraints.constrainHeight(intrinsicHeight);
+  @override
+  double computeMinIntrinsicHeight(double width) {
+    return _intrinsicHeight;
   }
 
-  double getMaxIntrinsicHeight(BoxConstraints constraints) {
-    return constraints.constrainHeight(intrinsicHeight);
+  @override
+  double computeMaxIntrinsicHeight(double width) {
+    return _intrinsicHeight;
   }
 
+  @override
   void performResize() {
-    size = constraints.constrain(new Size(double.INFINITY, intrinsicHeight));
+    size = constraints.constrain(new Size(double.INFINITY, _intrinsicHeight));
   }
 
+  @override
   void paint(PaintingContext context, Offset offset) {
     assert(needsCompositing);
-    context.pushPerformanceOverlay(offset, optionsMask, rasterizerThreshold, size);
+    context.addLayer(new PerformanceOverlayLayer(
+      overlayRect: new Rect.fromLTWH(offset.dx, offset.dy, size.width, size.height),
+      optionsMask: optionsMask,
+      rasterizerThreshold: rasterizerThreshold
+    ));
   }
 }

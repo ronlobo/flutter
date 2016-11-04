@@ -5,14 +5,71 @@
 import 'package:flutter/widgets.dart';
 
 import 'material.dart';
+import 'scaffold.dart';
 
+/// Asserts that the given context has a [Material] ancestor.
+///
+/// Used by many material design widgets to make sure that they are
+/// only used in contexts where they can print ink onto some material.
+///
+/// To call this function, use the following pattern, typically in the
+/// relevant Widget's [build] method:
+///
+/// ```dart
+/// assert(debugCheckHasMaterial(context));
+/// ```
+///
+/// Does nothing if asserts are disabled. Always returns true.
 bool debugCheckHasMaterial(BuildContext context) {
   assert(() {
     if (context.widget is! Material && context.ancestorWidgetOfExactType(Material) == null) {
       Element element = context;
-      throw new WidgetError(
-        'Missing Material widget.',
-        '${context.widget} needs to be placed inside a Material widget. Ownership chain:\n${element.debugGetOwnershipChain(10)}'
+      throw new FlutterError(
+        'No Material widget found.\n'
+        '${context.widget.runtimeType} widgets require a Material widget ancestor.\n'
+        'In material design, most widgets are conceptually "printed" on a sheet of material. In Flutter\'s material library, '
+        'that material is represented by the Material widget. It is the Material widget that renders ink splashes, for instance. '
+        'Because of this, many material library widgets require that there be a Material widget in the tree above them.\n'
+        'To introduce a Material widget, you can either directly include one, or use a widget that contains Material itself, '
+        'such as a Card, Dialog, Drawer, or Scaffold.\n'
+        'The specific widget that could not find a Material ancestor was:\n'
+        '  ${context.widget}\n'
+        'The ownership chain for the affected widget is:\n'
+        '  ${element.debugGetCreatorChain(10)}'
+      );
+    }
+    return true;
+  });
+  return true;
+}
+
+/// Asserts that the given context has a [Scaffold] ancestor.
+///
+/// Used by some material design widgets to make sure that they are
+/// only used in contexts where they can communicate with a Scaffold.
+///
+/// For example, the [AppBar] in some situations requires a Scaffold
+/// to do the right thing with scrolling.
+///
+/// To call this function, use the following pattern, typically in the
+/// relevant Widget's [build] method:
+///
+/// ```dart
+/// assert(debugCheckHasScaffold(context));
+/// ```
+///
+/// Does nothing if asserts are disabled. Always returns true.
+bool debugCheckHasScaffold(BuildContext context) {
+  assert(() {
+    if (Scaffold.of(context) == null) {
+      Element element = context;
+      throw new FlutterError(
+        'No Scaffold widget found.\n'
+        '${context.widget.runtimeType} widgets require a Scaffold widget ancestor.\n'
+        'The specific widget that could not find a Scaffold ancestor was:\n'
+        '  ${context.widget}\n'
+        'The ownership chain for the affected widget is:\n'
+        '  ${element.debugGetCreatorChain(10)}'
       );
     }
     return true;

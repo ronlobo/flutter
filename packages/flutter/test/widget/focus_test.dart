@@ -4,9 +4,8 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/widgets.dart';
-import 'package:test/test.dart';
 
-class TestFocusable extends StatelessComponent {
+class TestFocusable extends StatelessWidget {
   TestFocusable({
     GlobalKey key,
     this.no,
@@ -18,6 +17,7 @@ class TestFocusable extends StatelessComponent {
   final String yes;
   final bool autofocus;
 
+  @override
   Widget build(BuildContext context) {
     bool focused = Focus.at(context, autofocus: autofocus);
     return new GestureDetector(
@@ -28,176 +28,170 @@ class TestFocusable extends StatelessComponent {
 }
 
 void main() {
-  test('Can have multiple focused children and they update accordingly', () {
-    testWidgets((WidgetTester tester) {
-      GlobalKey keyFocus = new GlobalKey();
-      GlobalKey keyA = new GlobalKey();
-      GlobalKey keyB = new GlobalKey();
-      tester.pumpWidget(
-        new Focus(
-          key: keyFocus,
-          child: new Column(
-            children: <Widget>[
-              new TestFocusable(
-                key: keyA,
-                no: 'a',
-                yes: 'A FOCUSED'
-              ),
-              new TestFocusable(
-                key: keyB,
-                no: 'b',
-                yes: 'B FOCUSED'
-              ),
-            ]
-          )
+  testWidgets('Can have multiple focused children and they update accordingly', (WidgetTester tester) async {
+    GlobalKey keyFocus = new GlobalKey();
+    GlobalKey keyA = new GlobalKey();
+    GlobalKey keyB = new GlobalKey();
+    await tester.pumpWidget(
+      new Focus(
+        key: keyFocus,
+        child: new Column(
+          children: <Widget>[
+            new TestFocusable(
+              key: keyA,
+              no: 'a',
+              yes: 'A FOCUSED'
+            ),
+            new TestFocusable(
+              key: keyB,
+              no: 'b',
+              yes: 'B FOCUSED'
+            ),
+          ]
         )
-      );
-      expect(tester.findText('a'),         isNull);
-      expect(tester.findText('A FOCUSED'), isNotNull);
-      expect(tester.findText('b'),         isNotNull);
-      expect(tester.findText('B FOCUSED'), isNull);
-      tester.tap(tester.findText('A FOCUSED'));
-      tester.pump();
-      expect(tester.findText('a'),         isNull);
-      expect(tester.findText('A FOCUSED'), isNotNull);
-      expect(tester.findText('b'),         isNotNull);
-      expect(tester.findText('B FOCUSED'), isNull);
-      tester.tap(tester.findText('A FOCUSED'));
-      tester.pump();
-      expect(tester.findText('a'),         isNull);
-      expect(tester.findText('A FOCUSED'), isNotNull);
-      expect(tester.findText('b'),         isNotNull);
-      expect(tester.findText('B FOCUSED'), isNull);
-      tester.tap(tester.findText('b'));
-      tester.pump();
-      expect(tester.findText('a'),         isNotNull);
-      expect(tester.findText('A FOCUSED'), isNull);
-      expect(tester.findText('b'),         isNull);
-      expect(tester.findText('B FOCUSED'), isNotNull);
-      tester.tap(tester.findText('a'));
-      tester.pump();
-      expect(tester.findText('a'),         isNull);
-      expect(tester.findText('A FOCUSED'), isNotNull);
-      expect(tester.findText('b'),         isNotNull);
-      expect(tester.findText('B FOCUSED'), isNull);
-    });
+      )
+    );
+    expect(find.text('a'), findsNothing);
+    expect(find.text('A FOCUSED'), findsOneWidget);
+    expect(find.text('b'), findsOneWidget);
+    expect(find.text('B FOCUSED'), findsNothing);
+    await tester.tap(find.text('A FOCUSED'));
+    await tester.pump();
+    expect(find.text('a'), findsNothing);
+    expect(find.text('A FOCUSED'), findsOneWidget);
+    expect(find.text('b'), findsOneWidget);
+    expect(find.text('B FOCUSED'), findsNothing);
+    await tester.tap(find.text('A FOCUSED'));
+    await tester.pump();
+    expect(find.text('a'), findsNothing);
+    expect(find.text('A FOCUSED'), findsOneWidget);
+    expect(find.text('b'), findsOneWidget);
+    expect(find.text('B FOCUSED'), findsNothing);
+    await tester.tap(find.text('b'));
+    await tester.pump();
+    expect(find.text('a'), findsOneWidget);
+    expect(find.text('A FOCUSED'), findsNothing);
+    expect(find.text('b'), findsNothing);
+    expect(find.text('B FOCUSED'), findsOneWidget);
+    await tester.tap(find.text('a'));
+    await tester.pump();
+    expect(find.text('a'), findsNothing);
+    expect(find.text('A FOCUSED'), findsOneWidget);
+    expect(find.text('b'), findsOneWidget);
+    expect(find.text('B FOCUSED'), findsNothing);
   });
 
-  test('Can blur', () {
-    testWidgets((WidgetTester tester) {
-      GlobalKey keyFocus = new GlobalKey();
-      GlobalKey keyA = new GlobalKey();
-      tester.pumpWidget(
-        new Focus(
-          key: keyFocus,
-          child: new TestFocusable(
-            key: keyA,
-            no: 'a',
-            yes: 'A FOCUSED',
-            autofocus: false
-          )
+  testWidgets('Can blur', (WidgetTester tester) async {
+    GlobalKey keyFocus = new GlobalKey();
+    GlobalKey keyA = new GlobalKey();
+    await tester.pumpWidget(
+      new Focus(
+        key: keyFocus,
+        child: new TestFocusable(
+          key: keyA,
+          no: 'a',
+          yes: 'A FOCUSED',
+          autofocus: false
         )
-      );
+      )
+    );
 
-      expect(tester.findText('a'),         isNotNull);
-      expect(tester.findText('A FOCUSED'), isNull);
+    expect(find.text('a'), findsOneWidget);
+    expect(find.text('A FOCUSED'), findsNothing);
 
-      Focus.moveTo(keyA);
-      tester.pump();
+    Focus.moveTo(keyA);
+    await tester.pump();
 
-      expect(tester.findText('a'),         isNull);
-      expect(tester.findText('A FOCUSED'), isNotNull);
+    expect(find.text('a'), findsNothing);
+    expect(find.text('A FOCUSED'), findsOneWidget);
 
-      Focus.clear(keyA.currentContext);
-      tester.pump();
+    Focus.clear(keyA.currentContext);
+    await tester.pump();
 
-      expect(tester.findText('a'),         isNotNull);
-      expect(tester.findText('A FOCUSED'), isNull);
-    });
+    expect(find.text('a'), findsOneWidget);
+    expect(find.text('A FOCUSED'), findsNothing);
   });
 
-  test('Can move focus to scope', () {
-    testWidgets((WidgetTester tester) {
-      GlobalKey keyParentFocus = new GlobalKey();
-      GlobalKey keyChildFocus = new GlobalKey();
-      GlobalKey keyA = new GlobalKey();
-      tester.pumpWidget(
-        new Focus(
-          key: keyParentFocus,
-          child: new Row(
-            children: [
-              new TestFocusable(
-                key: keyA,
-                no: 'a',
-                yes: 'A FOCUSED',
-                autofocus: false
-              )
-            ]
-          )
+  testWidgets('Can move focus to scope', (WidgetTester tester) async {
+    GlobalKey keyParentFocus = new GlobalKey();
+    GlobalKey keyChildFocus = new GlobalKey();
+    GlobalKey keyA = new GlobalKey();
+    await tester.pumpWidget(
+      new Focus(
+        key: keyParentFocus,
+        child: new Row(
+          children: <Widget>[
+            new TestFocusable(
+              key: keyA,
+              no: 'a',
+              yes: 'A FOCUSED',
+              autofocus: false
+            )
+          ]
         )
-      );
+      )
+    );
 
-      expect(tester.findText('a'),         isNotNull);
-      expect(tester.findText('A FOCUSED'), isNull);
+    expect(find.text('a'), findsOneWidget);
+    expect(find.text('A FOCUSED'), findsNothing);
 
-      Focus.moveTo(keyA);
-      tester.pump();
+    Focus.moveTo(keyA);
+    await tester.pump();
 
-      expect(tester.findText('a'),         isNull);
-      expect(tester.findText('A FOCUSED'), isNotNull);
+    expect(find.text('a'), findsNothing);
+    expect(find.text('A FOCUSED'), findsOneWidget);
 
-      Focus.moveScopeTo(keyChildFocus, context: keyA.currentContext);
+    Focus.moveScopeTo(keyChildFocus, context: keyA.currentContext);
 
-      tester.pumpWidget(
-        new Focus(
-          key: keyParentFocus,
-          child: new Row(
-            children: [
-              new TestFocusable(
-                key: keyA,
-                no: 'a',
-                yes: 'A FOCUSED',
-                autofocus: false
-              ),
-              new Focus(
-                key: keyChildFocus,
-                child: new Container(
-                  width: 50.0,
-                  height: 50.0
-                )
+    await tester.pumpWidget(
+      new Focus(
+        key: keyParentFocus,
+        child: new Row(
+          children: <Widget>[
+            new TestFocusable(
+              key: keyA,
+              no: 'a',
+              yes: 'A FOCUSED',
+              autofocus: false
+            ),
+            new Focus(
+              key: keyChildFocus,
+              child: new Container(
+                width: 50.0,
+                height: 50.0
               )
-            ]
-          )
+            )
+          ]
         )
-      );
+      )
+    );
 
-      expect(tester.findText('a'),         isNotNull);
-      expect(tester.findText('A FOCUSED'), isNull);
+    expect(find.text('a'), findsOneWidget);
+    expect(find.text('A FOCUSED'), findsNothing);
 
-      tester.pumpWidget(
-        new Focus(
-          key: keyParentFocus,
-          child: new Row(
-            children: [
-              new TestFocusable(
-                key: keyA,
-                no: 'a',
-                yes: 'A FOCUSED',
-                autofocus: false
-              )
-            ]
-          )
+    await tester.pumpWidget(
+      new Focus(
+        key: keyParentFocus,
+        child: new Row(
+          children: <Widget>[
+            new TestFocusable(
+              key: keyA,
+              no: 'a',
+              yes: 'A FOCUSED',
+              autofocus: false
+            )
+          ]
         )
-      );
+      )
+    );
 
-      // Focus has received the removal notification but we haven't rebuilt yet.
-      expect(tester.findText('a'),         isNotNull);
-      expect(tester.findText('A FOCUSED'), isNull);
+    // Focus has received the removal notification but we haven't rebuilt yet.
+    expect(find.text('a'), findsOneWidget);
+    expect(find.text('A FOCUSED'), findsNothing);
 
-      tester.pump();
+    await tester.pump();
 
-      expect(tester.findText('a'),         isNull);
-      expect(tester.findText('A FOCUSED'), isNotNull);
-    });
+    expect(find.text('a'), findsNothing);
+    expect(find.text('A FOCUSED'), findsOneWidget);
   });
 }

@@ -5,8 +5,8 @@
 import 'dart:async';
 import 'dart:io';
 
-import '../base/context.dart';
 import '../base/process.dart';
+import '../globals.dart';
 
 // https://android.googlesource.com/platform/system/core/+/android-4.4_r1/adb/OVERVIEW.TXT
 // https://android.googlesource.com/platform/system/core/+/android-4.4_r1/adb/SERVICES.TXT
@@ -21,7 +21,7 @@ class Adb {
 
   bool exists() {
     try {
-      runCheckedSync([adbPath, 'version']);
+      runCheckedSync(<String>[adbPath, 'version']);
       return true;
     } catch (exception) {
       return false;
@@ -34,18 +34,18 @@ class Adb {
   ///     Revision eac51f2bb6a8-android
   ///
   /// This method throws if `adb version` fails.
-  String getVersion() => runCheckedSync([adbPath, 'version']);
+  String getVersion() => runCheckedSync(<String>[adbPath, 'version']);
 
   /// Starts the adb server. This will throw if there's an problem starting the
   /// adb server.
   void startServer() {
-    runCheckedSync([adbPath, 'start-server']);
+    runCheckedSync(<String>[adbPath, 'start-server']);
   }
 
   /// Stops the adb server. This will throw if there's an problem stopping the
   /// adb server.
   void killServer() {
-    runCheckedSync([adbPath, 'kill-server']);
+    runCheckedSync(<String>[adbPath, 'kill-server']);
   }
 
   /// Ask the ADB server for its internal version number.
@@ -70,46 +70,6 @@ class Adb {
     return message.split('\n').map(
       (String deviceInfo) => new AdbDevice(deviceInfo)
     ).toList();
-  }
-
-  /// Listen to device activations and deactivations via the asb server's
-  /// 'track-devices' command. Call cancel on the returned stream to stop
-  /// listening.
-  Stream<List<AdbDevice>> trackDevices() {
-    StreamController<List<AdbDevice>> controller;
-    Socket socket;
-    bool isFirstNotification = true;
-
-    controller = new StreamController(
-      onListen: () async {
-        socket = await Socket.connect(InternetAddress.LOOPBACK_IP_V4, adbServerPort);
-        printTrace('--> host:track-devices');
-        socket.add(_createAdbRequest('host:track-devices'));
-        socket.listen((List<int> data) {
-          String stringResult = new String.fromCharCodes(data);
-          printTrace('<-- ${stringResult.trim()}');
-          _AdbServerResponse response = new _AdbServerResponse(
-            stringResult,
-            noStatus: !isFirstNotification
-          );
-
-          String devicesText = response.message.trim();
-          isFirstNotification = false;
-
-          if (devicesText.isEmpty) {
-            controller.add(<AdbDevice>[]);
-          } else {
-            controller.add(devicesText.split('\n').map((String deviceInfo) {
-              return new AdbDevice(deviceInfo);
-            }).toList());
-          }
-        });
-        socket.done.then((_) => controller.close());
-      },
-      onCancel: () => socket?.destroy()
-    );
-
-    return controller.stream;
   }
 
   Future<String> _sendAdbServerCommand(String command) async {
@@ -137,7 +97,7 @@ class AdbDevice {
     // 'TA95000FQA             device usb:340787200X product:peregrine_retus model:XT1045 device:peregrine'
     // '015d172c98400a03       device usb:340787200X product:nakasi model:Nexus_7 device:grouper'
 
-    Match match = deviceRegex.firstMatch(deviceInfo);
+    Match match = kDeviceRegex.firstMatch(deviceInfo);
     id = match[1];
     status = match[2];
 
@@ -151,9 +111,12 @@ class AdbDevice {
         }
       }
     }
+
+    if (modelID != null)
+      modelID = cleanAdbDeviceName(modelID);
   }
 
-  static final RegExp deviceRegex = new RegExp(r'^(\S+)\s+(\S+)(.*)');
+  static final RegExp kDeviceRegex = new RegExp(r'^(\S+)\s+(\S+)(.*)');
 
   /// Always non-null; something like `TA95000FQA`.
   String id;
@@ -165,8 +128,16 @@ class AdbDevice {
 
   bool get isAvailable => status == 'device';
 
+  bool get isUnauthorized => status == 'unauthorized';
+
+  bool get isOffline => status == 'offline';
+
   /// Device model; can be null. `XT1045`, `Nexus_7`
   String get modelID => _info['model'];
+
+  set modelID(String value) {
+    _info['model'] = value;
+  }
 
   /// Device code name; can be null. `peregrine`, `grouper`
   String get deviceCodeName => _info['device'];
@@ -174,6 +145,7 @@ class AdbDevice {
   /// Device product; can be null. `peregrine_retus`, `nakasi`
   String get productID => _info['product'];
 
+  @override
   bool operator ==(dynamic other) {
     if (identical(this, other))
       return true;
@@ -183,8 +155,10 @@ class AdbDevice {
     return id == typedOther.id;
   }
 
+  @override
   int get hashCode => id.hashCode;
 
+  @override
   String toString() {
     if (modelID == null) {
       return '$id ($status)';
@@ -192,6 +166,20 @@ class AdbDevice {
       return '$id ($status) - $modelID';
     }
   }
+}
+
+final RegExp _whitespaceRegex = new RegExp(r'\s+');
+
+String cleanAdbDeviceName(String name) {
+  // Some emulators use `___` in the name as separators.
+  name = name.replaceAll('___', ', ');
+
+  // Convert `Nexus_7` / `Nexus_5X` style names to `Nexus 7` ones.
+  name = name.replaceAll('_', ' ');
+
+  name = name.replaceAll(_whitespaceRegex, ' ').trim();
+
+  return name;
 }
 
 List<int> _createAdbRequest(String payload) {

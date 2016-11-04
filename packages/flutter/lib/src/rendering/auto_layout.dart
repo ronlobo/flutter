@@ -1,237 +1,300 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'package:cassowary/cassowary.dart' as al; // "auto layout"
+import 'package:flutter/cassowary.dart' as al; // "auto layout"
+import 'package:meta/meta.dart';
 
 import 'box.dart';
 import 'object.dart';
 
 /// Hosts the edge parameters and vends useful methods to construct expressions
 /// for constraints. Also sets up and manages implicit constraints and edit
-/// variables. Used as a mixin by layout containers and parent data instances
-/// of render boxes taking part in auto layout.
-abstract class _AutoLayoutParamMixin {
+/// variables.
+class AutoLayoutRect {
+  /// Creates parameters for a rectangle for use with auto layout.
+  AutoLayoutRect()
+    : left = new al.Param(),
+      right = new al.Param(),
+      top = new al.Param(),
+      bottom = new al.Param();
 
-  void _setupLayoutParameters(dynamic context) {
-    _leftEdge = new al.Param.withContext(context);
-    _rightEdge = new al.Param.withContext(context);
-    _topEdge = new al.Param.withContext(context);
-    _bottomEdge = new al.Param.withContext(context);
+  /// A parameter that represents the left edge of the rectangle.
+  final al.Param left;
+
+  /// A parameter that represents the right edge of the rectangle.
+  final al.Param right;
+
+  /// A parameter that represents the top edge of the rectangle.
+  final al.Param top;
+
+  /// A parameter that represents the bottom edge of the rectangle.
+  final al.Param bottom;
+
+  /// An expression that represents the horizontal extent of the rectangle.
+  al.Expression get width => right - left;
+
+  /// An expression that represents the vertical extent of the rectangle.
+  al.Expression get height => bottom - top;
+
+  /// An expression that represents halfway between the left and right edges of the rectangle.
+  al.Expression get horizontalCenter => (left + right) / al.cm(2.0);
+
+  /// An expression that represents halfway between the top and bottom edges of the rectangle.
+  al.Expression get verticalCenter => (top + bottom) / al.cm(2.0);
+
+  /// Constraints that require that this rect contains the given rect.
+  List<al.Constraint> contains(AutoLayoutRect other) {
+    return <al.Constraint>[
+      other.left >= left,
+      other.right <= right,
+      other.top >= top,
+      other.bottom <= bottom,
+    ];
+  }
+}
+
+/// Parent data for use with [RenderAutoLayout].
+class AutoLayoutParentData extends ContainerBoxParentDataMixin<RenderBox> {
+  /// Creates parent data associated with the given render box.
+  AutoLayoutParentData(this._renderBox);
+
+  final RenderBox _renderBox;
+
+  /// Parameters that represent the size and position of the render box.
+  AutoLayoutRect get rect => _rect;
+  AutoLayoutRect _rect;
+  set rect(AutoLayoutRect value) {
+    if (_rect == value)
+      return;
+    if (_rect != null)
+      _removeImplicitConstraints();
+    _rect = value;
+    if (_rect != null)
+      _addImplicitConstraints();
   }
 
-  al.Param _leftEdge;
-  al.Param _rightEdge;
-  al.Param _topEdge;
-  al.Param _bottomEdge;
+  BoxConstraints get _constraintsFromSolver {
+    return new BoxConstraints.tightFor(
+      width: _rect.right.value - _rect.left.value,
+      height: _rect.bottom.value - _rect.top.value
+    );
+  }
+
+  Offset get _offsetFromSolver {
+    return new Offset(_rect.left.value, _rect.top.value);
+  }
 
   List<al.Constraint> _implicitConstraints;
 
-  al.Param get leftEdge => _leftEdge;
-  al.Param get rightEdge => _rightEdge;
-  al.Param get topEdge => _topEdge;
-  al.Param get bottomEdge => _bottomEdge;
-
-  al.Expression get width => _rightEdge - _leftEdge;
-  al.Expression get height => _bottomEdge - _topEdge;
-
-  al.Expression get horizontalCenter => (_leftEdge + _rightEdge) / al.cm(2.0);
-  al.Expression get verticalCenter => (_topEdge + _bottomEdge) / al.cm(2.0);
-
-  void _setupEditVariablesInSolver(al.Solver solver, double priority) {
-    solver.addEditVariables(<al.Variable>[
-        _leftEdge.variable,
-        _rightEdge.variable,
-        _topEdge.variable,
-        _bottomEdge.variable
-      ], priority);
+  void _addImplicitConstraints() {
+    assert(_renderBox != null);
+    if (_renderBox.parent == null || _rect == null)
+      return;
+    final List<al.Constraint> implicit = _constructImplicitConstraints();
+    assert(implicit != null && implicit.isNotEmpty);
+    assert(_renderBox.parent is RenderAutoLayout);
+    final RenderAutoLayout parent = _renderBox.parent;
+    final al.Result result = parent._solver.addConstraints(implicit);
+    assert(result == al.Result.success);
+    parent.markNeedsLayout();
+    _implicitConstraints = implicit;
   }
 
-  void _applyEditsAtSize(al.Solver solver, Size size) {
-    solver.suggestValueForVariable(_leftEdge.variable, 0.0);
-    solver.suggestValueForVariable(_topEdge.variable, 0.0);
-    solver.suggestValueForVariable(_bottomEdge.variable, size.height);
-    solver.suggestValueForVariable(_rightEdge.variable, size.width);
+  void _removeImplicitConstraints() {
+    assert(_renderBox != null);
+    if (_renderBox.parent == null || _implicitConstraints == null || _implicitConstraints.isEmpty)
+      return;
+    assert(_renderBox.parent is RenderAutoLayout);
+    final RenderAutoLayout parent = _renderBox.parent;
+    final al.Result result = parent._solver.removeConstraints(_implicitConstraints);
+    assert(result == al.Result.success);
+    parent.markNeedsLayout();
+    _implicitConstraints = null;
   }
-
-  /// Applies the parameter updates.
-  ///
-  /// This method is called when the solver has updated at least one of the
-  /// layout parameters of this object. The object is now responsible for
-  /// applying this update to its other properties (if necessary).
-  void _applyAutolayoutParameterUpdates();
 
   /// Returns the set of implicit constraints that need to be applied to all
   /// instances of this class when they are moved into a render object with an
   /// active solver. If no implicit constraints needs to be applied, the object
   /// may return null.
-  List<al.Constraint> _constructImplicitConstraints();
-
-  void _setupImplicitConstraints(al.Solver solver) {
-    List<al.Constraint> implicit = _constructImplicitConstraints();
-
-    if (implicit == null || implicit.length == 0) {
-      return;
-    }
-
-    al.Result result = solver.addConstraints(implicit);
-    assert(result == al.Result.success);
-
-    _implicitConstraints = implicit;
-  }
-
-  void _removeImplicitConstraints(al.Solver solver) {
-    if (_implicitConstraints == null || _implicitConstraints.length == 0) {
-      return;
-    }
-
-    al.Result result = solver.removeConstraints(_implicitConstraints);
-    assert(result == al.Result.success);
-
-    _implicitConstraints = null;
-  }
-}
-
-class AutoLayoutParentData extends ContainerBoxParentDataMixin<RenderBox> with _AutoLayoutParamMixin {
-
-  AutoLayoutParentData(this._renderBox) {
-    _setupLayoutParameters(this);
-  }
-
-  final RenderBox _renderBox;
-
-  void _applyAutolayoutParameterUpdates() {
-    // This is called by the parent's layout function
-    // to lay our box out.
-    assert(_renderBox.parentData == this);
-    assert(() {
-      final RenderAutoLayout parent = _renderBox.parent;
-      assert(parent.debugDoingThisLayout);
-    });
-    BoxConstraints size = new BoxConstraints.tightFor(
-      width: _rightEdge.value - _leftEdge.value,
-      height: _bottomEdge.value - _topEdge.value
-    );
-    _renderBox.layout(size);
-    offset = new Offset(_leftEdge.value, _topEdge.value);
-  }
-
   List<al.Constraint> _constructImplicitConstraints() {
     return <al.Constraint>[
-      _leftEdge >= al.cm(0.0), // The left edge must be positive.
-      _rightEdge >= _leftEdge, // Width must be positive.
+      _rect.left >= al.cm(0.0), // The left edge must be positive.
+      _rect.right >= _rect.left, // Width must be positive.
+      // TODO(chinmay): Check whether we need something similar for the top and
+      // bottom.
     ];
   }
-
 }
 
+/// Subclass to control the layout of a [RenderAutoLayout].
+abstract class AutoLayoutDelegate {
+  /// Abstract const constructor. This constructor enables subclasses to provide
+  /// const constructors so that they can be used in const expressions.
+  const AutoLayoutDelegate();
+
+  /// Returns the constraints to use when computing layout.
+  ///
+  /// The `parent` argument contains the parameters for the parent's position
+  /// and size. Typical implementations will return constraints that determine
+  /// the size and position of each child.
+  ///
+  /// The delegate interface does not provide a mechanism for obtaining the
+  /// parameters for children. Subclasses are expected to obtain those
+  /// parameters through some other mechanism.
+  List<al.Constraint> getConstraints(AutoLayoutRect parent);
+
+  /// Override this method to return true when new constraints need to be generated.
+  bool shouldUpdateConstraints(@checked AutoLayoutDelegate oldDelegate);
+}
+
+/// A render object that uses the cassowary constraint solver to automatically size and position children.
 class RenderAutoLayout extends RenderBox
     with ContainerRenderObjectMixin<RenderBox, AutoLayoutParentData>,
-         RenderBoxContainerDefaultsMixin<RenderBox, AutoLayoutParentData>,
-         _AutoLayoutParamMixin {
+         RenderBoxContainerDefaultsMixin<RenderBox, AutoLayoutParentData> {
+  /// Creates a render box that automatically sizes and positions its children.
+  RenderAutoLayout({
+    AutoLayoutDelegate delegate,
+    List<RenderBox> children
+  }) : _delegate = delegate, _needToUpdateConstraints = (delegate != null) {
+    _solver.addEditVariables(<al.Variable>[
+        _rect.left.variable,
+        _rect.right.variable,
+        _rect.top.variable,
+        _rect.bottom.variable
+      ], al.Priority.required - 1);
 
-  RenderAutoLayout({ List<RenderBox> children }) {
-    _setupLayoutParameters(this);
-    _setupEditVariablesInSolver(_solver, al.Priority.required - 1);
     addAll(children);
   }
 
+  /// The delegate that generates constraints for the layout.
+  ///
+  /// If the new delegate is the same as the previous one, this does nothing.
+  ///
+  /// If the new delegate is the same class as the previous one, then the new
+  /// delegate has its [AutoLayoutDelegate.shouldUpdateConstraints] called; if
+  /// the result is `true`, then the delegate will be called.
+  ///
+  /// If the new delegate is a different class than the previous one, then the
+  /// delegate will be called.
+  ///
+  /// If the delgate is null, the layout is unconstrained.
+  AutoLayoutDelegate get delegate => _delegate;
+  AutoLayoutDelegate _delegate;
+  set delegate(AutoLayoutDelegate newDelegate) {
+    if (_delegate == newDelegate)
+      return;
+    AutoLayoutDelegate oldDelegate = _delegate;
+    _delegate = newDelegate;
+    if (newDelegate == null) {
+      assert(oldDelegate != null);
+      _needToUpdateConstraints = true;
+      markNeedsLayout();
+    } else if (oldDelegate == null ||
+        newDelegate.runtimeType != oldDelegate.runtimeType ||
+        newDelegate.shouldUpdateConstraints(oldDelegate)) {
+      _needToUpdateConstraints = true;
+      markNeedsLayout();
+    }
+  }
+
+  bool _needToUpdateConstraints;
+
+  final AutoLayoutRect _rect = new AutoLayoutRect();
+
   final al.Solver _solver = new al.Solver();
-  List<al.Constraint> _explicitConstraints = new List<al.Constraint>();
+  final List<al.Constraint> _explicitConstraints = new List<al.Constraint>();
 
-  /// Adds all the given constraints to the solver. Either all constraints are
-  /// added or none.
-  al.Result addConstraints(List<al.Constraint> constraints) {
-    al.Result result = _solver.addConstraints(constraints);
-    if (result == al.Result.success) {
-      markNeedsLayout();
+  void _setExplicitConstraints(List<al.Constraint> constraints) {
+    assert(constraints != null);
+    if (constraints.isEmpty)
+      return;
+    if (_solver.addConstraints(constraints) == al.Result.success)
       _explicitConstraints.addAll(constraints);
-    }
-    return result;
   }
 
-  /// Adds the given constraint to the solver.
-  al.Result addConstraint(al.Constraint constraint) {
-    al.Result result = _solver.addConstraint(constraint);
-
-    if (result == al.Result.success) {
-      markNeedsLayout();
-      _explicitConstraints.add(constraint);
-    }
-
-    return result;
+  void _clearExplicitConstraints() {
+    if (_explicitConstraints.isEmpty)
+      return;
+    if (_solver.removeConstraints(_explicitConstraints) == al.Result.success)
+      _explicitConstraints.clear();
   }
 
-  /// Removes all explicitly added constraints.
-  al.Result clearAllConstraints() {
-    al.Result result = _solver.removeConstraints(_explicitConstraints);
-
-    if (result == al.Result.success) {
-      markNeedsLayout();
-      _explicitConstraints = new List<al.Constraint>();
-    }
-
-    return result;
-  }
-
+  @override
   void adoptChild(RenderObject child) {
     // Make sure to call super first to setup the parent data
     super.adoptChild(child);
     final AutoLayoutParentData childParentData = child.parentData;
-    childParentData._setupImplicitConstraints(_solver);
+    childParentData._addImplicitConstraints();
     assert(child.parentData == childParentData);
   }
 
+  @override
   void dropChild(RenderObject child) {
     final AutoLayoutParentData childParentData = child.parentData;
-    childParentData._removeImplicitConstraints(_solver);
+    childParentData._removeImplicitConstraints();
     assert(child.parentData == childParentData);
     super.dropChild(child);
   }
 
+  @override
   void setupParentData(RenderObject child) {
     if (child.parentData is! AutoLayoutParentData)
       child.parentData = new AutoLayoutParentData(child);
   }
 
+  @override
   bool get sizedByParent => true;
 
+  @override
   void performResize() {
     size = constraints.biggest;
   }
 
+  Size _previousSize;
+
+  @override
   void performLayout() {
-    // Step 1: Update dimensions of self
-    _applyEditsAtSize(_solver, size);
+    bool needToFlushUpdates = false;
 
-    // Step 2: Resolve solver updates and flush parameters
+    if (_needToUpdateConstraints) {
+      _clearExplicitConstraints();
+      if (_delegate != null)
+        _setExplicitConstraints(_delegate.getConstraints(_rect));
+      _needToUpdateConstraints = false;
+      needToFlushUpdates = true;
+    }
 
-    // We don't iterate over the children, instead, we ask the solver to tell
-    // us the updated parameters. Attached to the parameters (via the context)
-    // are the _AutoLayoutParamMixin instances.
-    for (_AutoLayoutParamMixin update in _solver.flushUpdates()) {
-      update._applyAutolayoutParameterUpdates();
+    if (size != _previousSize) {
+      _solver
+        ..suggestValueForVariable(_rect.left.variable, 0.0)
+        ..suggestValueForVariable(_rect.top.variable, 0.0)
+        ..suggestValueForVariable(_rect.bottom.variable, size.height)
+        ..suggestValueForVariable(_rect.right.variable, size.width);
+      _previousSize = size;
+      needToFlushUpdates = true;
+    }
+
+    if (needToFlushUpdates)
+      _solver.flushUpdates();
+
+    RenderBox child = firstChild;
+    while (child != null) {
+      final AutoLayoutParentData childParentData = child.parentData;
+      child.layout(childParentData._constraintsFromSolver);
+      childParentData.offset = childParentData._offsetFromSolver;
+      assert(child.parentData == childParentData);
+      child = childParentData.nextSibling;
     }
   }
 
-  void _applyAutolayoutParameterUpdates() {
-    // Nothing to do since the size update has already been presented to the
-    // solver as an edit variable modification. The invokation of this method
-    // only indicates that the value has been flushed to the variable.
-  }
-
+  @override
   bool hitTestChildren(HitTestResult result, { Point position }) {
     return defaultHitTestChildren(result, position: position);
   }
 
+  @override
   void paint(PaintingContext context, Offset offset) {
     defaultPaint(context, offset);
-  }
-
-  List<al.Constraint> _constructImplicitConstraints() {
-    // Only edits variables are present on layout containers. If, in the future,
-    // implicit constraints (for say margins, padding, etc.) need to be added,
-    // they must be returned from here.
-    return null;
   }
 }

@@ -12,7 +12,22 @@ import 'debug.dart';
 import 'material.dart';
 import 'theme.dart';
 
-class InkResponse extends StatefulComponent {
+/// An area of a [Material] that responds to touch. Has a configurable shape and
+/// can be configured to clip splashes that extend outside its bounds or not.
+///
+/// For a variant of this widget that is specialized for rectangular areas that
+/// always clip splashes, see [InkWell].
+///
+/// Must have an ancestor [Material] widget in which to cause ink reactions.
+///
+/// If a Widget uses this class directly, it should include the following line
+/// at the top of its [build] function to call [debugCheckHasMaterial]:
+///
+///     assert(debugCheckHasMaterial(context));
+class InkResponse extends StatefulWidget {
+  /// Creates an area of a [Material] that responds to touch.
+  ///
+  /// Must have an ancestor [Material] widget in which to cause ink reactions.
   InkResponse({
     Key key,
     this.child,
@@ -20,19 +35,66 @@ class InkResponse extends StatefulComponent {
     this.onDoubleTap,
     this.onLongPress,
     this.onHighlightChanged,
-    this.containedInWell: false,
-    this.highlightShape: BoxShape.circle
+    this.containedInkWell: false,
+    this.highlightShape: BoxShape.circle,
+    this.radius,
   }) : super(key: key);
 
+  /// The widget below this widget in the tree.
   final Widget child;
+
+  /// Called when the user taps this part of the material
   final GestureTapCallback onTap;
+
+  /// Called when the user double taps this part of the material.
   final GestureTapCallback onDoubleTap;
+
+  /// Called when the user long-presses on this part of the material.
   final GestureLongPressCallback onLongPress;
+
+  /// Called when this part of the material either becomes highlighted or stops behing highlighted.
+  ///
+  /// The value passed to the callback is true if this part of the material has
+  /// become highlighted and false if this part of the material has stopped
+  /// being highlighted.
   final ValueChanged<bool> onHighlightChanged;
-  final bool containedInWell;
+
+  /// Whether this ink response should be clipped its bounds.
+  final bool containedInkWell;
+
+  /// The shape (e.g., circle, rectangle) to use for the highlight drawn around this part of the material.
   final BoxShape highlightShape;
 
-  _InkResponseState createState() => new _InkResponseState<InkResponse>();
+  /// The radius of the ink splash.
+  final double radius;
+
+  /// The rectangle to use for the highlight effect and for clipping
+  /// the splash effects if [containedInkWell] is true.
+  ///
+  /// This method is intended to be overridden by descendants that
+  /// specialize [InkResponse] for unusual cases. For example,
+  /// [TableRowInkWell] implements this method to return the rectangle
+  /// corresponding to the row that the widget is in.
+  ///
+  /// The default behavior returns null, which is equivalent to
+  /// returning the referenceBox argument's bounding box (though
+  /// slightly more efficient).
+  RectCallback getRectCallback(RenderBox referenceBox) => null;
+
+  /// Asserts that the given context satisfies the prerequisites for
+  /// this class.
+  ///
+  /// This method is intended to be overridden by descendants that
+  /// specialize [InkResponse] for unusual cases. For example,
+  /// [TableRowInkWell] implements this method to verify that the widget is
+  /// in a table.
+  bool debugCheckContext(BuildContext context) {
+    assert(debugCheckHasMaterial(context));
+    return true;
+  }
+
+  @override
+  _InkResponseState<InkResponse> createState() => new _InkResponseState<InkResponse>();
 }
 
 class _InkResponseState<T extends InkResponse> extends State<T> {
@@ -52,6 +114,7 @@ class _InkResponseState<T extends InkResponse> extends State<T> {
           referenceBox: referenceBox,
           color: Theme.of(context).highlightColor,
           shape: config.highlightShape,
+          rectCallback: config.getRectCallback(referenceBox),
           onRemoved: () {
             assert(_lastHighlight != null);
             _lastHighlight = null;
@@ -68,16 +131,18 @@ class _InkResponseState<T extends InkResponse> extends State<T> {
       config.onHighlightChanged(value);
   }
 
-
-  void _handleTapDown(Point position) {
+  void _handleTapDown(TapDownDetails details) {
     RenderBox referenceBox = context.findRenderObject();
     assert(Material.of(context) != null);
     InkSplash splash;
+    RectCallback rectCallback = config.getRectCallback(referenceBox);
     splash = Material.of(context).splashAt(
       referenceBox: referenceBox,
-      position: referenceBox.globalToLocal(position),
+      position: referenceBox.globalToLocal(details.globalPosition),
       color: Theme.of(context).splashColor,
-      containedInWell: config.containedInWell,
+      containedInkWell: config.containedInkWell,
+      rectCallback: config.containedInkWell ? rectCallback : null,
+      radius: config.radius,
       onRemoved: () {
         if (_splashes != null) {
           assert(_splashes.contains(splash));
@@ -121,6 +186,7 @@ class _InkResponseState<T extends InkResponse> extends State<T> {
       config.onLongPress();
   }
 
+  @override
   void deactivate() {
     if (_splashes != null) {
       Set<InkSplash> splashes = _splashes;
@@ -135,13 +201,10 @@ class _InkResponseState<T extends InkResponse> extends State<T> {
     super.deactivate();
   }
 
-  void dependenciesChanged(Type affectedWidgetType) {
-    if (affectedWidgetType == Theme && _lastHighlight != null)
-      _lastHighlight.color = Theme.of(context).highlightColor;
-  }
-
+  @override
   Widget build(BuildContext context) {
-    assert(debugCheckHasMaterial(context));
+    assert(config.debugCheckContext(context));
+    _lastHighlight?.color = Theme.of(context).highlightColor;
     final bool enabled = config.onTap != null || config.onDoubleTap != null || config.onLongPress != null;
     return new GestureDetector(
       onTapDown: enabled ? _handleTapDown : null,
@@ -156,10 +219,18 @@ class _InkResponseState<T extends InkResponse> extends State<T> {
 
 }
 
-/// An area of a Material that responds to touch.
+/// A rectangular area of a Material that responds to touch.
 ///
-/// Must have an ancestor Material widget in which to cause ink reactions.
+/// Must have an ancestor [Material] widget in which to cause ink reactions.
+///
+/// If a Widget uses this class directly, it should include the following line
+/// at the top of its [build] function to call [debugCheckHasMaterial]:
+///
+///     assert(debugCheckHasMaterial(context));
 class InkWell extends InkResponse {
+  /// Creates an ink well.
+  ///
+  /// Must have an ancestor [Material] widget in which to cause ink reactions.
   InkWell({
     Key key,
     Widget child,
@@ -174,7 +245,7 @@ class InkWell extends InkResponse {
     onDoubleTap: onDoubleTap,
     onLongPress: onLongPress,
     onHighlightChanged: onHighlightChanged,
-    containedInWell: true,
+    containedInkWell: true,
     highlightShape: BoxShape.rectangle
   );
 }

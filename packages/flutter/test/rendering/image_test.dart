@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'dart:ui' as ui;
+import 'dart:ui' as ui show Image;
 
 import 'package:flutter/rendering.dart';
 import 'package:test/test.dart';
@@ -10,20 +10,35 @@ import 'package:test/test.dart';
 import 'rendering_tester.dart';
 
 class SquareImage implements ui.Image {
+  @override
   int get width => 10;
+
+  @override
   int get height => 10;
+
+  @override
   void dispose() { }
 }
 
 class WideImage implements ui.Image {
+  @override
   int get width => 20;
+
+  @override
   int get height => 10;
+
+  @override
   void dispose() { }
 }
 
 class TallImage implements ui.Image {
+  @override
   int get width => 10;
+
+  @override
   int get height => 20;
+
+  @override
   void dispose() { }
 }
 

@@ -2,30 +2,43 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'package:meta/meta.dart';
+
 import 'framework.dart';
 
 /// Superclass for locale-specific data provided by the application.
-class LocaleQueryData { }
+class LocaleQueryData { } // TODO(ianh): We need a better type here. This doesn't really make sense.
 
-class LocaleQuery<T extends LocaleQueryData> extends InheritedWidget {
+/// Establishes a subtree in which locale queries resolve to the given data.
+class LocaleQuery extends InheritedWidget {
+  /// Creates a widget that provides [LocaleQueryData] to its descendants.
   LocaleQuery({
     Key key,
-    this.data,
-    Widget child
+    @required this.data,
+    @required Widget child
   }) : super(key: key, child: child) {
     assert(child != null);
   }
 
-  final T data;
+  /// The locale data for this subtree.
+  final LocaleQueryData data;
 
   /// The data from the closest instance of this class that encloses the given context.
+  ///
+  /// Typical usage is as follows:
+  ///
+  /// ```dart
+  /// MyLocaleData data = LocaleQueryData.of(context);
+  /// ```
   static LocaleQueryData of(BuildContext context) {
     LocaleQuery query = context.inheritFromWidgetOfExactType(LocaleQuery);
     return query?.data;
   }
 
+  @override
   bool updateShouldNotify(LocaleQuery old) => data != old.data;
 
+  @override
   void debugFillDescription(List<String> description) {
     super.debugFillDescription(description);
     description.add('$data');

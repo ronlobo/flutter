@@ -4,23 +4,25 @@
 
 import 'dart:collection';
 
-import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 
 import 'events.dart';
 
 /// A callback that receives a [PointerEvent]
 typedef void PointerRoute(PointerEvent event);
 
-typedef void PointerExceptionHandler(PointerRouter source, PointerEvent event, PointerRoute route, dynamic exception, StackTrace stack);
-
 /// A routing table for [PointerEvent] events.
 class PointerRouter {
   final Map<int, LinkedHashSet<PointerRoute>> _routeMap = new Map<int, LinkedHashSet<PointerRoute>>();
+  final LinkedHashSet<PointerRoute> _globalRoutes = new LinkedHashSet<PointerRoute>();
 
   /// Adds a route to the routing table.
   ///
   /// Whenever this object routes a [PointerEvent] corresponding to
   /// pointer, call route.
+  ///
+  /// Routes added reentrantly within [PointerRouter.route] will take effect when
+  /// routing the next event.
   void addRoute(int pointer, PointerRoute route) {
     LinkedHashSet<PointerRoute> routes = _routeMap.putIfAbsent(pointer, () => new LinkedHashSet<PointerRoute>());
     assert(!routes.contains(route));
@@ -31,6 +33,9 @@ class PointerRouter {
   ///
   /// No longer call route when routing a [PointerEvent] corresponding to
   /// pointer. Requires that this route was previously added to the router.
+  ///
+  /// Routes removed reentrantly within [PointerRouter.route] will take effect
+  /// immediately.
   void removeRoute(int pointer, PointerRoute route) {
     assert(_routeMap.containsKey(pointer));
     LinkedHashSet<PointerRoute> routes = _routeMap[pointer];
@@ -40,15 +45,48 @@ class PointerRouter {
       _routeMap.remove(pointer);
   }
 
-  /// This callback is invoked whenever an exception is caught by the pointer
-  /// router. The 'source' argument is the [PointerRouter] object that caught
-  /// the exception. The 'event' argument is the pointer event that was being
-  /// routed. The 'route' argument is the callback that threw the exception. The
-  /// 'exception' argument contains the object that was thrown, and the 'stack'
-  /// argument contains the stack trace. If no handler is registered, then the
-  /// human-readable parts of this information (the exception, event, and stack
-  /// trace) will be printed to the console instead.
-  PointerExceptionHandler debugPointerExceptionHandler;
+  /// Adds a route to the global entry in the routing table.
+  ///
+  /// Whenever this object routes a [PointerEvent], call route.
+  ///
+  /// Routes added reentrantly within [PointerRouter.route] will take effect when
+  /// routing the next event.
+  void addGlobalRoute(PointerRoute route) {
+    assert(!_globalRoutes.contains(route));
+    _globalRoutes.add(route);
+  }
+
+  /// Removes a route from the global entry in the routing table.
+  ///
+  /// No longer call route when routing a [PointerEvent]. Requires that this
+  /// route was previously added via [addGlobalRoute].
+  ///
+  /// Routes removed reentrantly within [PointerRouter.route] will take effect
+  /// immediately.
+  void removeGlobalRoute(PointerRoute route) {
+    assert(_globalRoutes.contains(route));
+    _globalRoutes.remove(route);
+  }
+
+  void _dispatch(PointerEvent event, PointerRoute route) {
+    try {
+      route(event);
+    } catch (exception, stack) {
+      FlutterError.reportError(new FlutterErrorDetailsForPointerRouter(
+        exception: exception,
+        stack: stack,
+        library: 'gesture library',
+        context: 'while routing a pointer event',
+        router: this,
+        route: route,
+        event: event,
+        informationCollector: (StringBuffer information) {
+          information.writeln('Event:');
+          information.write('  $event');
+        }
+      ));
+    }
+  }
 
   /// Calls the routes registered for this pointer event.
   ///
@@ -56,27 +94,59 @@ class PointerRouter {
   /// PointerRouter object.
   void route(PointerEvent event) {
     LinkedHashSet<PointerRoute> routes = _routeMap[event.pointer];
-    if (routes == null)
-      return;
-    for (PointerRoute route in new List<PointerRoute>.from(routes)) {
-      if (!routes.contains(route))
-        continue;
-      try {
-        route(event);
-      } catch (exception, stack) {
-        if (debugPointerExceptionHandler != null) {
-          debugPointerExceptionHandler(this, event, route, exception, stack);
-        } else {
-          debugPrint('-- EXCEPTION CAUGHT BY GESTURE LIBRARY ---------------------------------');
-          debugPrint('The following exception was raised while routing a pointer event:');
-          debugPrint('$exception');
-          debugPrint('Event:');
-          debugPrint('$event');
-          debugPrint('Stack trace:');
-          debugPrint('$stack');
-          debugPrint('------------------------------------------------------------------------');
-        }
+    List<PointerRoute> globalRoutes = new List<PointerRoute>.from(_globalRoutes);
+    if (routes != null) {
+      for (PointerRoute route in new List<PointerRoute>.from(routes)) {
+        if (routes.contains(route))
+          _dispatch(event, route);
       }
     }
+    for (PointerRoute route in globalRoutes) {
+      if (_globalRoutes.contains(route))
+        _dispatch(event, route);
+    }
   }
+}
+
+/// Variant of [FlutterErrorDetails] with extra fields for the gestures
+/// library's pointer router ([PointerRouter]).
+///
+/// See also [FlutterErrorDetailsForPointerEventDispatcher], which is also used
+/// by the gestures library.
+class FlutterErrorDetailsForPointerRouter extends FlutterErrorDetails {
+  /// Creates a [FlutterErrorDetailsForPointerRouter] object with the given
+  /// arguments setting the object's properties.
+  ///
+  /// The gestures library calls this constructor when catching an exception
+  /// that will subsequently be reported using [FlutterError.onError].
+  const FlutterErrorDetailsForPointerRouter({
+    dynamic exception,
+    StackTrace stack,
+    String library,
+    String context,
+    this.router,
+    this.route,
+    this.event,
+    InformationCollector informationCollector,
+    bool silent: false
+  }) : super(
+    exception: exception,
+    stack: stack,
+    library: library,
+    context: context,
+    informationCollector: informationCollector,
+    silent: silent
+  );
+
+  /// The pointer router that caught the exception.
+  ///
+  /// In a typical application, this is the value of [GestureBinding.pointerRouter] on
+  /// the binding ([GestureBinding.instance]).
+  final PointerRouter router;
+
+  /// The callback that threw the exception.
+  final PointerRoute route;
+
+  /// The pointer event that was being routed when the exception was raised.
+  final PointerEvent event;
 }

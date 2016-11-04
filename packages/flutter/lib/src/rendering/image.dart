@@ -2,9 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'dart:ui' as ui;
-
-import 'package:flutter/painting.dart';
+import 'dart:ui' as ui show Image;
 
 import 'box.dart';
 import 'object.dart';
@@ -17,11 +15,16 @@ export 'package:flutter/painting.dart' show
 ///
 /// The render image attempts to find a size for itself that fits in the given
 /// constraints and preserves the image's intrinisc aspect ratio.
+///
+/// The image is painted using [paintImage], which describes the meanings of the
+/// various fields on this class in more detail.
 class RenderImage extends RenderBox {
+  /// Creates a render box that displays an image.
   RenderImage({
     ui.Image image,
     double width,
     double height,
+    double scale: 1.0,
     Color color,
     ImageFit fit,
     FractionalOffset alignment,
@@ -30,6 +33,7 @@ class RenderImage extends RenderBox {
   }) : _image = image,
       _width = width,
       _height = height,
+      _scale = scale,
       _color = color,
       _fit = fit,
       _alignment = alignment,
@@ -41,7 +45,7 @@ class RenderImage extends RenderBox {
   /// The image to display.
   ui.Image get image => _image;
   ui.Image _image;
-  void set image (ui.Image value) {
+  set image (ui.Image value) {
     if (value == _image)
       return;
     _image = value;
@@ -56,7 +60,7 @@ class RenderImage extends RenderBox {
   /// aspect ratio.
   double get width => _width;
   double _width;
-  void set width (double value) {
+  set width (double value) {
     if (value == _width)
       return;
     _width = value;
@@ -69,10 +73,23 @@ class RenderImage extends RenderBox {
   /// aspect ratio.
   double get height => _height;
   double _height;
-  void set height (double value) {
+  set height (double value) {
     if (value == _height)
       return;
     _height = value;
+    markNeedsLayout();
+  }
+
+  /// Specifies the image's scale.
+  ///
+  /// Used when determining the best display size for the image.
+  double get scale => _scale;
+  double _scale;
+  set scale (double value) {
+    assert(value != null);
+    if (value == _scale)
+      return;
+    _scale = value;
     markNeedsLayout();
   }
 
@@ -89,7 +106,7 @@ class RenderImage extends RenderBox {
   /// If non-null, apply this color filter to the image before painting.
   Color get color => _color;
   Color _color;
-  void set color (Color value) {
+  set color (Color value) {
     if (value == _color)
       return;
     _color = value;
@@ -97,10 +114,13 @@ class RenderImage extends RenderBox {
     markNeedsPaint();
   }
 
-  /// How to inscribe the image into the place allocated during layout.
+  /// How to inscribe the image into the space allocated during layout.
+  ///
+  /// The default varies based on the other fields. See the discussion at
+  /// [paintImage].
   ImageFit get fit => _fit;
   ImageFit _fit;
-  void set fit (ImageFit value) {
+  set fit (ImageFit value) {
     if (value == _fit)
       return;
     _fit = value;
@@ -110,7 +130,7 @@ class RenderImage extends RenderBox {
   /// How to align the image within its bounds.
   FractionalOffset get alignment => _alignment;
   FractionalOffset _alignment;
-  void set alignment (FractionalOffset value) {
+  set alignment (FractionalOffset value) {
     if (value == _alignment)
       return;
     _alignment = value;
@@ -120,7 +140,7 @@ class RenderImage extends RenderBox {
   /// How to repeat this image if it doesn't fill its layout bounds.
   ImageRepeat get repeat => _repeat;
   ImageRepeat _repeat;
-  void set repeat (ImageRepeat value) {
+  set repeat (ImageRepeat value) {
     if (value == _repeat)
       return;
     _repeat = value;
@@ -136,7 +156,7 @@ class RenderImage extends RenderBox {
   /// the center slice will be stretched only vertically.
   Rect get centerSlice => _centerSlice;
   Rect _centerSlice;
-  void set centerSlice (Rect value) {
+  set centerSlice (Rect value) {
     if (value == _centerSlice)
       return;
     _centerSlice = value;
@@ -151,75 +171,59 @@ class RenderImage extends RenderBox {
   ///  - The RenderImage's dimension are maximal subject to being smaller than
   ///    the intrinsic size of the image.
   Size _sizeForConstraints(BoxConstraints constraints) {
-    // Folds the given |width| and |height| into |cosntraints| so they can all
+    // Folds the given |width| and |height| into |constraints| so they can all
     // be treated uniformly.
     constraints = new BoxConstraints.tightFor(
       width: _width,
       height: _height
     ).enforce(constraints);
 
-    if (constraints.isTight || _image == null)
+    if (_image == null)
       return constraints.smallest;
 
-    double width = _image.width.toDouble();
-    double height = _image.height.toDouble();
-    assert(width > 0.0);
-    assert(height > 0.0);
-    double aspectRatio = width / height;
-
-    if (width > constraints.maxWidth) {
-      width = constraints.maxWidth;
-      height = width / aspectRatio;
-    }
-
-    if (height > constraints.maxHeight) {
-      height = constraints.maxHeight;
-      width = height * aspectRatio;
-    }
-
-    if (width < constraints.minWidth) {
-      width = constraints.minWidth;
-      height = width / aspectRatio;
-    }
-
-    if (height < constraints.minHeight) {
-      height = constraints.minHeight;
-      width = height * aspectRatio;
-    }
-
-    return constraints.constrain(new Size(width, height));
+    return constraints.constrainSizeAndAttemptToPreserveAspectRatio(new Size(
+      _image.width.toDouble() / _scale,
+      _image.height.toDouble() / _scale
+    ));
   }
 
-  double getMinIntrinsicWidth(BoxConstraints constraints) {
-    assert(constraints.isNormalized);
+  @override
+  double computeMinIntrinsicWidth(double height) {
+    assert(height >= 0.0);
     if (_width == null && _height == null)
-      return constraints.constrainWidth(0.0);
-    return _sizeForConstraints(constraints).width;
+      return 0.0;
+    return _sizeForConstraints(new BoxConstraints.tightForFinite(height: height)).width;
   }
 
-  double getMaxIntrinsicWidth(BoxConstraints constraints) {
-    assert(constraints.isNormalized);
-    return _sizeForConstraints(constraints).width;
+  @override
+  double computeMaxIntrinsicWidth(double height) {
+    assert(height >= 0.0);
+    return _sizeForConstraints(new BoxConstraints.tightForFinite(height: height)).width;
   }
 
-  double getMinIntrinsicHeight(BoxConstraints constraints) {
-    assert(constraints.isNormalized);
+  @override
+  double computeMinIntrinsicHeight(double width) {
+    assert(width >= 0.0);
     if (_width == null && _height == null)
-      return constraints.constrainHeight(0.0);
-    return _sizeForConstraints(constraints).height;
+      return 0.0;
+    return _sizeForConstraints(new BoxConstraints.tightForFinite(width: width)).height;
   }
 
-  double getMaxIntrinsicHeight(BoxConstraints constraints) {
-    assert(constraints.isNormalized);
-    return _sizeForConstraints(constraints).height;
+  @override
+  double computeMaxIntrinsicHeight(double width) {
+    assert(width >= 0.0);
+    return _sizeForConstraints(new BoxConstraints.tightForFinite(width: width)).height;
   }
 
+  @override
   bool hitTestSelf(Point position) => true;
 
+  @override
   void performLayout() {
     size = _sizeForConstraints(constraints);
   }
 
+  @override
   void paint(PaintingContext context, Offset offset) {
     if (_image == null)
       return;
@@ -229,16 +233,31 @@ class RenderImage extends RenderBox {
       image: _image,
       colorFilter: _colorFilter,
       fit: _fit,
-      alignX: _alignment?.dx,
-      alignY: _alignment?.dy,
+      alignment: _alignment,
       centerSlice: _centerSlice,
       repeat: _repeat
     );
   }
 
-  void debugDescribeSettings(List<String> settings) {
-    super.debugDescribeSettings(settings);
-    settings.add('width: $width');
-    settings.add('height: $height');
+  @override
+  void debugFillDescription(List<String> description) {
+    super.debugFillDescription(description);
+    description.add('image: $image');
+    if (width != null)
+      description.add('width: $width');
+    if (height != null)
+      description.add('height: $height');
+    if (scale != 1.0)
+      description.add('scale: $scale');
+    if (color != null)
+      description.add('color: $color');
+    if (fit != null)
+      description.add('fit: $fit');
+    if (alignment != null)
+      description.add('alignment: $alignment');
+    if (repeat != ImageRepeat.noRepeat)
+      description.add('repeat: $repeat');
+    if (centerSlice != null)
+      description.add('centerSlice: $centerSlice');
   }
 }

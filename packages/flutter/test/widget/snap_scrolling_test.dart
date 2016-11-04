@@ -6,7 +6,6 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/widgets.dart';
-import 'package:test/test.dart';
 
 const double itemExtent = 200.0;
 Axis scrollDirection = Axis.vertical;
@@ -20,21 +19,39 @@ Widget buildItem(int item) {
   );
 }
 
-double snapOffsetCallback(double offset) {
+double snapOffsetCallback(double offset, Size size) {
   return (offset / itemExtent).floor() * itemExtent;
+}
+
+class TestScrollConfigurationDelegate extends ScrollConfigurationDelegate {
+  const TestScrollConfigurationDelegate();
+
+  // Not testing platform-specific fling scrolling, use the default fling
+  // decleration simulation.
+  @override
+  TargetPlatform get platform => null;
+
+  @override
+  ExtentScrollBehavior createScrollBehavior() => new OverscrollWhenScrollableBehavior(platform: platform);
+
+  @override
+  bool updateShouldNotify(ScrollConfigurationDelegate old) => false;
 }
 
 Widget buildFrame() {
   scrollableListKey = new GlobalKey();
-  return new Center(
-    child: new Container(
-      height: itemExtent * 2.0,
-      child: new ScrollableList(
-        key: scrollableListKey,
-        snapOffsetCallback: snapOffsetCallback,
-        scrollDirection: scrollDirection,
-        itemExtent: itemExtent,
-        children: <int>[0, 1, 2, 3, 4, 5, 7, 8, 9].map(buildItem)
+  return new ScrollConfiguration(
+    delegate: const TestScrollConfigurationDelegate(),
+    child: new Center(
+      child: new Container(
+        height: itemExtent * 2.0,
+        child: new ScrollableList(
+          scrollableKey: scrollableListKey,
+          snapOffsetCallback: snapOffsetCallback,
+          scrollDirection: scrollDirection,
+          itemExtent: itemExtent,
+          children: <int>[0, 1, 2, 3, 4, 5, 7, 8, 9].map(buildItem)
+        )
       )
     )
   );
@@ -43,72 +60,75 @@ Widget buildFrame() {
 ScrollableState get scrollableState => scrollableListKey.currentState;
 
 double get scrollOffset =>  scrollableState.scrollOffset;
-void set scrollOffset(double value) {
+set scrollOffset(double value) {
   scrollableState.scrollTo(value);
 }
 
-Future fling(double velocity) {
-  Offset velocityOffset = scrollDirection == Axis.vertical
-    ? new Offset(0.0, velocity)
-    : new Offset(velocity, 0.0);
-  return scrollableState.fling(velocityOffset);
+Completer<Null> fling(double velocity) {
+  Completer<Null> completer = new Completer<Null>();
+  scrollableState.fling(velocity).whenComplete(completer.complete);
+  return completer;
 }
 
 void main() {
-  test('ScrollableList snap scrolling, fling(-0.8)', () {
-    testWidgets((WidgetTester tester) {
-      tester.pumpWidget(buildFrame());
+  testWidgets('ScrollableList snap scrolling', (WidgetTester tester) async {
+    await tester.pumpWidget(buildFrame());
 
-      scrollOffset = 0.0;
-      tester.pump();
-      expect(scrollOffset, 0.0);
+    scrollOffset = 0.0;
+    await tester.pump();
+    expect(scrollOffset, 0.0);
 
-      Duration dt = const Duration(seconds: 2);
+    Duration dt = const Duration(seconds: 2);
 
-      fling(-0.8);
-      tester.pump(); // Start the scheduler at 0.0
-      tester.pump(dt);
-      expect(scrollOffset, closeTo(200.0, 1.0));
+    Completer<Null> completer = fling(1000.0);
+    expect(completer.isCompleted, isFalse);
+    await tester.pump(); // Start the scheduler at 0.0
+    await tester.pump(dt);
+    expect(scrollOffset, closeTo(200.0, 1.0));
+    expect(completer.isCompleted, isTrue);
 
-      scrollOffset = 0.0;
-      tester.pump();
-      expect(scrollOffset, 0.0);
+    scrollOffset = 0.0;
+    await tester.pump();
+    expect(scrollOffset, 0.0);
 
-      fling(-2.0);
-      tester.pump();
-      tester.pump(dt);
-      expect(scrollOffset, closeTo(400.0, 1.0));
+    completer = fling(2000.0);
+    expect(completer.isCompleted, isFalse);
+    await tester.pump();
+    await tester.pump(dt);
+    expect(scrollOffset, closeTo(400.0, 1.0));
+    expect(completer.isCompleted, isTrue);
 
-      scrollOffset = 400.0;
-      tester.pump();
-      expect(scrollOffset, 400.0);
+    scrollOffset = 400.0;
+    await tester.pump();
+    expect(scrollOffset, 400.0);
 
-      fling(0.8);
-      tester.pump();
-      tester.pump(dt);
-      expect(scrollOffset, closeTo(0.0, 1.0));
+    completer = fling(-800.0);
+    expect(completer.isCompleted, isFalse);
+    await tester.pump();
+    await tester.pump(dt);
+    expect(scrollOffset, closeTo(0.0, 1.0));
+    expect(completer.isCompleted, isTrue);
 
-      scrollOffset = 800.0;
-      tester.pump();
-      expect(scrollOffset, 800.0);
+    scrollOffset = 800.0;
+    await tester.pump();
+    expect(scrollOffset, 800.0);
 
-      fling(2.0);
-      tester.pump();
-      tester.pump(dt);
-      expect(scrollOffset, closeTo(200.0, 1.0));
+    completer = fling(-2000.0);
+    expect(completer.isCompleted, isFalse);
+    await tester.pump();
+    await tester.pump(dt);
+    expect(scrollOffset, closeTo(200.0, 1.0));
+    expect(completer.isCompleted, isTrue);
 
-      scrollOffset = 800.0;
-      tester.pump();
-      expect(scrollOffset, 800.0);
+    scrollOffset = 800.0;
+    await tester.pump();
+    expect(scrollOffset, 800.0);
 
-      bool completed = false;
-      fling(2.0).then((_) {
-        completed = true;
-        expect(scrollOffset, closeTo(200.0, 1.0));
-      });
-      tester.pump();
-      tester.pump(dt);
-      expect(completed, true);
-    });
+    completer = fling(-2000.0);
+    expect(completer.isCompleted, isFalse);
+    await tester.pump();
+    await tester.pump(dt);
+    expect(completer.isCompleted, isTrue);
+    expectSync(scrollOffset, closeTo(200.0, 1.0));
   });
 }

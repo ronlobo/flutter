@@ -15,7 +15,7 @@ void main() {
 
     root = new RenderPositionedBox(
       child: new RenderCustomPaint(
-        child: child = text = new RenderParagraph(new PlainTextSpan('Hello World')),
+        child: child = text = new RenderParagraph(new TextSpan(text: 'Hello World')),
         painter: new TestCallbackPainter(
           onPaint: () {
             baseline1 = child.getDistanceToBaseline(TextBaseline.alphabetic);
@@ -28,8 +28,8 @@ void main() {
 
     root = new RenderPositionedBox(
       child: new RenderCustomPaint(
-        child: child = new RenderOverflowBox(
-          child: text = new RenderParagraph(new PlainTextSpan('Hello World')),
+        child: child = new RenderConstrainedOverflowBox(
+          child: text = new RenderParagraph(new TextSpan(text: 'Hello World')),
           maxHeight: height1 / 2.0,
           alignment: const FractionalOffset(0.0, 0.0)
         ),

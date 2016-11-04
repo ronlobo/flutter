@@ -20,6 +20,7 @@ class _GridPaperPainter extends CustomPainter {
   final int divisions;
   final int subDivisions;
 
+  @override
   void paint(Canvas canvas, Size size) {
     Paint linePaint = new Paint()
       ..color = color;
@@ -34,6 +35,7 @@ class _GridPaperPainter extends CustomPainter {
     }
   }
 
+  @override
   bool shouldRepaint(_GridPaperPainter oldPainter) {
     return oldPainter.color != color
         || oldPainter.interval != interval
@@ -41,12 +43,15 @@ class _GridPaperPainter extends CustomPainter {
         || oldPainter.subDivisions != subDivisions;
   }
 
+  @override
   bool hitTest(Point position) => false;
 }
 
-/// Draws a rectalinear grid of 1px width lines at the specified color and interval.
-/// Useful with a Stack for visualizing your layout along a grid.
-class GridPaper extends StatelessComponent {
+/// A widget that draws a rectilinear grid of 1px wide lines.
+///
+/// Useful with a [Stack] for visualizing your layout along a grid.
+class GridPaper extends StatelessWidget {
+  /// Creates a widget that draws a rectilinear grid of 1px wide lines.
   GridPaper({
     Key key,
     this.color: const Color(0x7FC3E8F3),
@@ -56,12 +61,22 @@ class GridPaper extends StatelessComponent {
     this.child
   }) : super(key: key);
 
+  /// The color to draw the lines in the grid.
   final Color color;
+
+  /// The distance between the primary lines in the grid, in logical pixels.
   final double interval;
+
+  /// The number of major divisions within each primary grid cell.
   final int divisions;
+
+  /// The number of minor divisions within each major division.
   final int subDivisions;
+
+  /// The widget below this widget in the tree.
   final Widget child;
 
+  @override
   Widget build(BuildContext context) {
     return new CustomPaint(
       foregroundPainter: new _GridPaperPainter(

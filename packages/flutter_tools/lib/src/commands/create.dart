@@ -5,147 +5,190 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:args/command_runner.dart';
-import 'package:mustache4dart/mustache4dart.dart' as mustache;
 import 'package:path/path.dart' as path;
 
 import '../android/android.dart' as android;
-import '../artifacts.dart';
-import '../base/context.dart';
-import '../base/process.dart';
+import '../base/utils.dart';
+import '../cache.dart';
+import '../dart/pub.dart';
+import '../globals.dart';
+import '../runner/flutter_command.dart';
+import '../template.dart';
 
-class CreateCommand extends Command {
-  final String name = 'create';
-  final String description = 'Create a new Flutter project.';
-
+class CreateCommand extends FlutterCommand {
   CreateCommand() {
-    argParser.addOption('out', abbr: 'o', help: 'The output directory.');
     argParser.addFlag('pub',
-        defaultsTo: true,
-        help: 'Whether to run "pub get" after the project has been created.');
+      defaultsTo: true,
+      help: 'Whether to run "flutter packages get" after the project has been created.'
+    );
+    argParser.addFlag(
+      'with-driver-test',
+      negatable: true,
+      defaultsTo: false,
+      help: 'Also add a flutter_driver dependency and generate a sample \'flutter drive\' test.'
+    );
+    argParser.addOption(
+      'description',
+      defaultsTo: 'A new flutter project.',
+      help: 'The description to use for your new flutter project. This string ends up in the pubspec.yaml file.'
+    );
   }
 
   @override
-  Future<int> run() async {
-    if (!argResults.wasParsed('out')) {
-      printStatus('No option specified for the output directory.');
-      printStatus(argParser.usage);
+  final String name = 'create';
+
+  @override
+  final String description = 'Create a new Flutter project.\n\n'
+    'If run on a project that already exists, this will repair the project, recreating any files that are missing.';
+
+  @override
+  String get invocation => "${runner.executableName} $name <output directory>";
+
+  @override
+  Future<int> runCommand() async {
+    if (argResults.rest.isEmpty) {
+      printError('No option specified for the output directory.');
+      printError(usage);
       return 2;
     }
 
-    if (ArtifactStore.flutterRoot == null) {
-      printError('Neither the --flutter-root command line flag nor the FLUTTER_ROOT environment');
-      printError('variable was specified. Unable to find package:flutter.');
+    if (argResults.rest.length > 1) {
+      printError('Multiple output directories specified.');
+      for (String arg in argResults.rest) {
+        if (arg.startsWith('-')) {
+          printError('Try moving $arg to be immediately following $name');
+          break;
+        }
+      }
       return 2;
     }
-    String flutterRoot = path.absolute(ArtifactStore.flutterRoot);
 
-    String flutterPackagePath = path.join(flutterRoot, 'packages', 'flutter');
+    if (Cache.flutterRoot == null) {
+      printError('Neither the --flutter-root command line flag nor the FLUTTER_ROOT environment\n'
+        'variable was specified. Unable to find package:flutter.');
+      return 2;
+    }
+
+    await Cache.instance.updateAll();
+
+    String flutterRoot = path.absolute(Cache.flutterRoot);
+
+    String flutterPackagesDirectory = path.join(flutterRoot, 'packages');
+    String flutterPackagePath = path.join(flutterPackagesDirectory, 'flutter');
     if (!FileSystemEntity.isFileSync(path.join(flutterPackagePath, 'pubspec.yaml'))) {
       printError('Unable to find package:flutter in $flutterPackagePath');
       return 2;
     }
 
-    Directory out = new Directory(argResults['out']);
-
-    new FlutterSimpleTemplate().generateInto(out, flutterPackagePath);
-
-    printStatus('');
-
-    String message = '''
-All done! To run your application:
-
-  \$ cd ${out.path}
-  \$ flutter start
-''';
-
-    if (argResults['pub']) {
-      int code = await pubGet(directory: out.path);
-      if (code != 0)
-        return code;
+    String flutterDriverPackagePath = path.join(flutterRoot, 'packages', 'flutter_driver');
+    if (!FileSystemEntity.isFileSync(path.join(flutterDriverPackagePath, 'pubspec.yaml'))) {
+      printError('Unable to find package:flutter_driver in $flutterDriverPackagePath');
+      return 2;
     }
 
-    printStatus('');
-    printStatus(message);
-    return 0;
-  }
+    Directory projectDir = new Directory(argResults.rest.first);
+    String dirPath = path.normalize(projectDir.absolute.path);
+    String relativePath = path.relative(dirPath);
+    String projectName = _normalizeProjectName(path.basename(dirPath));
 
-  Future<int> pubGet({
-    String directory: '',
-    bool skipIfAbsent: false
-  }) async {
-    File pubSpecYaml = new File(path.join(directory, 'pubspec.yaml'));
-    File pubSpecLock = new File(path.join(directory, 'pubspec.lock'));
-    File dotPackages = new File(path.join(directory, '.packages'));
-
-    if (!pubSpecYaml.existsSync()) {
-      if (skipIfAbsent)
-        return 0;
-      printError('$directory: no pubspec.yaml found');
+    String error =_validateProjectDir(dirPath, flutterRoot: flutterRoot);
+    if (error != null) {
+      printError(error);
       return 1;
     }
 
-    if (!pubSpecLock.existsSync() || pubSpecYaml.lastModifiedSync().isAfter(pubSpecLock.lastModifiedSync())) {
-      printStatus("Running 'pub get' in '$directory'...");
-      int code = await runCommandAndStreamOutput(
-        <String>[sdkBinaryName('pub'), '--verbosity=warning', 'get'],
-        workingDirectory: directory
-      );
+    error = _validateProjectName(projectName);
+    if (error != null) {
+      printError(error);
+      return 1;
+    }
+
+    int generatedCount = _renderTemplates(
+      projectName,
+      argResults['description'],
+      dirPath,
+      flutterPackagesDirectory,
+      renderDriverTest: argResults['with-driver-test']
+    );
+    printStatus('Wrote $generatedCount files.');
+
+    printStatus('');
+
+    if (argResults['pub']) {
+      int code = await pubGet(directory: dirPath);
       if (code != 0)
         return code;
     }
 
-    if ((pubSpecLock.existsSync() && pubSpecLock.lastModifiedSync().isAfter(pubSpecYaml.lastModifiedSync())) &&
-        (dotPackages.existsSync() && dotPackages.lastModifiedSync().isAfter(pubSpecYaml.lastModifiedSync())))
-      return 0;
+    printStatus('');
 
-    printError('$directory: pubspec.yaml, pubspec.lock, and .packages are in an inconsistent state');
-    return 1;
-  }
-}
+    // Run doctor; tell the user the next steps.
+    if (doctor.canLaunchAnything) {
+      // Let them know a summary of the state of their tooling.
+      await doctor.summary();
 
-abstract class Template {
-  final String name;
-  final String description;
+      printStatus('''
+All done! In order to run your application, type:
 
-  Map<String, String> files = {};
+  \$ cd $relativePath
+  \$ flutter run
 
-  Template(this.name, this.description);
+Your main program file is lib/main.dart in the $relativePath directory.
+''');
+    } else {
+      printStatus("You'll need to install additional components before you can run "
+        "your Flutter app:");
+      printStatus('');
 
-  void generateInto(Directory dir, String flutterPackagePath) {
-    String dirPath = path.normalize(dir.absolute.path);
-    String projectName = _normalizeProjectName(path.basename(dirPath));
-    printStatus('Creating ${path.basename(projectName)}...');
-    dir.createSync(recursive: true);
+      // Give the user more detailed analysis.
+      await doctor.diagnose();
+      printStatus('');
+      printStatus("After installing components, run 'flutter doctor' in order to "
+        "re-validate your setup.");
+      printStatus("When complete, type 'flutter run' from the '$relativePath' "
+        "directory in order to launch your app.");
+      printStatus("Your main program file is: $relativePath/lib/main.dart");
+    }
 
-    String relativeFlutterPackagePath = path.relative(flutterPackagePath, from: dirPath);
-
-    files.forEach((String filePath, String contents) {
-      Map m = {
-        'projectName': projectName,
-        'description': description,
-        'flutterPackagePath': relativeFlutterPackagePath
-      };
-      contents = mustache.render(contents, m);
-      filePath = filePath.replaceAll('/', Platform.pathSeparator);
-      File file = new File(path.join(dir.path, filePath));
-      file.parent.createSync();
-      file.writeAsStringSync(contents);
-      printStatus('  ${file.path}');
-    });
+    return 0;
   }
 
-  String toString() => name;
-}
+  int _renderTemplates(String projectName, String projectDescription, String dirPath,
+      String flutterPackagesDirectory, { bool renderDriverTest: false }) {
+    new Directory(dirPath).createSync(recursive: true);
 
-class FlutterSimpleTemplate extends Template {
-  FlutterSimpleTemplate() : super('flutter-simple', 'A minimal Flutter project.') {
-    files['.gitignore'] = _gitignore;
-    files['flutter.yaml'] = _flutterYaml;
-    files['pubspec.yaml'] = _pubspec;
-    files['README.md'] = _readme;
-    files['lib/main.dart'] = _libMain;
-    files['apk/AndroidManifest.xml'] = _apkManifest;
+    flutterPackagesDirectory = path.normalize(flutterPackagesDirectory);
+    flutterPackagesDirectory = _relativePath(from: dirPath, to: flutterPackagesDirectory);
+
+    printStatus('Creating project ${path.relative(dirPath)}...');
+
+    Map<String, dynamic> templateContext = <String, dynamic>{
+      'projectName': projectName,
+      'androidIdentifier': _createAndroidIdentifier(projectName),
+      'iosIdentifier': _createUTIIdentifier(projectName),
+      'description': projectDescription,
+      'flutterPackagesDirectory': flutterPackagesDirectory,
+      'androidMinApiLevel': android.minApiLevel
+    };
+
+    int fileCount = 0;
+
+    templateContext['withDriverTest'] = renderDriverTest;
+
+    Template createTemplate = new Template.fromName('create');
+    fileCount += createTemplate.render(
+      new Directory(dirPath),
+      templateContext, overwriteExisting: false,
+      projectName: projectName
+    );
+
+    if (renderDriverTest) {
+      Template driverTemplate = new Template.fromName('driver');
+      fileCount += driverTemplate.render(new Directory(path.join(dirPath, 'test_driver')),
+          templateContext, overwriteExisting: false);
+    }
+
+    return fileCount;
   }
 }
 
@@ -157,109 +200,76 @@ String _normalizeProjectName(String name) {
   return name;
 }
 
-const String _gitignore = r'''
-.DS_Store
-.atom/
-.idea
-.packages
-.pub/
-build/
-packages
-pubspec.lock
-''';
-
-const String _readme = r'''
-# {{projectName}}
-
-{{description}}
-
-## Getting Started
-
-For help getting started with Flutter, view our online
-[documentation](http://flutter.io/).
-''';
-
-const String _pubspec = r'''
-name: {{projectName}}
-description: {{description}}
-dependencies:
-  flutter:
-    path: {{flutterPackagePath}}
-''';
-
-const String _flutterYaml = r'''
-name: {{projectName}}
-material-design-icons:
-  - name: content/add
-''';
-
-const String _libMain = r'''
-import 'package:flutter/material.dart';
-
-void main() {
-  runApp(
-    new MaterialApp(
-      title: "Flutter Demo",
-      routes: <String, RouteBuilder>{
-        '/': (RouteArguments args) => new FlutterDemo()
-      }
-    )
-  );
+String _createAndroidIdentifier(String name) {
+  return 'com.yourcompany.${camelCase(name)}';
 }
 
-class FlutterDemo extends StatefulComponent {
-  @override
-  State createState() => new FlutterDemoState();
+String _createUTIIdentifier(String name) {
+  // Create a UTI (https://en.wikipedia.org/wiki/Uniform_Type_Identifier) from a base name
+  RegExp disallowed = new RegExp(r"[^a-zA-Z0-9\-\.\u0080-\uffff]+");
+  name = camelCase(name).replaceAll(disallowed, '');
+  name = name.isEmpty ? 'untitled' : name;
+  return 'com.yourcompany.$name';
 }
 
-class FlutterDemoState extends State {
-  int counter = 0;
+final Set<String> _packageDependencies = new Set<String>.from(<String>[
+  'args',
+  'async',
+  'collection',
+  'convert',
+  'flutter',
+  'html',
+  'intl',
+  'logging',
+  'matcher',
+  'mime',
+  'path',
+  'plugin',
+  'pool',
+  'test',
+  'utf',
+  'watcher',
+  'yaml'
+]);
 
-  void incrementCounter() {
-    setState(() {
-      counter++;
-    });
+/// Return `null` if the project name is legal. Return a validation message if
+/// we should disallow the project name.
+String _validateProjectName(String projectName) {
+  if (_packageDependencies.contains(projectName)) {
+    return "Invalid project name: '$projectName' - this will conflict with Flutter "
+      "package dependencies.";
+  }
+  return null;
+}
+
+/// Return `null` if the project directory is legal. Return a validation message
+/// if we should disallow the directory name.
+String _validateProjectDir(String dirPath, { String flutterRoot }) {
+  if (path.isWithin(flutterRoot, dirPath)) {
+    return "Cannot create a project within the Flutter SDK.\n"
+      "Target directory '$dirPath' is within the Flutter SDK at '$flutterRoot'.";
   }
 
-  Widget build(BuildContext context) {
-    return new Scaffold(
-      toolBar: new ToolBar(
-        center: new Text("Flutter Demo")
-      ),
-      body: new Material(
-        child: new Center(
-          child: new Text("Button tapped $counter times.")
-        )
-      ),
-      floatingActionButton: new FloatingActionButton(
-        child: new Icon(
-          icon: 'content/add'
-        ),
-        onPressed: incrementCounter
-      )
-    );
+  FileSystemEntityType type = FileSystemEntity.typeSync(dirPath);
+
+  if (type != FileSystemEntityType.NOT_FOUND) {
+    switch(type) {
+      case FileSystemEntityType.FILE:
+        // Do not overwrite files.
+        return "Invalid project name: '$dirPath' - file exists.";
+      case FileSystemEntityType.LINK:
+        // Do not overwrite links.
+        return "Invalid project name: '$dirPath' - refers to a link.";
+    }
   }
+
+  return null;
 }
-''';
 
-final String _apkManifest = '''
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.example.{{projectName}}">
-
-    <uses-sdk android:minSdkVersion="${android.minApiLevel}" android:targetSdkVersion="21" />
-    <uses-permission android:name="android.permission.INTERNET"/>
-
-    <application android:name="org.domokit.sky.shell.SkyApplication" android:label="{{projectName}}">
-        <activity android:name="org.domokit.sky.shell.SkyActivity"
-                  android:launchMode="singleTask"
-                  android:theme="@android:style/Theme.Black.NoTitleBar"
-                  android:configChanges="orientation|keyboardHidden|keyboard|screenSize"
-                  android:hardwareAccelerated="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN"/>
-                <category android:name="android.intent.category.LAUNCHER"/>
-            </intent-filter>
-        </activity>
-    </application>
-</manifest>
-''';
+String _relativePath({ String from, String to }) {
+  String result = path.relative(to, from: from);
+  // `path.relative()` doesn't always return a correct result: dart-lang/path#12.
+  if (FileSystemEntity.isDirectorySync(path.join(from, result)))
+    return result;
+  return to;
+}

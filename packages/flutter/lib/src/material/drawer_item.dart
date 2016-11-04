@@ -5,55 +5,112 @@
 import 'package:flutter/widgets.dart';
 
 import 'colors.dart';
+import 'constants.dart';
+import 'debug.dart';
 import 'icon.dart';
+import 'icon_theme.dart';
+import 'icon_theme_data.dart';
+import 'image_icon.dart';
 import 'ink_well.dart';
 import 'theme.dart';
 
-class DrawerItem extends StatelessComponent {
+/// An item in a material design drawer.
+///
+/// Part of the material design [Drawer].
+///
+/// Requires one of its ancestors to be a [Material] widget.
+///
+/// See also:
+///
+///  * [Drawer]
+///  * [DrawerHeader]
+///  * <https://material.google.com/patterns/navigation-drawer.html>
+class DrawerItem extends StatelessWidget {
+  /// Creates a material design drawer item.
+  ///
+  /// Requires one of its ancestors to be a [Material] widget.
   const DrawerItem({
     Key key,
-    this.icon,
+    this.icon: const Icon(null),
     this.child,
     this.onPressed,
     this.selected: false
   }) : super(key: key);
 
-  final String icon;
+  /// The icon to display before the child widget.
+  ///
+  /// The size and color of the icon is configured automatically using an
+  /// [IconTheme] and therefore do not need to be explicitly given in the
+  /// icon widget.
+  ///
+  /// See [Icon], [ImageIcon].
+  final Widget icon;
+
+  /// The widget below this widget in the tree.
   final Widget child;
+
+  /// Called when the user taps this drawer item.
+  ///
+  /// If null, the drawer item is displayed as disabled.
+  ///
+  /// To close the [Drawer] when an item is pressed, call [Navigator.pop].
   final VoidCallback onPressed;
+
+  /// Whether this drawer item is currently selected.
+  ///
+  /// The currently selected item is highlighted to distinguish it from other
+  /// drawer items.
   final bool selected;
 
   Color _getIconColor(ThemeData themeData) {
-    if (selected) {
-      if (themeData.brightness == ThemeBrightness.dark)
-        return themeData.accentColor;
-      return themeData.primaryColor;
+    switch (themeData.brightness) {
+      case Brightness.light:
+        if (selected)
+          return themeData.primaryColor;
+        if (onPressed == null)
+          return Colors.black26;
+        return Colors.black45;
+      case Brightness.dark:
+        if (selected)
+          return themeData.accentColor;
+        if (onPressed == null)
+          return Colors.white30;
+        return null; // use default icon theme color unmodified
     }
-    return Colors.black45;
+    assert(themeData.brightness != null);
+    return null;
   }
 
   TextStyle _getTextStyle(ThemeData themeData) {
-    TextStyle result = themeData.text.body2;
+    TextStyle result = themeData.textTheme.body2;
     if (selected) {
-      if (themeData.brightness == ThemeBrightness.dark)
-        result = result.copyWith(color: themeData.accentColor);
-      else
-        result = result.copyWith(color: themeData.primaryColor);
+      switch (themeData.brightness) {
+        case Brightness.light:
+          return result.copyWith(color: themeData.primaryColor);
+        case Brightness.dark:
+          return result.copyWith(color: themeData.accentColor);
+      }
     }
     return result;
   }
 
+  @override
   Widget build(BuildContext context) {
+    assert(debugCheckHasMaterial(context));
     ThemeData themeData = Theme.of(context);
 
     List<Widget> children = <Widget>[];
     if (icon != null) {
       children.add(
         new Padding(
-          padding: const EdgeDims.symmetric(horizontal: 16.0),
-          child: new Icon(
-            icon: icon,
-            color: _getIconColor(themeData)
+          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+          child: new IconTheme.merge(
+            context: context,
+            data: new IconThemeData(
+              color: _getIconColor(themeData),
+              size: 24.0
+            ),
+            child: icon
           )
         )
       );
@@ -61,9 +118,10 @@ class DrawerItem extends StatelessComponent {
     children.add(
       new Flexible(
         child: new Padding(
-          padding: const EdgeDims.symmetric(horizontal: 16.0),
-          child: new DefaultTextStyle(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+          child: new AnimatedDefaultTextStyle(
             style: _getTextStyle(themeData),
+            duration: kThemeChangeDuration,
             child: child
           )
         )

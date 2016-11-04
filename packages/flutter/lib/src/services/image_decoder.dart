@@ -4,18 +4,13 @@
 
 import 'dart:async';
 import 'dart:typed_data';
-import 'dart:ui' as ui;
+import 'dart:ui' as ui show Image, decodeImageFromList;
 
-import 'package:mojo/core.dart' show MojoDataPipeConsumer;
-
-Future<ui.Image> decodeImageFromDataPipe(MojoDataPipeConsumer consumerHandle) {
-  Completer<ui.Image> completer = new Completer<ui.Image>();
-  ui.decodeImageFromDataPipe(consumerHandle.handle.h, (ui.Image image) {
-    completer.complete(image);
-  });
-  return completer.future;
-}
-
+/// Creates an image from a list of bytes.
+///
+/// This function attempts to interpret the given bytes an image. If successful,
+/// the returned [Future] resolves to the decoded image. Otherwise, the [Future]
+/// resolves to [null].
 Future<ui.Image> decodeImageFromList(Uint8List list) {
   Completer<ui.Image> completer = new Completer<ui.Image>();
   ui.decodeImageFromList(list, (ui.Image image) {

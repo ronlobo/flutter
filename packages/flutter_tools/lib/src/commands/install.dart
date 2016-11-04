@@ -5,46 +5,51 @@
 import 'dart:async';
 
 import '../application_package.dart';
+import '../cache.dart';
 import '../device.dart';
+import '../globals.dart';
 import '../runner/flutter_command.dart';
 
 class InstallCommand extends FlutterCommand {
+  @override
   final String name = 'install';
-  final String description = 'Install Flutter apps on attached devices.';
 
-  InstallCommand() {
-    argParser.addFlag('boot', help: 'Boot the iOS Simulator if it isn\'t already running.');
+  @override
+  final String description = 'Install a Flutter app on an attached device.';
+
+  Device device;
+
+  @override
+  Future<int> verifyThenRunCommand() async {
+    if (!commandValidator())
+      return 1;
+    device = await findTargetDevice();
+    if (device == null)
+      return 1;
+    return super.verifyThenRunCommand();
   }
 
   @override
-  Future<int> runInProject() async {
-    await downloadApplicationPackagesAndConnectToDevices();
-    bool installedAny = installApp(
-      devices,
-      applicationPackages,
-      boot: argResults['boot']
-    );
-    return installedAny ? 0 : 2;
+  Future<int> runCommand() async {
+    ApplicationPackage package = applicationPackages.getPackageForPlatform(device.platform);
+
+    Cache.releaseLockEarly();
+
+    printStatus('Installing $package to $device...');
+
+    return installApp(device, package) ? 0 : 2;
   }
 }
 
-bool installApp(
-  DeviceStore devices,
-  ApplicationPackageStore applicationPackages, {
-  bool boot: false
-}) {
-  if (boot)
-    devices.iOSSimulator?.boot();
+bool installApp(Device device, ApplicationPackage package, { bool uninstall: true }) {
+  if (package == null)
+    return false;
 
-  bool installedSomewhere = false;
-
-  for (Device device in devices.all) {
-    ApplicationPackage package = applicationPackages.getPackageForPlatform(device.platform);
-    if (package == null || !device.isConnected() || device.isAppInstalled(package))
-      continue;
-    if (device.installApp(package))
-      installedSomewhere = true;
+  if (uninstall && device.isAppInstalled(package)) {
+    printStatus('Uninstalling old version...');
+    if (!device.uninstallApp(package))
+      printError('Warning: uninstalling old version failed');
   }
 
-  return installedSomewhere;
+  return device.installApp(package);
 }

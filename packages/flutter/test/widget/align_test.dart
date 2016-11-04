@@ -5,46 +5,41 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
-import 'package:test/test.dart';
 
 void main() {
-  test('Align smoke test', () {
-    testWidgets((WidgetTester tester) {
-      tester.pumpWidget(
-        new Align(
-          child: new Container(),
-          alignment: const FractionalOffset(0.75, 0.75)
-        )
-      );
+  testWidgets('Align smoke test', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      new Align(
+        child: new Container(),
+        alignment: const FractionalOffset(0.75, 0.75)
+      )
+    );
 
-      tester.pumpWidget(
-        new Align(
-          child: new Container(),
-          alignment: const FractionalOffset(0.5, 0.5)
-        )
-      );
-    });
+    await tester.pumpWidget(
+      new Align(
+        child: new Container(),
+        alignment: const FractionalOffset(0.5, 0.5)
+      )
+    );
   });
 
-  test('Shrink wraps in finite space', () {
-    testWidgets((WidgetTester tester) {
-      GlobalKey alignKey = new GlobalKey();
-      tester.pumpWidget(
-        new ScrollableViewport(
-          child: new Align(
-            key: alignKey,
-            child: new Container(
-              width: 10.0,
-              height: 10.0
-            ),
-            alignment: const FractionalOffset(0.50, 0.50)
-          )
+  testWidgets('Shrink wraps in finite space', (WidgetTester tester) async {
+    GlobalKey alignKey = new GlobalKey();
+    await tester.pumpWidget(
+      new ScrollableViewport(
+        child: new Align(
+          key: alignKey,
+          child: new Container(
+            width: 10.0,
+            height: 10.0
+          ),
+          alignment: const FractionalOffset(0.50, 0.50)
         )
-      );
+      )
+    );
 
-      RenderBox box = alignKey.currentContext.findRenderObject();
-      expect(box.size.width, equals(800.0));
-      expect(box.size.height, equals(10.0));
-    });
+    final Size size = alignKey.currentContext.size;
+    expect(size.width, equals(800.0));
+    expect(size.height, equals(10.0));
   });
 }

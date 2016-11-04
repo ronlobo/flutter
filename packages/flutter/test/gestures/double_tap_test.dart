@@ -6,18 +6,25 @@ import 'package:flutter/gestures.dart';
 import 'package:quiver/testing/async.dart';
 import 'package:test/test.dart';
 
+import 'gesture_tester.dart';
+
 class TestGestureArenaMember extends GestureArenaMember {
-  void acceptGesture(Object key) {
+  @override
+  void acceptGesture(int key) {
     accepted = true;
   }
-  void rejectGesture(Object key) {
+
+  @override
+  void rejectGesture(int key) {
     rejected = true;
   }
+
   bool accepted = false;
   bool rejected = false;
 }
 
 void main() {
+  setUp(ensureGestureBinding);
 
   // Down/up pair 1: normal tap sequence
   const PointerDownEvent down1 = const PointerDownEvent(
@@ -79,13 +86,8 @@ void main() {
     position: const Point(11.0, 9.0)
   );
 
-  test('Should recognize double tap', () {
-    PointerRouter router = new PointerRouter();
-    GestureArena gestureArena = new GestureArena();
-    DoubleTapGestureRecognizer tap = new DoubleTapGestureRecognizer(
-      router: router,
-      gestureArena: gestureArena
-    );
+  testGesture('Should recognize double tap', (GestureTester tester) {
+    DoubleTapGestureRecognizer tap = new DoubleTapGestureRecognizer();
 
     bool doubleTapRecognized = false;
     tap.onDoubleTap = () {
@@ -93,37 +95,32 @@ void main() {
     };
 
     tap.addPointer(down1);
-    gestureArena.close(1);
+    tester.closeArena(1);
     expect(doubleTapRecognized, isFalse);
-    router.route(down1);
+    tester.route(down1);
     expect(doubleTapRecognized, isFalse);
 
-    router.route(up1);
+    tester.route(up1);
     expect(doubleTapRecognized, isFalse);
-    gestureArena.sweep(1);
+    GestureBinding.instance.gestureArena.sweep(1);
     expect(doubleTapRecognized, isFalse);
 
     tap.addPointer(down2);
-    gestureArena.close(2);
+    tester.closeArena(2);
     expect(doubleTapRecognized, isFalse);
-    router.route(down2);
+    tester.route(down2);
     expect(doubleTapRecognized, isFalse);
 
-    router.route(up2);
+    tester.route(up2);
     expect(doubleTapRecognized, isTrue);
-    gestureArena.sweep(2);
+    GestureBinding.instance.gestureArena.sweep(2);
     expect(doubleTapRecognized, isTrue);
 
     tap.dispose();
   });
 
-  test('Inter-tap distance cancels double tap', () {
-    PointerRouter router = new PointerRouter();
-    GestureArena gestureArena = new GestureArena();
-    DoubleTapGestureRecognizer tap = new DoubleTapGestureRecognizer(
-      router: router,
-      gestureArena: gestureArena
-    );
+  testGesture('Inter-tap distance cancels double tap', (GestureTester tester) {
+    DoubleTapGestureRecognizer tap = new DoubleTapGestureRecognizer();
 
     bool doubleTapRecognized = false;
     tap.onDoubleTap = () {
@@ -131,37 +128,32 @@ void main() {
     };
 
     tap.addPointer(down1);
-    gestureArena.close(1);
+    tester.closeArena(1);
     expect(doubleTapRecognized, isFalse);
-    router.route(down1);
+    tester.route(down1);
     expect(doubleTapRecognized, isFalse);
 
-    router.route(up1);
+    tester.route(up1);
     expect(doubleTapRecognized, isFalse);
-    gestureArena.sweep(1);
+    GestureBinding.instance.gestureArena.sweep(1);
     expect(doubleTapRecognized, isFalse);
 
     tap.addPointer(down3);
-    gestureArena.close(3);
+    tester.closeArena(3);
     expect(doubleTapRecognized, isFalse);
-    router.route(down3);
+    tester.route(down3);
     expect(doubleTapRecognized, isFalse);
 
-    router.route(up3);
+    tester.route(up3);
     expect(doubleTapRecognized, isFalse);
-    gestureArena.sweep(3);
+    GestureBinding.instance.gestureArena.sweep(3);
     expect(doubleTapRecognized, isFalse);
 
     tap.dispose();
   });
 
-  test('Intra-tap distance cancels double tap', () {
-    PointerRouter router = new PointerRouter();
-    GestureArena gestureArena = new GestureArena();
-    DoubleTapGestureRecognizer tap = new DoubleTapGestureRecognizer(
-      router: router,
-      gestureArena: gestureArena
-    );
+  testGesture('Intra-tap distance cancels double tap', (GestureTester tester) {
+    DoubleTapGestureRecognizer tap = new DoubleTapGestureRecognizer();
 
     bool doubleTapRecognized = false;
     tap.onDoubleTap = () {
@@ -169,174 +161,34 @@ void main() {
     };
 
     tap.addPointer(down4);
-    gestureArena.close(4);
+    tester.closeArena(4);
     expect(doubleTapRecognized, isFalse);
-    router.route(down4);
+    tester.route(down4);
     expect(doubleTapRecognized, isFalse);
 
-    router.route(move4);
+    tester.route(move4);
     expect(doubleTapRecognized, isFalse);
-    router.route(up4);
+    tester.route(up4);
     expect(doubleTapRecognized, isFalse);
-    gestureArena.sweep(4);
+    GestureBinding.instance.gestureArena.sweep(4);
     expect(doubleTapRecognized, isFalse);
 
     tap.addPointer(down1);
-    gestureArena.close(1);
+    tester.closeArena(1);
     expect(doubleTapRecognized, isFalse);
-    router.route(down2);
+    tester.route(down2);
     expect(doubleTapRecognized, isFalse);
 
-    router.route(up1);
+    tester.route(up1);
     expect(doubleTapRecognized, isFalse);
-    gestureArena.sweep(1);
+    GestureBinding.instance.gestureArena.sweep(1);
     expect(doubleTapRecognized, isFalse);
 
     tap.dispose();
   });
 
-  test('Inter-tap delay cancels double tap', () {
-    PointerRouter router = new PointerRouter();
-    GestureArena gestureArena = new GestureArena();
-    DoubleTapGestureRecognizer tap = new DoubleTapGestureRecognizer(
-      router: router,
-      gestureArena: gestureArena
-    );
-
-    bool doubleTapRecognized = false;
-    tap.onDoubleTap = () {
-      doubleTapRecognized = true;
-    };
-
-    new FakeAsync().run((FakeAsync async) {
-      tap.addPointer(down1);
-      gestureArena.close(1);
-      expect(doubleTapRecognized, isFalse);
-      router.route(down1);
-      expect(doubleTapRecognized, isFalse);
-
-      router.route(up1);
-      expect(doubleTapRecognized, isFalse);
-      gestureArena.sweep(1);
-      expect(doubleTapRecognized, isFalse);
-
-      async.elapse(new Duration(milliseconds: 5000));
-      tap.addPointer(down2);
-      gestureArena.close(2);
-      expect(doubleTapRecognized, isFalse);
-      router.route(down2);
-      expect(doubleTapRecognized, isFalse);
-
-      router.route(up2);
-      expect(doubleTapRecognized, isFalse);
-      gestureArena.sweep(2);
-      expect(doubleTapRecognized, isFalse);
-    });
-
-    tap.dispose();
-  });
-
-  test('Inter-tap delay resets double tap, allowing third tap to be a double-tap', () {
-    PointerRouter router = new PointerRouter();
-    GestureArena gestureArena = new GestureArena();
-    DoubleTapGestureRecognizer tap = new DoubleTapGestureRecognizer(
-      router: router,
-      gestureArena: gestureArena
-    );
-
-    bool doubleTapRecognized = false;
-    tap.onDoubleTap = () {
-      doubleTapRecognized = true;
-    };
-
-    new FakeAsync().run((FakeAsync async) {
-      tap.addPointer(down1);
-      gestureArena.close(1);
-      expect(doubleTapRecognized, isFalse);
-      router.route(down1);
-      expect(doubleTapRecognized, isFalse);
-
-      router.route(up1);
-      expect(doubleTapRecognized, isFalse);
-      gestureArena.sweep(1);
-      expect(doubleTapRecognized, isFalse);
-
-      async.elapse(new Duration(milliseconds: 5000));
-      tap.addPointer(down2);
-      gestureArena.close(2);
-      expect(doubleTapRecognized, isFalse);
-      router.route(down2);
-      expect(doubleTapRecognized, isFalse);
-
-      router.route(up2);
-      expect(doubleTapRecognized, isFalse);
-      gestureArena.sweep(2);
-      expect(doubleTapRecognized, isFalse);
-
-      async.elapse(new Duration(milliseconds: 100));
-      tap.addPointer(down5);
-      gestureArena.close(5);
-      expect(doubleTapRecognized, isFalse);
-      router.route(down5);
-      expect(doubleTapRecognized, isFalse);
-
-      router.route(up5);
-      expect(doubleTapRecognized, isTrue);
-      gestureArena.sweep(5);
-      expect(doubleTapRecognized, isTrue);
-    });
-
-    tap.dispose();
-  });
-
-  test('Intra-tap delay does not cancel double tap', () {
-    PointerRouter router = new PointerRouter();
-    GestureArena gestureArena = new GestureArena();
-    DoubleTapGestureRecognizer tap = new DoubleTapGestureRecognizer(
-      router: router,
-      gestureArena: gestureArena
-    );
-
-    bool doubleTapRecognized = false;
-    tap.onDoubleTap = () {
-      doubleTapRecognized = true;
-    };
-
-    new FakeAsync().run((FakeAsync async) {
-      tap.addPointer(down1);
-      gestureArena.close(1);
-      expect(doubleTapRecognized, isFalse);
-      router.route(down1);
-      expect(doubleTapRecognized, isFalse);
-
-      async.elapse(new Duration(milliseconds: 1000));
-      router.route(up1);
-      expect(doubleTapRecognized, isFalse);
-      gestureArena.sweep(1);
-      expect(doubleTapRecognized, isFalse);
-
-      tap.addPointer(down2);
-      gestureArena.close(2);
-      expect(doubleTapRecognized, isFalse);
-      router.route(down2);
-      expect(doubleTapRecognized, isFalse);
-
-      router.route(up2);
-      expect(doubleTapRecognized, isTrue);
-      gestureArena.sweep(2);
-      expect(doubleTapRecognized, isTrue);
-    });
-
-    tap.dispose();
-  });
-
-  test('Should not recognize two overlapping taps', () {
-    PointerRouter router = new PointerRouter();
-    GestureArena gestureArena = new GestureArena();
-    DoubleTapGestureRecognizer tap = new DoubleTapGestureRecognizer(
-      router: router,
-      gestureArena: gestureArena
-    );
+  testGesture('Inter-tap delay cancels double tap', (GestureTester tester) {
+    DoubleTapGestureRecognizer tap = new DoubleTapGestureRecognizer();
 
     bool doubleTapRecognized = false;
     tap.onDoubleTap = () {
@@ -344,37 +196,33 @@ void main() {
     };
 
     tap.addPointer(down1);
-    gestureArena.close(1);
+    tester.closeArena(1);
     expect(doubleTapRecognized, isFalse);
-    router.route(down1);
+    tester.route(down1);
     expect(doubleTapRecognized, isFalse);
 
+    tester.route(up1);
+    expect(doubleTapRecognized, isFalse);
+    GestureBinding.instance.gestureArena.sweep(1);
+    expect(doubleTapRecognized, isFalse);
+
+    tester.async.elapse(new Duration(milliseconds: 5000));
     tap.addPointer(down2);
-    gestureArena.close(2);
+    tester.closeArena(2);
     expect(doubleTapRecognized, isFalse);
-    router.route(down1);
-    expect(doubleTapRecognized, isFalse);
-
-    router.route(up1);
-    expect(doubleTapRecognized, isFalse);
-    gestureArena.sweep(1);
+    tester.route(down2);
     expect(doubleTapRecognized, isFalse);
 
-    router.route(up2);
+    tester.route(up2);
     expect(doubleTapRecognized, isFalse);
-    gestureArena.sweep(2);
+    GestureBinding.instance.gestureArena.sweep(2);
     expect(doubleTapRecognized, isFalse);
 
     tap.dispose();
   });
 
-  test('Should recognize one tap of group followed by second tap', () {
-    PointerRouter router = new PointerRouter();
-    GestureArena gestureArena = new GestureArena();
-    DoubleTapGestureRecognizer tap = new DoubleTapGestureRecognizer(
-      router: router,
-      gestureArena: gestureArena
-    );
+  testGesture('Inter-tap delay resets double tap, allowing third tap to be a double-tap', (GestureTester tester) {
+    DoubleTapGestureRecognizer tap = new DoubleTapGestureRecognizer();
 
     bool doubleTapRecognized = false;
     tap.onDoubleTap = () {
@@ -382,49 +230,157 @@ void main() {
     };
 
     tap.addPointer(down1);
-    gestureArena.close(1);
+    tester.closeArena(1);
     expect(doubleTapRecognized, isFalse);
-    router.route(down1);
+    tester.route(down1);
     expect(doubleTapRecognized, isFalse);
 
+    tester.route(up1);
+    expect(doubleTapRecognized, isFalse);
+    GestureBinding.instance.gestureArena.sweep(1);
+    expect(doubleTapRecognized, isFalse);
+
+    tester.async.elapse(new Duration(milliseconds: 5000));
     tap.addPointer(down2);
-    gestureArena.close(2);
+    tester.closeArena(2);
     expect(doubleTapRecognized, isFalse);
-    router.route(down1);
-    expect(doubleTapRecognized, isFalse);
-
-    router.route(up1);
-    expect(doubleTapRecognized, isFalse);
-    gestureArena.sweep(1);
+    tester.route(down2);
     expect(doubleTapRecognized, isFalse);
 
-    router.route(up2);
+    tester.route(up2);
     expect(doubleTapRecognized, isFalse);
-    gestureArena.sweep(2);
-    expect(doubleTapRecognized, isFalse);
-
-    tap.addPointer(down1);
-    gestureArena.close(1);
-    expect(doubleTapRecognized, isFalse);
-    router.route(down1);
+    GestureBinding.instance.gestureArena.sweep(2);
     expect(doubleTapRecognized, isFalse);
 
-    router.route(up1);
+    tester.async.elapse(new Duration(milliseconds: 100));
+    tap.addPointer(down5);
+    tester.closeArena(5);
+    expect(doubleTapRecognized, isFalse);
+    tester.route(down5);
+    expect(doubleTapRecognized, isFalse);
+
+    tester.route(up5);
     expect(doubleTapRecognized, isTrue);
-    gestureArena.sweep(1);
+    GestureBinding.instance.gestureArena.sweep(5);
+    expect(doubleTapRecognized, isTrue);
+
+    tap.dispose();
+  });
+
+  testGesture('Intra-tap delay does not cancel double tap', (GestureTester tester) {
+    DoubleTapGestureRecognizer tap = new DoubleTapGestureRecognizer();
+
+    bool doubleTapRecognized = false;
+    tap.onDoubleTap = () {
+      doubleTapRecognized = true;
+    };
+
+    tap.addPointer(down1);
+    tester.closeArena(1);
+    expect(doubleTapRecognized, isFalse);
+    tester.route(down1);
+    expect(doubleTapRecognized, isFalse);
+
+    tester.async.elapse(new Duration(milliseconds: 1000));
+    tester.route(up1);
+    expect(doubleTapRecognized, isFalse);
+    GestureBinding.instance.gestureArena.sweep(1);
+    expect(doubleTapRecognized, isFalse);
+
+    tap.addPointer(down2);
+    tester.closeArena(2);
+    expect(doubleTapRecognized, isFalse);
+    tester.route(down2);
+    expect(doubleTapRecognized, isFalse);
+
+    tester.route(up2);
+    expect(doubleTapRecognized, isTrue);
+    GestureBinding.instance.gestureArena.sweep(2);
+    expect(doubleTapRecognized, isTrue);
+
+    tap.dispose();
+  });
+
+  testGesture('Should not recognize two overlapping taps', (GestureTester tester) {
+    DoubleTapGestureRecognizer tap = new DoubleTapGestureRecognizer();
+
+    bool doubleTapRecognized = false;
+    tap.onDoubleTap = () {
+      doubleTapRecognized = true;
+    };
+
+    tap.addPointer(down1);
+    tester.closeArena(1);
+    expect(doubleTapRecognized, isFalse);
+    tester.route(down1);
+    expect(doubleTapRecognized, isFalse);
+
+    tap.addPointer(down2);
+    tester.closeArena(2);
+    expect(doubleTapRecognized, isFalse);
+    tester.route(down1);
+    expect(doubleTapRecognized, isFalse);
+
+    tester.route(up1);
+    expect(doubleTapRecognized, isFalse);
+    GestureBinding.instance.gestureArena.sweep(1);
+    expect(doubleTapRecognized, isFalse);
+
+    tester.route(up2);
+    expect(doubleTapRecognized, isFalse);
+    GestureBinding.instance.gestureArena.sweep(2);
+    expect(doubleTapRecognized, isFalse);
+
+    tap.dispose();
+  });
+
+  testGesture('Should recognize one tap of group followed by second tap', (GestureTester tester) {
+    DoubleTapGestureRecognizer tap = new DoubleTapGestureRecognizer();
+
+    bool doubleTapRecognized = false;
+    tap.onDoubleTap = () {
+      doubleTapRecognized = true;
+    };
+
+    tap.addPointer(down1);
+    tester.closeArena(1);
+    expect(doubleTapRecognized, isFalse);
+    tester.route(down1);
+    expect(doubleTapRecognized, isFalse);
+
+    tap.addPointer(down2);
+    tester.closeArena(2);
+    expect(doubleTapRecognized, isFalse);
+    tester.route(down1);
+    expect(doubleTapRecognized, isFalse);
+
+    tester.route(up1);
+    expect(doubleTapRecognized, isFalse);
+    GestureBinding.instance.gestureArena.sweep(1);
+    expect(doubleTapRecognized, isFalse);
+
+    tester.route(up2);
+    expect(doubleTapRecognized, isFalse);
+    GestureBinding.instance.gestureArena.sweep(2);
+    expect(doubleTapRecognized, isFalse);
+
+    tap.addPointer(down1);
+    tester.closeArena(1);
+    expect(doubleTapRecognized, isFalse);
+    tester.route(down1);
+    expect(doubleTapRecognized, isFalse);
+
+    tester.route(up1);
+    expect(doubleTapRecognized, isTrue);
+    GestureBinding.instance.gestureArena.sweep(1);
     expect(doubleTapRecognized, isTrue);
 
     tap.dispose();
 
   });
 
-  test('Should cancel on arena reject during first tap', () {
-    PointerRouter router = new PointerRouter();
-    GestureArena gestureArena = new GestureArena();
-    DoubleTapGestureRecognizer tap = new DoubleTapGestureRecognizer(
-      router: router,
-      gestureArena: gestureArena
-    );
+  testGesture('Should cancel on arena reject during first tap', (GestureTester tester) {
+    DoubleTapGestureRecognizer tap = new DoubleTapGestureRecognizer();
 
     bool doubleTapRecognized = false;
     tap.onDoubleTap = () {
@@ -433,41 +389,36 @@ void main() {
 
     tap.addPointer(down1);
     TestGestureArenaMember member = new TestGestureArenaMember();
-    GestureArenaEntry entry = gestureArena.add(1, member);
-    gestureArena.close(1);
+    GestureArenaEntry entry = GestureBinding.instance.gestureArena.add(1, member);
+    tester.closeArena(1);
     expect(doubleTapRecognized, isFalse);
-    router.route(down1);
+    tester.route(down1);
     expect(doubleTapRecognized, isFalse);
 
-    router.route(up1);
+    tester.route(up1);
     expect(doubleTapRecognized, isFalse);
     entry.resolve(GestureDisposition.accepted);
     expect(member.accepted, isTrue);
     expect(doubleTapRecognized, isFalse);
-    gestureArena.sweep(1);
+    GestureBinding.instance.gestureArena.sweep(1);
     expect(doubleTapRecognized, isFalse);
 
     tap.addPointer(down2);
-    gestureArena.close(2);
+    tester.closeArena(2);
     expect(doubleTapRecognized, isFalse);
-    router.route(down2);
+    tester.route(down2);
     expect(doubleTapRecognized, isFalse);
 
-    router.route(up2);
+    tester.route(up2);
     expect(doubleTapRecognized, isFalse);
-    gestureArena.sweep(2);
+    GestureBinding.instance.gestureArena.sweep(2);
     expect(doubleTapRecognized, isFalse);
 
     tap.dispose();
   });
 
-  test('Should cancel on arena reject between taps', () {
-    PointerRouter router = new PointerRouter();
-    GestureArena gestureArena = new GestureArena();
-    DoubleTapGestureRecognizer tap = new DoubleTapGestureRecognizer(
-      router: router,
-      gestureArena: gestureArena
-    );
+  testGesture('Should cancel on arena reject between taps', (GestureTester tester) {
+    DoubleTapGestureRecognizer tap = new DoubleTapGestureRecognizer();
 
     bool doubleTapRecognized = false;
     tap.onDoubleTap = () {
@@ -476,41 +427,36 @@ void main() {
 
     tap.addPointer(down1);
     TestGestureArenaMember member = new TestGestureArenaMember();
-    GestureArenaEntry entry = gestureArena.add(1, member);
-    gestureArena.close(1);
+    GestureArenaEntry entry = GestureBinding.instance.gestureArena.add(1, member);
+    tester.closeArena(1);
     expect(doubleTapRecognized, isFalse);
-    router.route(down1);
+    tester.route(down1);
     expect(doubleTapRecognized, isFalse);
 
-    router.route(up1);
+    tester.route(up1);
     expect(doubleTapRecognized, isFalse);
-    gestureArena.sweep(1);
+    GestureBinding.instance.gestureArena.sweep(1);
     expect(doubleTapRecognized, isFalse);
 
     entry.resolve(GestureDisposition.accepted);
     expect(member.accepted, isTrue);
 
     tap.addPointer(down2);
-    gestureArena.close(2);
+    tester.closeArena(2);
     expect(doubleTapRecognized, isFalse);
-    router.route(down2);
+    tester.route(down2);
     expect(doubleTapRecognized, isFalse);
 
-    router.route(up2);
+    tester.route(up2);
     expect(doubleTapRecognized, isFalse);
-    gestureArena.sweep(2);
+    GestureBinding.instance.gestureArena.sweep(2);
     expect(doubleTapRecognized, isFalse);
 
     tap.dispose();
   });
 
-  test('Should cancel on arena reject during last tap', () {
-    PointerRouter router = new PointerRouter();
-    GestureArena gestureArena = new GestureArena();
-    DoubleTapGestureRecognizer tap = new DoubleTapGestureRecognizer(
-      router: router,
-      gestureArena: gestureArena
-    );
+  testGesture('Should cancel on arena reject during last tap', (GestureTester tester) {
+    DoubleTapGestureRecognizer tap = new DoubleTapGestureRecognizer();
 
     bool doubleTapRecognized = false;
     tap.onDoubleTap = () {
@@ -519,41 +465,36 @@ void main() {
 
     tap.addPointer(down1);
     TestGestureArenaMember member = new TestGestureArenaMember();
-    GestureArenaEntry entry = gestureArena.add(1, member);
-    gestureArena.close(1);
+    GestureArenaEntry entry = GestureBinding.instance.gestureArena.add(1, member);
+    tester.closeArena(1);
     expect(doubleTapRecognized, isFalse);
-    router.route(down1);
+    tester.route(down1);
     expect(doubleTapRecognized, isFalse);
 
-    router.route(up1);
+    tester.route(up1);
     expect(doubleTapRecognized, isFalse);
-    gestureArena.sweep(1);
+    GestureBinding.instance.gestureArena.sweep(1);
     expect(doubleTapRecognized, isFalse);
 
     tap.addPointer(down2);
-    gestureArena.close(2);
+    tester.closeArena(2);
     expect(doubleTapRecognized, isFalse);
-    router.route(down2);
+    tester.route(down2);
     expect(doubleTapRecognized, isFalse);
 
     entry.resolve(GestureDisposition.accepted);
     expect(member.accepted, isTrue);
 
-    router.route(up2);
+    tester.route(up2);
     expect(doubleTapRecognized, isFalse);
-    gestureArena.sweep(2);
+    GestureBinding.instance.gestureArena.sweep(2);
     expect(doubleTapRecognized, isFalse);
 
     tap.dispose();
   });
 
-  test('Passive gesture should trigger on double tap cancel', () {
-    PointerRouter router = new PointerRouter();
-    GestureArena gestureArena = new GestureArena();
-    DoubleTapGestureRecognizer tap = new DoubleTapGestureRecognizer(
-      router: router,
-      gestureArena: gestureArena
-    );
+  testGesture('Passive gesture should trigger on double tap cancel', (GestureTester tester) {
+    DoubleTapGestureRecognizer tap = new DoubleTapGestureRecognizer();
 
     bool doubleTapRecognized = false;
     tap.onDoubleTap = () {
@@ -563,15 +504,15 @@ void main() {
     new FakeAsync().run((FakeAsync async) {
       tap.addPointer(down1);
       TestGestureArenaMember member = new TestGestureArenaMember();
-      gestureArena.add(1, member);
-      gestureArena.close(1);
+      GestureBinding.instance.gestureArena.add(1, member);
+      tester.closeArena(1);
       expect(doubleTapRecognized, isFalse);
-      router.route(down1);
+      tester.route(down1);
       expect(doubleTapRecognized, isFalse);
 
-      router.route(up1);
+      tester.route(up1);
       expect(doubleTapRecognized, isFalse);
-      gestureArena.sweep(1);
+      GestureBinding.instance.gestureArena.sweep(1);
       expect(doubleTapRecognized, isFalse);
 
       expect(member.accepted, isFalse);

@@ -4,14 +4,19 @@
 
 import 'dart:async';
 
-import 'package:flutter/animation.dart';
-import 'package:flutter/rendering.dart';
+import 'package:flutter/rendering.dart' show RenderStack;
 
 import 'basic.dart';
+import 'container.dart';
 import 'framework.dart';
 import 'overlay.dart';
 
 /// An opaque reference to a widget that can be mimicked.
+///
+/// Obtained from [MimicableState.startMimic].
+///
+/// This handle should be passed to a [Mimic] widget via its [Mimic.original]
+/// property.
 class MimicableHandle {
   MimicableHandle._(this._state);
 
@@ -27,15 +32,19 @@ class MimicableHandle {
 }
 
 /// An overlay entry that is mimicking another widget.
+///
+/// Obtained from [MimicableState.liftToOverlay].
 class MimicOverlayEntry {
-  MimicOverlayEntry._(this._key) {
+  MimicOverlayEntry._(this._handle, this._overlay) {
+    _initialGlobalBounds = _handle.globalBounds;
     _overlayEntry = new OverlayEntry(builder: _build);
-    _initialGlobalBounds = _key.globalBounds;
+    _overlay.insert(_overlayEntry);
   }
 
   Rect _initialGlobalBounds;
 
-  MimicableHandle _key;
+  MimicableHandle _handle;
+  OverlayState _overlay;
   OverlayEntry _overlayEntry;
 
   // Animation state
@@ -49,12 +58,12 @@ class MimicOverlayEntry {
   /// given curve.
   ///
   /// This function can only be called once per overlay entry.
-  Future animateTo({
+  Future<Null> animateTo({
     GlobalKey targetKey,
     Duration duration,
     Curve curve: Curves.linear
   }) {
-    assert(_key != null);
+    assert(_handle != null);
     assert(_overlayEntry != null);
     assert(targetKey != null);
     assert(duration != null);
@@ -63,7 +72,8 @@ class MimicOverlayEntry {
     _curve = curve;
     // TODO(abarth): Support changing the animation target when in flight.
     assert(_controller == null);
-    _controller = new AnimationController(duration: duration)
+    // TODO(ianh): Need to get a TickerProvider that's tied to the Overlay's TickerMode.
+    _controller = new AnimationController(duration: duration, vsync: _overlay)
       ..addListener(_overlayEntry.markNeedsBuild);
     return _controller.forward();
   }
@@ -77,22 +87,23 @@ class MimicOverlayEntry {
    _overlayEntry?.markNeedsBuild();
  }
 
-  /// Remove this entry from the overlay and restore the widget to its original place in the tree.
+  /// Remove this entry from the overlay and restore the widget to its original
+  /// place in the tree.
   ///
   /// Once removed, the overlay entry cannot be used further.
   void dispose() {
     _targetKey = null;
     _curve = null;
-    _controller?.stop();
+    _controller?.dispose();
     _controller = null;
-    _key.stopMimic();
-    _key = null;
+    _handle.stopMimic();
+    _handle = null;
     _overlayEntry.remove();
     _overlayEntry = null;
   }
 
   Widget _build(BuildContext context) {
-    assert(_key != null);
+    assert(_handle != null);
     assert(_overlayEntry != null);
     Rect globalBounds = _initialGlobalBounds;
     Point globalPosition = globalBounds.topLeft;
@@ -110,103 +121,135 @@ class MimicOverlayEntry {
 
     RenderBox stack = context.ancestorRenderObjectOfType(const TypeMatcher<RenderStack>());
     // TODO(abarth): Handle the case where the transform here isn't just a translation.
-    Point localPosition = stack == null ? globalPosition: stack.globalToLocal(globalPosition);
+    // TODO(ianh): We should probably be getting the overlay's render object rather than looking for a RenderStack.
+    assert(stack != null);
+    Point localPosition = stack.globalToLocal(globalPosition);
     return new Positioned(
       left: localPosition.x,
       top: localPosition.y,
       width: globalBounds.width,
       height: globalBounds.height,
-      child: new Mimic(original: _key)
+      child: new Mimic(original: _handle)
     );
   }
 }
 
 /// A widget that copies the appearance of another widget.
-class Mimic extends StatelessComponent {
+///
+/// The other widget should be specified (via the [original] property) by
+/// providing a [MimicableHandle] obtained from [MimicableState.startMimic].
+class Mimic extends StatelessWidget {
+  /// Creates a widget that copies the appearance of another widget.
   Mimic({ Key key, this.original }) : super(key: key);
 
   /// A handle to the widget that this widget should copy.
+  ///
+  /// Obtained from [MimicableState.startMimic].
   final MimicableHandle original;
 
+  @override
   Widget build(BuildContext context) {
-    if (original != null && original._state._beingMimicked)
+    if (original != null && original._state.mounted && original._state._placeholderSize != null)
       return original._state.config.child;
     return new Container();
   }
 }
 
 /// A widget that can be copied by a [Mimic].
-class Mimicable extends StatefulComponent {
+///
+/// This widget's State, [MimicableState], contains an API for initiating the
+/// mimic operation. Typically you would obtain this state by assigning a
+/// [GlobalKey] to the [Mimicable] and then using [GlobalKey.currentState].
+class Mimicable extends StatefulWidget {
+  /// Creates a widget that can be copies by a [Mimic].
   Mimicable({ Key key, this.child }) : super(key: key);
 
+  /// The widget below this widget in the tree.
   final Widget child;
 
+  @override
   MimicableState createState() => new MimicableState();
 }
 
+/// The state for a [Mimicable].
+///
+/// Exposes an API for starting and stopping mimicking.
 class MimicableState extends State<Mimicable> {
-  Size _size;
-  bool _beingMimicked = false;
+  Size _placeholderSize;
+
+  Rect get _globalBounds {
+    assert(mounted);
+    RenderBox box = context.findRenderObject();
+    assert(box != null);
+    assert(box.hasSize);
+    assert(!box.needsLayout);
+    // TODO(abarth): The bounds will be wrong if there's a scale or rotation transform involved
+    return box.localToGlobal(Point.origin) & box.size;
+  }
 
   /// Start the mimicking process.
   ///
   /// The child of this object will no longer be built at this location in the
-  /// tree.  Instead, this widget will build a transparent placeholder with the
+  /// tree. Instead, this widget will build a transparent placeholder with the
   /// same dimensions as the widget had when the mimicking process started.
+  ///
+  /// If you use [startMimic], it is your responsibility to do something with
+  /// the returned [MimicableHandle]; typically, passing it to a [Mimic] widget.
+  /// To mimic the child in the [Overlay], consider using [liftToOverlay()]
+  /// instead.
+  ///
+  /// To end the mimic process, call [MimicableHandle.stopMimic] on the returned
+  /// object.
   MimicableHandle startMimic() {
-    assert(!_beingMimicked);
-    assert(_size != null);
+    assert(() {
+      if (_placeholderSize != null) {
+        throw new FlutterError(
+          'Mimicable started while already active.\n'
+          'When startMimic() or liftToOverlay() is called on a MimicableState, the mimic becomes active. '
+          'While active, it cannot be reactivated until it is stopped. '
+          'To stop a Mimicable started with startMimic(), call the MimicableHandle object\'s stopMimic() method. '
+          'To stop a Mimicable started with liftToOverlay(), call dispose() on the MimicOverlayEntry.'
+        );
+      }
+      return true;
+    });
     setState(() {
-      _beingMimicked = true;
+      _placeholderSize = context.size;
     });
     return new MimicableHandle._(this);
   }
 
-  /// Mimic this object in the enclosing overlay.
+  /// Start the mimicking process and mimic this object in the enclosing
+  /// [Overlay].
   ///
   /// The child of this object will no longer be built at this location in the
-  /// tree.  Instead, (1) this widget will build a transparent placeholder with
+  /// tree. Instead, (1) this widget will build a transparent placeholder with
   /// the same dimensions as the widget had when the mimicking process started
   /// and (2) the child will be placed in the enclosing overlay.
+  ///
+  /// To end the mimic process, call [MimicOverlayEntry.dispose] on the returned
+  /// object.
   MimicOverlayEntry liftToOverlay() {
-    OverlayState overlay = Overlay.of(context);
-    assert(overlay != null); // You need an overlay to lift into.
-    MimicOverlayEntry entry = new MimicOverlayEntry._(startMimic());
-    overlay.insert(entry._overlayEntry);
-    return entry;
+    OverlayState overlay = Overlay.of(context, debugRequiredFor: config);
+    return new MimicOverlayEntry._(startMimic(), overlay);
   }
 
   void _stopMimic() {
-    assert(_beingMimicked);
-    if (!mounted) {
-      _beingMimicked = false;
-      return;
+    assert(_placeholderSize != null);
+    if (mounted) {
+      setState(() {
+        _placeholderSize = null;
+      });
     }
-    setState(() {
-      _beingMimicked = false;
-    });
   }
 
-  Rect get _globalBounds {
-    RenderBox box = context.findRenderObject();
-    return box.localToGlobal(Point.origin) & box.size;
-  }
-
-  void _handleSizeChanged(Size size) {
-    setState(() {
-      _size = size;
-    });
-  }
-
+  @override
   Widget build(BuildContext context) {
-    if (_beingMimicked) {
+    if (_placeholderSize != null) {
       return new ConstrainedBox(
-        constraints: new BoxConstraints.tight(_size)
+        constraints: new BoxConstraints.tight(_placeholderSize)
       );
     }
-    return new SizeObserver(
-      onSizeChanged: _handleSizeChanged,
-      child: config.child
-    );
+    return config.child;
   }
 }

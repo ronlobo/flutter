@@ -4,15 +4,16 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/widgets.dart';
-import 'package:test/test.dart';
 
 List<String> ancestors = <String>[];
 
-class TestComponent extends StatefulComponent {
-  TestComponentState createState() => new TestComponentState();
+class TestWidget extends StatefulWidget {
+  @override
+  TestWidgetState createState() => new TestWidgetState();
 }
 
-class TestComponentState extends State<TestComponent> {
+class TestWidgetState extends State<TestWidget> {
+  @override
   void initState() {
     super.initState();
     context.visitAncestorElements((Element element) {
@@ -21,14 +22,13 @@ class TestComponentState extends State<TestComponent> {
     });
   }
 
+  @override
   Widget build(BuildContext context) => new Container();
 }
 
 void main() {
-  test('initState() is called when we are in the tree', () {
-    testWidgets((WidgetTester tester) {
-      tester.pumpWidget(new Container(child: new TestComponent()));
-      expect(ancestors, equals(<String>['Container', 'RenderObjectToWidgetAdapter<RenderBox>']));
-    });
+  testWidgets('initState() is called when we are in the tree', (WidgetTester tester) async {
+    await tester.pumpWidget(new Container(child: new TestWidget()));
+    expect(ancestors, equals(<String>['Container', 'RenderObjectToWidgetAdapter<RenderBox>']));
   });
 }

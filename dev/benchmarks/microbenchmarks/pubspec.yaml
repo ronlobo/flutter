@@ -1,0 +1,9 @@
+name: microbenchmarks
+description: A new flutter project.
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_test:
+    sdk: flutter
+  stocks:
+    path: ../../../examples/stocks

@@ -2,18 +2,27 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-/// A [Future]-based library for making HTTP requests.
-///
-/// This library is based on Dart's `http` package, but we have removed the
-/// dependency on mirrors and added a `mojo`-based HTTP client.
-library http;
-
+/// A composable, [Future]-based library for making HTTP requests.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'mojo_client.dart';
+import 'client.dart';
 import 'response.dart';
+
+export 'base_client.dart';
+export 'base_request.dart';
+export 'base_response.dart';
+export 'byte_stream.dart';
+export 'client.dart';
+export 'exception.dart';
+export 'io_client.dart';
+export 'multipart_file.dart';
+export 'multipart_request.dart';
+export 'request.dart';
+export 'response.dart';
+export 'streamed_request.dart';
+export 'streamed_response.dart';
 
 /// Sends an HTTP HEAD request with the given headers to the given URL, which
 /// can be a [Uri] or a [String].
@@ -21,8 +30,10 @@ import 'response.dart';
 /// This automatically initializes a new [Client] and closes that client once
 /// the request is complete. If you're planning on making multiple requests to
 /// the same server, you should use a single [Client] for all of those requests.
-Future<Response> head(url) =>
-  _withClient((client) => client.head(url));
+///
+/// For more fine-grained control over the request, use [Request] instead.
+Future<Response> head(dynamic url, {Map<String, String> headers}) =>
+  _withClient((Client client) => client.head(url, headers: headers));
 
 /// Sends an HTTP GET request with the given headers to the given URL, which can
 /// be a [Uri] or a [String].
@@ -30,16 +41,34 @@ Future<Response> head(url) =>
 /// This automatically initializes a new [Client] and closes that client once
 /// the request is complete. If you're planning on making multiple requests to
 /// the same server, you should use a single [Client] for all of those requests.
-Future<Response> get(url, {Map<String, String> headers}) =>
-  _withClient((client) => client.get(url, headers: headers));
+///
+/// For more fine-grained control over the request, use [Request] instead.
+Future<Response> get(dynamic url, {Map<String, String> headers}) =>
+  _withClient((Client client) => client.get(url, headers: headers));
 
 /// Sends an HTTP POST request with the given headers and body to the given URL,
 /// which can be a [Uri] or a [String].
 ///
-/// [body] sets the body of the request.
-Future<Response> post(url, {Map<String, String> headers, body}) =>
-  _withClient((client) => client.post(url,
-      headers: headers, body: body));
+/// [body] sets the body of the request. It can be a [String], a [List<int>] or
+/// a [Map<String, String>]. If it's a String, it's encoded using [encoding] and
+/// used as the body of the request. The content-type of the request will
+/// default to "text/plain".
+///
+/// If [body] is a List, it's used as a list of bytes for the body of the
+/// request.
+///
+/// If [body] is a Map, it's encoded as form fields using [encoding]. The
+/// content-type of the request will be set to
+/// `"application/x-www-form-urlencoded"`; this cannot be overridden.
+///
+/// [encoding] defaults to [UTF8].
+///
+/// For more fine-grained control over the request, use [Request] or
+/// [StreamedRequest] instead.
+Future<Response> post(dynamic url, {Map<String, String> headers, dynamic body,
+    Encoding encoding}) =>
+  _withClient((Client client) => client.post(url,
+      headers: headers, body: body, encoding: encoding));
 
 /// Sends an HTTP PUT request with the given headers and body to the given URL,
 /// which can be a [Uri] or a [String].
@@ -48,9 +77,22 @@ Future<Response> post(url, {Map<String, String> headers, body}) =>
 /// a [Map<String, String>]. If it's a String, it's encoded using [encoding] and
 /// used as the body of the request. The content-type of the request will
 /// default to "text/plain".
-Future<Response> put(url, {Map<String, String> headers, body}) =>
-  _withClient((client) => client.put(url,
-      headers: headers, body: body));
+///
+/// If [body] is a List, it's used as a list of bytes for the body of the
+/// request.
+///
+/// If [body] is a Map, it's encoded as form fields using [encoding]. The
+/// content-type of the request will be set to
+/// `"application/x-www-form-urlencoded"`; this cannot be overridden.
+///
+/// [encoding] defaults to [UTF8].
+///
+/// For more fine-grained control over the request, use [Request] or
+/// [StreamedRequest] instead.
+Future<Response> put(dynamic url, {Map<String, String> headers, dynamic body,
+    Encoding encoding}) =>
+  _withClient((Client client) => client.put(url,
+      headers: headers, body: body, encoding: encoding));
 
 /// Sends an HTTP PATCH request with the given headers and body to the given
 /// URL, which can be a [Uri] or a [String].
@@ -71,9 +113,10 @@ Future<Response> put(url, {Map<String, String> headers, body}) =>
 ///
 /// For more fine-grained control over the request, use [Request] or
 /// [StreamedRequest] instead.
-Future<Response> patch(url, {Map<String, String> headers, body}) =>
-  _withClient((client) => client.patch(url,
-      headers: headers, body: body));
+Future<Response> patch(dynamic url, {Map<String, String> headers, dynamic body,
+    Encoding encoding}) =>
+  _withClient((Client client) => client.patch(url,
+      headers: headers, body: body, encoding: encoding));
 
 /// Sends an HTTP DELETE request with the given headers to the given URL, which
 /// can be a [Uri] or a [String].
@@ -83,8 +126,8 @@ Future<Response> patch(url, {Map<String, String> headers, body}) =>
 /// the same server, you should use a single [Client] for all of those requests.
 ///
 /// For more fine-grained control over the request, use [Request] instead.
-Future<Response> delete(url, {Map<String, String> headers}) =>
-  _withClient((client) => client.delete(url, headers: headers));
+Future<Response> delete(dynamic url, {Map<String, String> headers}) =>
+  _withClient((Client client) => client.delete(url, headers: headers));
 
 /// Sends an HTTP GET request with the given headers to the given URL, which can
 /// be a [Uri] or a [String], and returns a Future that completes to the body of
@@ -99,8 +142,8 @@ Future<Response> delete(url, {Map<String, String> headers}) =>
 ///
 /// For more fine-grained control over the request and response, use [Request]
 /// instead.
-Future<String> read(url, {Map<String, String> headers}) =>
-  _withClient((client) => client.read(url, headers: headers));
+Future<String> read(dynamic url, {Map<String, String> headers}) =>
+  _withClient((Client client) => client.read(url, headers: headers));
 
 /// Sends an HTTP GET request with the given headers to the given URL, which can
 /// be a [Uri] or a [String], and returns a Future that completes to the body of
@@ -115,11 +158,14 @@ Future<String> read(url, {Map<String, String> headers}) =>
 ///
 /// For more fine-grained control over the request and response, use [Request]
 /// instead.
-Future<Uint8List> readBytes(url, {Map<String, String> headers}) =>
-  _withClient((client) => client.readBytes(url, headers: headers));
+Future<Uint8List> readBytes(dynamic url, {Map<String, String> headers}) =>
+  _withClient((Client client) => client.readBytes(url, headers: headers));
 
-Future _withClient(Future fn(MojoClient client)) {
-  var client = new MojoClient();
-  var future = fn(client);
-  return future.whenComplete(client.close);
+Future/*<T>*/ _withClient/*<T>*/(Future/*<T>*/ fn(Client client)) async {
+  Client client = new Client();
+  try {
+    return await fn(client);
+  } finally {
+    client.close();
+  }
 }

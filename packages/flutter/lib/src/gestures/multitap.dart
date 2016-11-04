@@ -6,22 +6,35 @@ import 'dart:async';
 import 'dart:ui' show Point, Offset;
 
 import 'arena.dart';
+import 'binding.dart';
 import 'constants.dart';
 import 'events.dart';
 import 'pointer_router.dart';
 import 'recognizer.dart';
+import 'tap.dart';
 
+/// Signature for callback when the user has tapped the screen at the same
+/// location twice in quick succession.
 typedef void GestureDoubleTapCallback();
 
-typedef void GestureMultiTapDownCallback(Point globalPosition, int pointer);
-typedef void GestureMultiTapUpCallback(Point globalPosition, int pointer);
+/// Signature used by [MultiTapGestureRecognizer] for when a pointer that might
+/// cause a tap has contacted the screen at a particular location.
+typedef void GestureMultiTapDownCallback(int pointer, TapDownDetails details);
+
+/// Signature used by [MultiTapGestureRecognizer] for when a pointer that will
+/// trigger a tap has stopped contacting the screen at a particular location.
+typedef void GestureMultiTapUpCallback(int pointer, TapUpDetails details);
+
+/// Signature used by [MultiTapGestureRecognizer] for when a tap has occurred.
 typedef void GestureMultiTapCallback(int pointer);
+
+/// Signature for when the pointer that previously triggered a
+/// [GestureMultiTapDownCallback] will not end up causing a tap.
 typedef void GestureMultiTapCancelCallback(int pointer);
 
 /// TapTracker helps track individual tap sequences as part of a
 /// larger gesture.
 class _TapTracker {
-
   _TapTracker({ PointerDownEvent event, this.entry })
     : pointer = event.pointer,
       _initialPosition = event.position;
@@ -32,17 +45,17 @@ class _TapTracker {
 
   bool _isTrackingPointer = false;
 
-  void startTrackingPointer(PointerRouter router, PointerRoute route) {
+  void startTrackingPointer(PointerRoute route) {
     if (!_isTrackingPointer) {
       _isTrackingPointer = true;
-      router.addRoute(pointer, route);
+      GestureBinding.instance.pointerRouter.addRoute(pointer, route);
     }
   }
 
-  void stopTrackingPointer(PointerRouter router, PointerRoute route) {
+  void stopTrackingPointer(PointerRoute route) {
     if (_isTrackingPointer) {
       _isTrackingPointer = false;
-      router.removeRoute(pointer, route);
+      GestureBinding.instance.pointerRouter.removeRoute(pointer, route);
     }
   }
 
@@ -50,22 +63,11 @@ class _TapTracker {
     Offset offset = event.position - _initialPosition;
     return offset.distance <= tolerance;
   }
-
 }
 
-
+/// Recognizes when the user has tapped the screen at the same location twice in
+/// quick succession.
 class DoubleTapGestureRecognizer extends GestureRecognizer {
-
-  DoubleTapGestureRecognizer({
-    PointerRouter router,
-    GestureArena gestureArena,
-    this.onDoubleTap
-  }) : _router = router,
-       _gestureArena = gestureArena {
-    assert(router != null);
-    assert(gestureArena != null);
-  }
-
   // Implementation notes:
   // The double tap recognizer can be in one of four states. There's no
   // explicit enum for the states, because they are already captured by
@@ -80,20 +82,21 @@ class DoubleTapGestureRecognizer extends GestureRecognizer {
   // _firstTap records the successful tap.
   // Second tap in progress: Much like the "first tap in progress" state, but
   // _firstTap is non-null.  If a tap completes successfully while in this
-  // state, the callback is invoked and the state is reset.
+  // state, the callback is called and the state is reset.
   // There are various other scenarios that cause the state to reset:
   // - All in-progress taps are rejected (by time, distance, pointercancel, etc)
   // - The long timer between taps expires
   // - The gesture arena decides we have been rejected wholesale
 
-  PointerRouter _router;
-  GestureArena _gestureArena;
+  /// Called when the user has tapped the screen at the same location twice in
+  /// quick succession.
   GestureDoubleTapCallback onDoubleTap;
 
   Timer _doubleTapTimer;
   _TapTracker _firstTap;
   final Map<int, _TapTracker> _trackers = new Map<int, _TapTracker>();
 
+  @override
   void addPointer(PointerEvent event) {
     // Ignore out-of-bounds second taps.
     if (_firstTap != null &&
@@ -102,13 +105,13 @@ class DoubleTapGestureRecognizer extends GestureRecognizer {
     _stopDoubleTapTimer();
     _TapTracker tracker = new _TapTracker(
       event: event,
-      entry: _gestureArena.add(event.pointer, this)
+      entry: GestureBinding.instance.gestureArena.add(event.pointer, this)
     );
     _trackers[event.pointer] = tracker;
-    tracker.startTrackingPointer(_router, handleEvent);
+    tracker.startTrackingPointer(_handleEvent);
   }
 
-  void handleEvent(PointerEvent event) {
+  void _handleEvent(PointerEvent event) {
     _TapTracker tracker = _trackers[event.pointer];
     assert(tracker != null);
     if (event is PointerUpEvent) {
@@ -124,8 +127,10 @@ class DoubleTapGestureRecognizer extends GestureRecognizer {
     }
   }
 
+  @override
   void acceptGesture(int pointer) { }
 
+  @override
   void rejectGesture(int pointer) {
     _TapTracker tracker = _trackers[pointer];
     // If tracker isn't in the list, check if this is the first tap tracker
@@ -150,10 +155,10 @@ class DoubleTapGestureRecognizer extends GestureRecognizer {
       _reset();
   }
 
+  @override
   void dispose() {
     _reset();
-    _router = null;
-    _gestureArena = null;
+    super.dispose();
   }
 
   void _reset() {
@@ -164,14 +169,14 @@ class DoubleTapGestureRecognizer extends GestureRecognizer {
       _TapTracker tracker = _firstTap;
       _firstTap = null;
       _reject(tracker);
-      _gestureArena.release(tracker.pointer);
+      GestureBinding.instance.gestureArena.release(tracker.pointer);
     }
     _clearTrackers();
   }
 
   void _registerFirstTap(_TapTracker tracker) {
     _startDoubleTapTimer();
-    _gestureArena.hold(tracker.pointer);
+    GestureBinding.instance.gestureArena.hold(tracker.pointer);
     // Note, order is important below in order for the clear -> reject logic to
     // work properly.
     _freezeTracker(tracker);
@@ -186,7 +191,7 @@ class DoubleTapGestureRecognizer extends GestureRecognizer {
     _freezeTracker(tracker);
     _trackers.remove(tracker.pointer);
     if (onDoubleTap != null)
-      onDoubleTap();
+      invokeCallback/*<Null>*/('onDoubleTap', onDoubleTap);
     _reset();
   }
 
@@ -198,7 +203,7 @@ class DoubleTapGestureRecognizer extends GestureRecognizer {
   }
 
   void _freezeTracker(_TapTracker tracker) {
-    tracker.stopTrackingPointer(_router, handleEvent);
+    tracker.stopTrackingPointer(_handleEvent);
   }
 
   void _startDoubleTapTimer() {
@@ -212,6 +217,8 @@ class DoubleTapGestureRecognizer extends GestureRecognizer {
     }
   }
 
+  @override
+  String toStringShort() => 'double tap';
 }
 
 
@@ -233,9 +240,9 @@ class _TapGesture extends _TapTracker {
        _lastPosition = event.position,
        super(
     event: event,
-    entry: gestureRecognizer._gestureArena.add(event.pointer, gestureRecognizer)
+    entry: GestureBinding.instance.gestureArena.add(event.pointer, gestureRecognizer)
   ) {
-    startTrackingPointer(gestureRecognizer.router, handleEvent);
+    startTrackingPointer(handleEvent);
     if (longTapDelay > Duration.ZERO) {
       _timer = new Timer(longTapDelay, () {
         _timer = null;
@@ -262,16 +269,17 @@ class _TapGesture extends _TapTracker {
     } else if (event is PointerCancelEvent) {
       cancel();
     } else if (event is PointerUpEvent) {
-      stopTrackingPointer(gestureRecognizer.router, handleEvent);
+      stopTrackingPointer(handleEvent);
       _finalPosition = event.position;
       _check();
     }
   }
 
-  void stopTrackingPointer(PointerRouter router, PointerRoute route) {
+  @override
+  void stopTrackingPointer(PointerRoute route) {
     _timer?.cancel();
     _timer = null;
-    super.stopTrackingPointer(router, route);
+    super.stopTrackingPointer(route);
   }
 
   void accept() {
@@ -280,7 +288,7 @@ class _TapGesture extends _TapTracker {
   }
 
   void reject() {
-    stopTrackingPointer(gestureRecognizer.router, handleEvent);
+    stopTrackingPointer(handleEvent);
     gestureRecognizer._resolveTap(pointer, _TapResolution.cancel, null);
   }
 
@@ -290,7 +298,7 @@ class _TapGesture extends _TapTracker {
     if (_wonArena)
       reject();
     else
-      entry.resolve(GestureDisposition.rejected);
+      entry.resolve(GestureDisposition.rejected); // eventually calls reject()
   }
 
   void _check() {
@@ -300,39 +308,49 @@ class _TapGesture extends _TapTracker {
 
 }
 
-/// MultiTapGestureRecognizer is a tap recognizer that treats taps
-/// independently. That is, each pointer sequence that could resolve to a tap
-/// does so independently of others: down-1, down-2, up-1, up-2 produces two
-/// taps, on up-1 and up-2.
+/// Recognizes taps on a per-pointer basis.
+///
+/// [MultiTapGestureRecognizer] considers each sequence of pointer events that
+/// could constitute a tap independently of other pointers: For example, down-1,
+/// down-2, up-1, up-2 produces two taps, on up-1 and up-2.
+///
+/// See also:
+///
+///  * [TapGestureRecognizer]
 class MultiTapGestureRecognizer extends GestureRecognizer {
+  /// Creates a multi-tap gesture recognizer.
+  ///
+  /// The [longTapDelay] defaults to [Duration.ZERO], which means
+  /// [onLongTapDown] is called immediately after [onTapDown].
   MultiTapGestureRecognizer({
-    PointerRouter router,
-    GestureArena gestureArena,
-    this.onTapDown,
-    this.onTapUp,
-    this.onTap,
-    this.onTapCancel,
-    this.longTapDelay: Duration.ZERO,
-    this.onLongTapDown
-  }) : _router = router,
-       _gestureArena = gestureArena {
-    assert(router != null);
-    assert(gestureArena != null);
-  }
+    this.longTapDelay: Duration.ZERO
+  });
 
-  PointerRouter get router => _router;
-  PointerRouter _router;
-  GestureArena get gestureArena => _gestureArena;
-  GestureArena _gestureArena;
+  /// A pointer that might cause a tap has contacted the screen at a particular
+  /// location.
   GestureMultiTapDownCallback onTapDown;
+
+  /// A pointer that will trigger a tap has stopped contacting the screen at a
+  /// particular location.
   GestureMultiTapUpCallback onTapUp;
+
+  /// A tap has occurred.
   GestureMultiTapCallback onTap;
+
+  /// The pointer that previously triggered [onTapDown] will not end up causing
+  /// a tap.
   GestureMultiTapCancelCallback onTapCancel;
+
+  /// The amount of time between [onTapDown] and [onLongTapDown].
   Duration longTapDelay;
+
+  /// A pointer that might cause a tap is still in contact with the screen at a
+  /// particular location after [longTapDelay].
   GestureMultiTapDownCallback onLongTapDown;
 
   final Map<int, _TapGesture> _gestureMap = new Map<int, _TapGesture>();
 
+  @override
   void addPointer(PointerEvent event) {
     assert(!_gestureMap.containsKey(event.pointer));
     _gestureMap[event.pointer] = new _TapGesture(
@@ -341,15 +359,17 @@ class MultiTapGestureRecognizer extends GestureRecognizer {
       longTapDelay: longTapDelay
     );
     if (onTapDown != null)
-      onTapDown(event.position, event.pointer);
+      invokeCallback/*<Null>*/('onTapDown', () => onTapDown(event.pointer, new TapDownDetails(globalPosition: event.position)));
   }
 
+  @override
   void acceptGesture(int pointer) {
     assert(_gestureMap.containsKey(pointer));
     _gestureMap[pointer]?.accept();
     assert(!_gestureMap.containsKey(pointer));
   }
 
+  @override
   void rejectGesture(int pointer) {
     assert(_gestureMap.containsKey(pointer));
     _gestureMap[pointer]?.reject();
@@ -360,29 +380,31 @@ class MultiTapGestureRecognizer extends GestureRecognizer {
     _gestureMap.remove(pointer);
     if (resolution == _TapResolution.tap) {
       if (onTapUp != null)
-        onTapUp(globalPosition, pointer);
+        invokeCallback/*<Null>*/('onTapUp', () => onTapUp(pointer, new TapUpDetails(globalPosition: globalPosition)));
       if (onTap != null)
-        onTap(pointer);
+        invokeCallback/*<Null>*/('onTap', () => onTap(pointer));
     } else {
       if (onTapCancel != null)
-        onTapCancel(pointer);
+        invokeCallback/*<Null>*/('onTapCancel', () => onTapCancel(pointer));
     }
   }
 
   void _handleLongTap(int pointer, Point lastPosition) {
     assert(_gestureMap.containsKey(pointer));
     if (onLongTapDown != null)
-      onLongTapDown(lastPosition, pointer);
+      invokeCallback/*<Null>*/('onLongTapDown', () => onLongTapDown(pointer, new TapDownDetails(globalPosition: lastPosition)));
   }
 
+  @override
   void dispose() {
     List<_TapGesture> localGestures = new List<_TapGesture>.from(_gestureMap.values);
     for (_TapGesture gesture in localGestures)
       gesture.cancel();
     // Rejection of each gesture should cause it to be removed from our map
     assert(_gestureMap.isEmpty);
-    _router = null;
-    _gestureArena = null;
+    super.dispose();
   }
 
+  @override
+  String toStringShort() => 'multitap';
 }

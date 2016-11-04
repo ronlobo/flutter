@@ -3,263 +3,169 @@
 // found in the LICENSE file.
 
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
-import 'package:archive/archive.dart';
-import 'package:flx/bundle.dart';
-import 'package:flx/signing.dart';
 import 'package:path/path.dart' as path;
-import 'package:yaml/yaml.dart';
 
-import 'base/context.dart';
-import 'base/file_system.dart';
+import 'asset.dart';
+import 'base/file_system.dart' show ensureDirectoryExists;
+import 'base/process.dart';
+import 'dart/package_map.dart';
+import 'build_info.dart';
+import 'globals.dart';
 import 'toolchain.dart';
+import 'zip.dart';
 
 const String defaultMainPath = 'lib/main.dart';
-const String defaultAssetBase = 'packages/material_design_icons/icons';
+const String defaultAssetBasePath = '.';
 const String defaultManifestPath = 'flutter.yaml';
-const String defaultFlxOutputPath = 'build/app.flx';
-const String defaultSnapshotPath = 'build/snapshot_blob.bin';
+String get defaultFlxOutputPath => path.join(getBuildDirectory(), 'app.flx');
+String get defaultSnapshotPath => path.join(getBuildDirectory(), 'snapshot_blob.bin');
+String get defaultDepfilePath => path.join(getBuildDirectory(), 'snapshot_blob.bin.d');
 const String defaultPrivateKeyPath = 'privatekey.der';
 
 const String _kSnapshotKey = 'snapshot_blob.bin';
-Map<String, double> _kIconDensities = {
-  'mdpi': 1.0,
-  'hdpi' : 1.5,
-  'xhdpi' : 2.0,
-  'xxhdpi' : 3.0,
-  'xxxhdpi' : 4.0
-};
-const List<String> _kThemes = const ['white', 'black'];
-const List<int> _kSizes = const [18, 24, 36, 48];
 
-class _Asset {
-  final String source;
-  final String base;
-  final String key;
+Future<int> createSnapshot({
+  String snapshotterPath,
+  String mainPath,
+  String snapshotPath,
+  String depfilePath,
+  String packages
+}) {
+  assert(snapshotterPath != null);
+  assert(mainPath != null);
+  assert(snapshotPath != null);
+  assert(packages != null);
 
-  _Asset({ this.source, this.base, this.key });
-}
-
-Map<_Asset, List<_Asset>> _parseAssets(Map manifestDescriptor, String manifestPath) {
-  Map<_Asset, List<_Asset>> result = <_Asset, List<_Asset>>{};
-  if (manifestDescriptor == null)
-    return result;
-  String basePath = path.dirname(path.absolute(manifestPath));
-  if (manifestDescriptor.containsKey('assets')) {
-    for (String asset in manifestDescriptor['assets']) {
-      _Asset baseAsset = new _Asset(base: basePath, key: asset);
-      List<_Asset> variants = <_Asset>[];
-      result[baseAsset] = variants;
-      // Find asset variants
-      String assetPath = path.join(basePath, asset);
-      String assetFilename = path.basename(assetPath);
-      Directory assetDir = new Directory(path.dirname(assetPath));
-      List<FileSystemEntity> files = assetDir.listSync(recursive: true);
-      for (FileSystemEntity entity in files) {
-        if (path.basename(entity.path) == assetFilename &&
-            FileSystemEntity.isFileSync(entity.path) &&
-            entity.path != assetPath) {
-          String key = path.relative(entity.path, from: basePath);
-          variants.add(new _Asset(base: basePath, key: key));
-        }
-      }
-    }
+  final List<String> args = <String>[
+    snapshotterPath,
+    '--packages=$packages',
+    '--snapshot=$snapshotPath'
+  ];
+  if (depfilePath != null) {
+    args.add('--depfile=$depfilePath');
+    args.add('--build-output=$snapshotPath');
   }
-  return result;
+  args.add(mainPath);
+  return runCommandAndStreamOutput(args);
 }
 
-class _MaterialAsset extends _Asset {
-  final String name;
-  final String density;
-  final String theme;
-  final int size;
-
-  _MaterialAsset(this.name, this.density, this.theme, this.size, String assetBase)
-    : super(base: assetBase);
-
-  String get source {
-    List<String> parts = name.split('/');
-    String category = parts[0];
-    String subtype = parts[1];
-    return '$category/drawable-$density/ic_${subtype}_${theme}_${size}dp.png';
-  }
-
-  String get key {
-    List<String> parts = name.split('/');
-    String category = parts[0];
-    String subtype = parts[1];
-    double devicePixelRatio = _kIconDensities[density];
-    if (devicePixelRatio == 1.0)
-      return '$category/ic_${subtype}_${theme}_${size}dp.png';
-    else
-      return '$category/${devicePixelRatio}x/ic_${subtype}_${theme}_${size}dp.png';
-  }
-}
-
-List _generateValues(Map assetDescriptor, String key, List defaults) {
-  if (assetDescriptor.containsKey(key))
-    return [assetDescriptor[key]];
-  return defaults;
-}
-
-void _accumulateMaterialAssets(Map<_Asset, List<_Asset>> result, Map assetDescriptor, String assetBase) {
-  String name = assetDescriptor['name'];
-  for (String theme in _generateValues(assetDescriptor, 'theme', _kThemes)) {
-    for (int size in _generateValues(assetDescriptor, 'size', _kSizes)) {
-      _MaterialAsset main = new _MaterialAsset(name, 'mdpi', theme, size, assetBase);
-      List<_Asset> variants = <_Asset>[];
-      result[main] = variants;
-      for (String density in _generateValues(assetDescriptor, 'density', _kIconDensities.keys)) {
-        if (density == 'mdpi')
-          continue;
-        variants.add(new _MaterialAsset(name, density, theme, size, assetBase));
-      }
-    }
-  }
-}
-
-Map<_Asset, List<_Asset>> _parseMaterialAssets(Map manifestDescriptor, String assetBase) {
-  Map<_Asset, List<_Asset>> result = <_Asset, List<_Asset>>{};
-  if (manifestDescriptor == null || !manifestDescriptor.containsKey('material-design-icons'))
-    return result;
-  for (Map assetDescriptor in manifestDescriptor['material-design-icons']) {
-    _accumulateMaterialAssets(result, assetDescriptor, assetBase);
-  }
-  return result;
-}
-
-dynamic _loadManifest(String manifestPath) {
-  if (manifestPath == null || !FileSystemEntity.isFileSync(manifestPath))
-    return null;
-  String manifestDescriptor = new File(manifestPath).readAsStringSync();
-  return loadYaml(manifestDescriptor);
-}
-
-bool _addAssetFile(Archive archive, _Asset asset) {
-  String source = asset.source ?? asset.key;
-  File file = new File('${asset.base}/$source');
-  if (!file.existsSync()) {
-    printError('Cannot find asset "$source" in directory "${path.absolute(asset.base)}".');
-    return false;
-  }
-  List<int> content = file.readAsBytesSync();
-  archive.addFile(
-    new ArchiveFile.noCompress(asset.key, content.length, content)
-  );
-  return true;
-}
-
-ArchiveFile _createAssetManifest(Map<_Asset, List<_Asset>> assets) {
-  String key = 'AssetManifest.json';
-  Map<String, List<String>> json = <String, List<String>>{};
-  for (_Asset main in assets.keys) {
-    List<String> variants = <String>[];
-    for (_Asset variant in assets[main])
-      variants.add(variant.key);
-    json[main.key] = variants;
-  }
-  List<int> content = UTF8.encode(JSON.encode(json));
-  return new ArchiveFile.noCompress(key, content.length, content);
-}
-
-ArchiveFile _createSnapshotFile(String snapshotPath) {
-  File file = new File(snapshotPath);
-  List<int> content = file.readAsBytesSync();
-  return new ArchiveFile(_kSnapshotKey, content.length, content);
-}
-
-/// Build the flx in a temp dir and return `localBundlePath` on success.
-Future<DirectoryResult> buildInTempDir(
-  Toolchain toolchain, {
-  String mainPath: defaultMainPath
+/// Build the flx in the build directory and return `localBundlePath` on success.
+///
+/// Return `null` on failure.
+Future<String> buildFlx({
+  String mainPath: defaultMainPath,
+  bool precompiledSnapshot: false,
+  bool includeRobotoFonts: true
 }) async {
   int result;
-  Directory tempDir = await Directory.systemTemp.createTemp('flutter_tools');
-  String localBundlePath = path.join(tempDir.path, 'app.flx');
-  String localSnapshotPath = path.join(tempDir.path, 'snapshot_blob.bin');
   result = await build(
-    toolchain,
-    snapshotPath: localSnapshotPath,
-    outputPath: localBundlePath,
-    mainPath: mainPath
+    snapshotPath: defaultSnapshotPath,
+    outputPath: defaultFlxOutputPath,
+    mainPath: mainPath,
+    precompiledSnapshot: precompiledSnapshot,
+    includeRobotoFonts: includeRobotoFonts
   );
-  if (result == 0)
-    return new DirectoryResult(tempDir, localBundlePath);
-  else
-    throw result;
+  return result == 0 ? defaultFlxOutputPath : null;
 }
 
-/// The result from [buildInTempDir]. Note that this object should be disposed after use.
-class DirectoryResult {
-  final Directory directory;
-  final String localBundlePath;
-
-  DirectoryResult(this.directory, this.localBundlePath);
-
-  /// Call this to delete the temporary directory.
-  void dispose() {
-    directory.deleteSync(recursive: true);
-  }
-}
-
-Future<int> build(
-  Toolchain toolchain, {
-  String assetBase: defaultAssetBase,
+Future<int> build({
+  String snapshotterPath,
   String mainPath: defaultMainPath,
   String manifestPath: defaultManifestPath,
-  String outputPath: defaultFlxOutputPath,
-  String snapshotPath: defaultSnapshotPath,
+  String outputPath,
+  String snapshotPath,
+  String depfilePath,
   String privateKeyPath: defaultPrivateKeyPath,
-  bool precompiledSnapshot: false
+  String workingDirPath,
+  String packagesPath,
+  bool precompiledSnapshot: false,
+  bool includeRobotoFonts: true,
+  bool reportLicensedPackages: false
 }) async {
-  printTrace('Building $outputPath');
-
-  Map manifestDescriptor = _loadManifest(manifestPath);
-
-  Map<_Asset, List<_Asset>> assets = _parseAssets(manifestDescriptor, manifestPath);
-  assets.addAll(_parseMaterialAssets(manifestDescriptor, assetBase));
-
-  Archive archive = new Archive();
+  snapshotterPath ??= tools.getHostToolPath(HostTool.SkySnapshot);
+  outputPath ??= defaultFlxOutputPath;
+  snapshotPath ??= defaultSnapshotPath;
+  depfilePath ??= defaultDepfilePath;
+  workingDirPath ??= getAssetBuildDirectory();
+  packagesPath ??= path.absolute(PackageMap.globalPackagesPath);
+  File snapshotFile;
 
   if (!precompiledSnapshot) {
     ensureDirectoryExists(snapshotPath);
 
     // In a precompiled snapshot, the instruction buffer contains script
     // content equivalents
-    int result = await toolchain.compiler.compile(mainPath: mainPath, snapshotPath: snapshotPath);
+    int result = await createSnapshot(
+      snapshotterPath: snapshotterPath,
+      mainPath: mainPath,
+      snapshotPath: snapshotPath,
+      depfilePath: depfilePath,
+      packages: packagesPath
+    );
     if (result != 0) {
       printError('Failed to run the Flutter compiler. Exit code: $result');
       return result;
     }
 
-    archive.addFile(_createSnapshotFile(snapshotPath));
+    snapshotFile = new File(snapshotPath);
   }
 
-  for (_Asset asset in assets.keys) {
-    if (!_addAssetFile(archive, asset))
-      return 1;
-    for (_Asset variant in assets[asset]) {
-      if (!_addAssetFile(archive, variant))
-        return 1;
-    }
-  }
-
-  archive.addFile(_createAssetManifest(assets));
-
-  await CipherParameters.get().seedRandom();
-
-  AsymmetricKeyPair keyPair = keyPairFromPrivateKeyFileSync(privateKeyPath);
-  Uint8List zipBytes = new Uint8List.fromList(new ZipEncoder().encode(archive));
-  ensureDirectoryExists(outputPath);
-  Bundle bundle = new Bundle.fromContent(
-    path: outputPath,
-    manifest: manifestDescriptor,
-    contentBytes: zipBytes,
-    keyPair: keyPair
+  return assemble(
+    manifestPath: manifestPath,
+    snapshotFile: snapshotFile,
+    outputPath: outputPath,
+    privateKeyPath: privateKeyPath,
+    workingDirPath: workingDirPath,
+    packagesPath: packagesPath,
+    includeRobotoFonts: includeRobotoFonts,
+    reportLicensedPackages: reportLicensedPackages
   );
-  bundle.writeSync();
+}
+
+Future<int> assemble({
+  String manifestPath,
+  File snapshotFile,
+  String outputPath,
+  String privateKeyPath: defaultPrivateKeyPath,
+  String workingDirPath,
+  String packagesPath,
+  bool includeRobotoFonts: true,
+  bool reportLicensedPackages: false
+}) async {
+  outputPath ??= defaultFlxOutputPath;
+  workingDirPath ??= getAssetBuildDirectory();
+  packagesPath ??= path.absolute(PackageMap.globalPackagesPath);
+  printTrace('Building $outputPath');
+
+  // Build the asset bundle.
+  AssetBundle assetBundle = new AssetBundle();
+  int result = await assetBundle.build(
+    manifestPath: manifestPath,
+    workingDirPath: workingDirPath,
+    packagesPath: packagesPath,
+    includeRobotoFonts: includeRobotoFonts,
+    reportLicensedPackages: reportLicensedPackages
+  );
+  if (result != 0) {
+    return result;
+  }
+
+  ZipBuilder zipBuilder = new ZipBuilder();
+
+  // Add all entries from the asset bundle.
+  zipBuilder.entries.addAll(assetBundle.entries);
+
+  if (snapshotFile != null)
+    zipBuilder.addEntry(new AssetBundleEntry.fromFile(_kSnapshotKey, snapshotFile));
+
+  ensureDirectoryExists(outputPath);
+
+  printTrace('Encoding zip file to $outputPath');
+  zipBuilder.createZip(new File(outputPath), new Directory(workingDirPath));
+
+  printTrace('Built $outputPath.');
+
   return 0;
 }

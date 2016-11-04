@@ -2,29 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'package:args/command_runner.dart';
 import 'package:flutter_tools/src/commands/logs.dart';
-import 'package:mockito/mockito.dart';
 import 'package:test/test.dart';
 
+import 'src/common.dart';
+import 'src/context.dart';
 import 'src/mocks.dart';
 
-main() => defineTests();
-
-defineTests() {
+void main() {
   group('logs', () {
-    test('returns 0 when no device is connected', () {
+    testUsingContext('fail with a bad device id', () {
       LogsCommand command = new LogsCommand();
       applyMocksToCommand(command);
-      MockDeviceStore mockDevices = command.devices;
-
-      when(mockDevices.android.isConnected()).thenReturn(false);
-      when(mockDevices.iOS.isConnected()).thenReturn(false);
-      when(mockDevices.iOSSimulator.isConnected()).thenReturn(false);
-
-      CommandRunner runner = new CommandRunner('test_flutter', '')
-        ..addCommand(command);
-      runner.run(['logs']).then((int code) => expect(code, equals(0)));
+      return createTestCommandRunner(command).run(<String>['-d', 'abc123', 'logs']).then((int code) {
+        expect(code, 1);
+      });
     });
   });
 }

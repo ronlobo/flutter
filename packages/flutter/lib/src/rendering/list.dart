@@ -11,115 +11,137 @@ import 'viewport.dart';
 /// Parent data for use with [RenderList].
 class ListParentData extends ContainerBoxParentDataMixin<RenderBox> { }
 
-class RenderList extends RenderVirtualViewport<ListParentData> implements HasScrollDirection {
+/// A linear layout of children intended for use as a virtual viewport.
+///
+/// Children are layout out in order along the main axis. If [itemExtent] is
+/// non-null, each child is required to have exactly [itemExtent] extent in the
+/// main axis. If [itemExtent] is null, each child is required to have the same
+/// extent in the main axis as the list itself.
+///
+/// In the cross axis, the render list expands to fill the available space and
+/// each child is required to have the same extent in the cross axis as the list
+/// itself.
+class RenderList extends RenderVirtualViewport<ListParentData> {
+  /// Creates a render list.
+  ///
+  /// By default, the list is oriented vertically and anchored at the start.
   RenderList({
     List<RenderBox> children,
     double itemExtent,
-    EdgeDims padding,
+    EdgeInsets padding,
     int virtualChildCount,
     Offset paintOffset: Offset.zero,
-    Axis scrollDirection: Axis.vertical,
+    Axis mainAxis: Axis.vertical,
+    ViewportAnchor anchor: ViewportAnchor.start,
     LayoutCallback callback
   }) : _itemExtent = itemExtent,
        _padding = padding,
-       _scrollDirection = scrollDirection,
        super(
          virtualChildCount: virtualChildCount,
          paintOffset: paintOffset,
+         mainAxis: mainAxis,
+         anchor: anchor,
          callback: callback
        ) {
     addAll(children);
   }
 
+  /// The main-axis extent of each item in the list.
+  ///
+  /// If [itemExtent] is null, the items are required to match the main-axis
+  /// extent of the list itself.
   double get itemExtent => _itemExtent;
   double _itemExtent;
-  void set itemExtent (double newValue) {
-    assert(newValue != null);
+  set itemExtent (double newValue) {
     if (_itemExtent == newValue)
       return;
     _itemExtent = newValue;
     markNeedsLayout();
   }
 
-  EdgeDims get padding => _padding;
-  EdgeDims _padding;
-  void set padding (EdgeDims newValue) {
+  /// The amount of space by which to inset the children inside the list.
+  EdgeInsets get padding => _padding;
+  EdgeInsets _padding;
+  set padding (EdgeInsets newValue) {
     if (_padding == newValue)
       return;
     _padding = newValue;
     markNeedsLayout();
   }
 
-  Axis get scrollDirection => _scrollDirection;
-  Axis _scrollDirection;
-  void set scrollDirection (Axis newValue) {
-    if (_scrollDirection == newValue)
-      return;
-    _scrollDirection = newValue;
-    markNeedsLayout();
-  }
-
+  @override
   void setupParentData(RenderBox child) {
     if (child.parentData is! ListParentData)
       child.parentData = new ListParentData();
   }
 
-  double get _scrollAxisPadding {
-    switch (scrollDirection) {
-      case Axis.vertical:
-        return padding.vertical;
-      case Axis.horizontal:
-        return padding.horizontal;
-    }
-  }
-
   double get _preferredExtent {
     if (itemExtent == null)
       return double.INFINITY;
-    double extent = itemExtent * virtualChildCount;
+    final int count = virtualChildCount;
+    if (count == null)
+      return double.INFINITY;
+    double extent = itemExtent * count;
     if (padding != null)
-      extent += _scrollAxisPadding;
+      extent += padding.along(mainAxis);
     return extent;
   }
 
-  double _getIntrinsicWidth(BoxConstraints constraints) {
-    assert(constraints.isNormalized);
-    switch (scrollDirection) {
+  double _computeIntrinsicWidth() {
+    switch (mainAxis) {
       case Axis.vertical:
-        return constraints.constrainWidth(0.0);
+        assert(debugThrowIfNotCheckingIntrinsics());
+        return 0.0;
       case Axis.horizontal:
-        return constraints.constrainWidth(_preferredExtent);
+        final double width = _preferredExtent;
+        if (width.isFinite)
+          return width;
+        assert(debugThrowIfNotCheckingIntrinsics());
+        return 0.0;
     }
+    assert(mainAxis != null);
+    return null;
   }
 
-  double getMinIntrinsicWidth(BoxConstraints constraints) {
-    return _getIntrinsicWidth(constraints);
+  @override
+  double computeMinIntrinsicWidth(double height) {
+    return _computeIntrinsicWidth();
   }
 
-  double getMaxIntrinsicWidth(BoxConstraints constraints) {
-    return _getIntrinsicWidth(constraints);
+  @override
+  double computeMaxIntrinsicWidth(double height) {
+    return _computeIntrinsicWidth();
   }
 
-  double _getIntrinsicHeight(BoxConstraints constraints) {
-    assert(constraints.isNormalized);
-    switch (scrollDirection) {
+  double _computeIntrinsicHeight() {
+    switch (mainAxis) {
       case Axis.vertical:
-        return constraints.constrainHeight(_preferredExtent);
+        final double height = _preferredExtent;
+        if (height.isFinite)
+          return height;
+        assert(debugThrowIfNotCheckingIntrinsics());
+        return 0.0;
       case Axis.horizontal:
-        return constraints.constrainHeight(0.0);
+        assert(debugThrowIfNotCheckingIntrinsics());
+        return 0.0;
     }
+    assert(mainAxis != null);
+    return null;
   }
 
-  double getMinIntrinsicHeight(BoxConstraints constraints) {
-    return _getIntrinsicHeight(constraints);
+  @override
+  double computeMinIntrinsicHeight(double width) {
+    return _computeIntrinsicHeight();
   }
 
-  double getMaxIntrinsicHeight(BoxConstraints constraints) {
-    return _getIntrinsicHeight(constraints);
+  @override
+  double computeMaxIntrinsicHeight(double width) {
+    return _computeIntrinsicHeight();
   }
 
+  @override
   void performLayout() {
-    switch (scrollDirection) {
+    switch (mainAxis) {
       case Axis.vertical:
         size = new Size(constraints.maxWidth,
                         constraints.constrainHeight(_preferredExtent));
@@ -142,17 +164,17 @@ class RenderList extends RenderVirtualViewport<ListParentData> implements HasScr
     double y = 0.0;
     double dy = 0.0;
 
-    switch (scrollDirection) {
+    switch (mainAxis) {
       case Axis.vertical:
-        itemWidth = math.max(0, size.width - (padding == null ? 0.0 : padding.horizontal));
+        itemWidth = math.max(0.0, size.width - (padding == null ? 0.0 : padding.horizontal));
         itemHeight = itemExtent ?? size.height;
-        y = padding != null ? padding.top : 0.0;
+        x = padding != null ? padding.left : 0.0;
         dy = itemHeight;
         break;
       case Axis.horizontal:
         itemWidth = itemExtent ?? size.width;
-        itemHeight = math.max(0, size.height - (padding == null ? 0.0 : padding.vertical));
-        x = padding != null ? padding.left : 0.0;
+        itemHeight = math.max(0.0, size.height - (padding == null ? 0.0 : padding.vertical));
+        y = padding != null ? padding.top : 0.0;
         dx = itemWidth;
         break;
     }

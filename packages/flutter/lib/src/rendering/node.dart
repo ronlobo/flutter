@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'package:meta/meta.dart';
+
 /// An abstract node in a tree
 ///
 /// AbstractNode has as notion of depth, attachment, and parent, but does not
@@ -50,36 +52,51 @@ class AbstractNode {
   int get depth => _depth;
 
   /// Call only from overrides of [redepthChildren]
+  @protected
   void redepthChild(AbstractNode child) {
-    assert(child._attached == _attached);
+    assert(child.owner == owner);
     if (child._depth <= _depth) {
       child._depth = _depth + 1;
       child.redepthChildren();
     }
   }
 
-  /// Override this function in subclasses with child nodes to call
+  /// Override this method in subclasses with child nodes to call
   /// redepthChild(child) for each child. Do not call directly.
   void redepthChildren() { }
 
-  bool _attached = false;
-  /// Whether this node is in a tree whose root is attached to something.
-  bool get attached => _attached;
+  Object _owner;
+  /// The owner for this node (null if unattached).
+  Object get owner => _owner;
 
-  /// Mark this node as attached.
+  /// Whether this node is in a tree whose root is attached to something.
+  bool get attached => _owner != null;
+
+  /// Mark this node as attached to the given owner.
   ///
   /// Typically called only from the parent's attach(), and to mark the root of
   /// a tree attached.
-  void attach() {
-    _attached = true;
+  ///
+  /// Subclasses with children should attach all their children to the same
+  /// [owner] whenever this method is called.
+  @mustCallSuper
+  void attach(@checked Object owner) {
+    assert(owner != null);
+    assert(_owner == null);
+    _owner = owner;
   }
 
   /// Mark this node as detached.
   ///
   /// Typically called only from the parent's detach(), and to mark the root of
   /// a tree detached.
+  ///
+  /// Subclasses with children should detach all their children whenever this
+  /// method is called.
+  @mustCallSuper
   void detach() {
-    _attached = false;
+    assert(_owner != null);
+    _owner = null;
   }
 
   AbstractNode _parent;
@@ -87,7 +104,9 @@ class AbstractNode {
   AbstractNode get parent => _parent;
 
   /// Subclasses should call this function when they acquire a new child.
-  void adoptChild(AbstractNode child) {
+  @protected
+  @mustCallSuper
+  void adoptChild(@checked AbstractNode child) {
     assert(child != null);
     assert(child._parent == null);
     assert(() {
@@ -99,12 +118,14 @@ class AbstractNode {
     });
     child._parent = this;
     if (attached)
-      child.attach();
+      child.attach(_owner);
     redepthChild(child);
   }
 
   /// Subclasses should call this function when they lose a child.
-  void dropChild(AbstractNode child) {
+  @protected
+  @mustCallSuper
+  void dropChild(@checked AbstractNode child) {
     assert(child != null);
     assert(child._parent == this);
     assert(child.attached == attached);

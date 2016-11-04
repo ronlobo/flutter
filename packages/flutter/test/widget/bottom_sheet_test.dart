@@ -5,117 +5,147 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/widgets.dart';
-import 'package:test/test.dart';
 
 void main() {
-  test('Verify that a tap dismisses a modal BottomSheet', () {
-    testWidgets((WidgetTester tester) {
-      BuildContext context;
-      bool showBottomSheetThenCalled = false;
+  testWidgets('Verify that a tap dismisses a modal BottomSheet', (WidgetTester tester) async {
+    BuildContext savedContext;
 
-      tester.pumpWidget(new MaterialApp(
-          routes: <String, RouteBuilder>{
-            '/': (RouteArguments args) {
-              context = args.context;
-              return new Container();
-            }
-          }
-      ));
-
-      tester.pump();
-      expect(tester.findText('BottomSheet'), isNull);
-
-      showModalBottomSheet(
-        context: context,
-        builder: (BuildContext context) => new Text('BottomSheet')
-      ).then((_) {
-        showBottomSheetThenCalled = true;
-      });
-
-      tester.pump(); // bottom sheet show animation starts
-      tester.pump(new Duration(seconds: 1)); // animation done
-      expect(tester.findText('BottomSheet'), isNotNull);
-      expect(showBottomSheetThenCalled, isFalse);
-
-      // Tap on the the bottom sheet itself to dismiss it
-      tester.tap(tester.findText('BottomSheet'));
-      tester.pump(); // bottom sheet dismiss animation starts
-      expect(showBottomSheetThenCalled, isTrue);
-      tester.pump(new Duration(seconds: 1)); // last frame of animation (sheet is entirely off-screen, but still present)
-      tester.pump(new Duration(seconds: 1)); // frame after the animation (sheet has been removed)
-      expect(tester.findText('BottomSheet'), isNull);
-
-      showModalBottomSheet(context: context, builder: (BuildContext context) => new Text('BottomSheet'));
-      tester.pump(); // bottom sheet show animation starts
-      tester.pump(new Duration(seconds: 1)); // animation done
-      expect(tester.findText('BottomSheet'), isNotNull);
-
-      // Tap above the the bottom sheet to dismiss it
-      tester.tapAt(new Point(20.0, 20.0));
-      tester.pump(); // bottom sheet dismiss animation starts
-      tester.pump(new Duration(seconds: 1)); // animation done
-      tester.pump(new Duration(seconds: 1)); // rebuild frame
-      expect(tester.findText('BottomSheet'), isNull);
-    });
-  });
-
-  test('Verify that a downwards fling dismisses a persistent BottomSheet', () {
-    testWidgets((WidgetTester tester) {
-      GlobalKey<ScaffoldState> scaffoldKey = new GlobalKey<ScaffoldState>();
-      bool showBottomSheetThenCalled = false;
-
-      tester.pumpWidget(new MaterialApp(
-        routes: <String, RouteBuilder>{
-          '/': (RouteArguments args) {
-            return new Scaffold(
-              key: scaffoldKey,
-              body: new Center(child: new Text('body'))
-            );
-          }
+    await tester.pumpWidget(new MaterialApp(
+      home: new Builder(
+        builder: (BuildContext context) {
+          savedContext = context;
+          return new Container();
         }
-      ));
+      )
+    ));
 
-      expect(showBottomSheetThenCalled, isFalse);
-      expect(tester.findText('BottomSheet'), isNull);
+    await tester.pump();
+    expect(find.text('BottomSheet'), findsNothing);
 
-      scaffoldKey.currentState.showBottomSheet((BuildContext context) {
-        return new Container(
-          margin: new EdgeDims.all(40.0),
-          child: new Text('BottomSheet')
-        );
-      }).closed.then((_) {
-        showBottomSheetThenCalled = true;
-      });
-
-      expect(showBottomSheetThenCalled, isFalse);
-      expect(tester.findText('BottomSheet'), isNull);
-
-      tester.pump(); // bottom sheet show animation starts
-
-      expect(showBottomSheetThenCalled, isFalse);
-      expect(tester.findText('BottomSheet'), isNotNull);
-
-      tester.pump(new Duration(seconds: 1)); // animation done
-
-      expect(showBottomSheetThenCalled, isFalse);
-      expect(tester.findText('BottomSheet'), isNotNull);
-
-      tester.fling(tester.findText('BottomSheet'), const Offset(0.0, 20.0), 1000.0);
-      tester.pump(); // drain the microtask queue (Future completion callback)
-
-      expect(showBottomSheetThenCalled, isTrue);
-      expect(tester.findText('BottomSheet'), isNotNull);
-
-      tester.pump(); // bottom sheet dismiss animation starts
-
-      expect(showBottomSheetThenCalled, isTrue);
-      expect(tester.findText('BottomSheet'), isNotNull);
-
-      tester.pump(new Duration(seconds: 1)); // animation done
-
-      expect(showBottomSheetThenCalled, isTrue);
-      expect(tester.findText('BottomSheet'), isNull);
+    bool showBottomSheetThenCalled = false;
+    showModalBottomSheet/*<Null>*/(
+      context: savedContext,
+      builder: (BuildContext context) => new Text('BottomSheet')
+    ).then((Null result) {
+      expectSync(result, isNull);
+      showBottomSheetThenCalled = true;
     });
+
+    await tester.pump(); // bottom sheet show animation starts
+    await tester.pump(new Duration(seconds: 1)); // animation done
+    expect(find.text('BottomSheet'), findsOneWidget);
+    expect(showBottomSheetThenCalled, isFalse);
+
+    // Tap on the the bottom sheet itself to dismiss it
+    await tester.tap(find.text('BottomSheet'));
+    await tester.pump(); // bottom sheet dismiss animation starts
+    expect(showBottomSheetThenCalled, isTrue);
+    await tester.pump(new Duration(seconds: 1)); // last frame of animation (sheet is entirely off-screen, but still present)
+    await tester.pump(new Duration(seconds: 1)); // frame after the animation (sheet has been removed)
+    expect(find.text('BottomSheet'), findsNothing);
+
+    showBottomSheetThenCalled = false;
+    showModalBottomSheet/*<Null>*/(
+      context: savedContext,
+      builder: (BuildContext context) => new Text('BottomSheet'),
+    ).then((Null result) {
+      expectSync(result, isNull);
+      showBottomSheetThenCalled = true;
+    });
+    await tester.pump(); // bottom sheet show animation starts
+    await tester.pump(new Duration(seconds: 1)); // animation done
+    expect(find.text('BottomSheet'), findsOneWidget);
+    expect(showBottomSheetThenCalled, isFalse);
+
+    // Tap above the the bottom sheet to dismiss it
+    await tester.tapAt(new Point(20.0, 20.0));
+    await tester.pump(); // bottom sheet dismiss animation starts
+    expect(showBottomSheetThenCalled, isTrue);
+    await tester.pump(new Duration(seconds: 1)); // animation done
+    await tester.pump(new Duration(seconds: 1)); // rebuild frame
+    expect(find.text('BottomSheet'), findsNothing);
   });
 
+  testWidgets('Verify that a downwards fling dismisses a persistent BottomSheet', (WidgetTester tester) async {
+    GlobalKey<ScaffoldState> scaffoldKey = new GlobalKey<ScaffoldState>();
+    bool showBottomSheetThenCalled = false;
+
+    await tester.pumpWidget(new MaterialApp(
+      home: new Scaffold(
+        key: scaffoldKey,
+        body: new Center(child: new Text('body'))
+      )
+    ));
+
+    expect(showBottomSheetThenCalled, isFalse);
+    expect(find.text('BottomSheet'), findsNothing);
+
+    scaffoldKey.currentState.showBottomSheet((BuildContext context) {
+      return new Container(
+        margin: new EdgeInsets.all(40.0),
+        child: new Text('BottomSheet')
+      );
+    }).closed.then((_) {
+      showBottomSheetThenCalled = true;
+    });
+
+    expect(showBottomSheetThenCalled, isFalse);
+    expect(find.text('BottomSheet'), findsNothing);
+
+    await tester.pump(); // bottom sheet show animation starts
+
+    expect(showBottomSheetThenCalled, isFalse);
+    expect(find.text('BottomSheet'), findsOneWidget);
+
+    await tester.pump(new Duration(seconds: 1)); // animation done
+
+    expect(showBottomSheetThenCalled, isFalse);
+    expect(find.text('BottomSheet'), findsOneWidget);
+
+    await tester.fling(find.text('BottomSheet'), const Offset(0.0, 20.0), 1000.0);
+    await tester.pump(); // drain the microtask queue (Future completion callback)
+
+    expect(showBottomSheetThenCalled, isTrue);
+    expect(find.text('BottomSheet'), findsOneWidget);
+
+    await tester.pump(); // bottom sheet dismiss animation starts
+
+    expect(showBottomSheetThenCalled, isTrue);
+    expect(find.text('BottomSheet'), findsOneWidget);
+
+    await tester.pump(new Duration(seconds: 1)); // animation done
+
+    expect(showBottomSheetThenCalled, isTrue);
+    expect(find.text('BottomSheet'), findsNothing);
+  });
+
+  testWidgets('Verify that dragging past the bottom dismisses a persistent BottomSheet', (WidgetTester tester) async {
+    // This is a regression test for https://github.com/flutter/flutter/issues/5528
+    GlobalKey<ScaffoldState> scaffoldKey = new GlobalKey<ScaffoldState>();
+
+    await tester.pumpWidget(new MaterialApp(
+      home: new Scaffold(
+        key: scaffoldKey,
+        body: new Center(child: new Text('body'))
+      )
+    ));
+
+    scaffoldKey.currentState.showBottomSheet((BuildContext context) {
+      return new Container(
+        margin: new EdgeInsets.all(40.0),
+        child: new Text('BottomSheet')
+      );
+    });
+
+    await tester.pump(); // bottom sheet show animation starts
+    await tester.pump(new Duration(seconds: 1)); // animation done
+    expect(find.text('BottomSheet'), findsOneWidget);
+
+    await tester.fling(find.text('BottomSheet'), const Offset(0.0, 400.0), 1000.0);
+    await tester.pump(); // drain the microtask queue (Future completion callback)
+    await tester.pump(); // bottom sheet dismiss animation starts
+    await tester.pump(new Duration(seconds: 1)); // animation done
+
+    expect(find.text('BottomSheet'), findsNothing);
+  });
 }

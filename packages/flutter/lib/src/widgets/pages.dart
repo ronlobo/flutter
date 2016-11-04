@@ -2,25 +2,31 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'dart:async';
-
-import 'package:flutter/animation.dart';
-
+import 'basic.dart';
 import 'navigator.dart';
 import 'overlay.dart';
 import 'routes.dart';
 
 /// A modal route that replaces the entire screen.
 abstract class PageRoute<T> extends ModalRoute<T> {
+  /// Creates a modal route that replaces the entire screen.
   PageRoute({
-    Completer<T> completer,
     RouteSettings settings: const RouteSettings()
-  }) : super(completer: completer, settings: settings);
-  bool get opaque => true;
-  bool get barrierDismissable => false;
-  bool canTransitionTo(TransitionRoute nextRoute) => nextRoute is PageRoute;
-  bool canTransitionFrom(TransitionRoute nextRoute) => nextRoute is PageRoute;
+  }) : super(settings: settings);
 
+  @override
+  bool get opaque => true;
+
+  @override
+  bool get barrierDismissable => false;
+
+  @override
+  bool canTransitionTo(TransitionRoute<dynamic> nextRoute) => nextRoute is PageRoute<dynamic>;
+
+  @override
+  bool canTransitionFrom(TransitionRoute<dynamic> nextRoute) => nextRoute is PageRoute<dynamic>;
+
+  @override
   AnimationController createAnimationController() {
     AnimationController controller = super.createAnimationController();
     if (settings.isInitialRoute)

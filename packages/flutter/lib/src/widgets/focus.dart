@@ -4,13 +4,15 @@
 
 import 'dart:async';
 
+import 'package:meta/meta.dart';
+
 import 'basic.dart';
 import 'framework.dart';
 import 'media_query.dart';
 import 'scrollable.dart';
 
 // _noFocusedScope is used by Focus to track the case where none of the Focus
-// component's subscopes (e.g. dialogs) are focused. This is distinct from the
+// widget's subscopes (e.g. dialogs) are focused. This is distinct from the
 // focused scope being null, which means that we haven't yet decided which scope
 // is focused and whichever is the first scope to ask for focus will get it.
 final GlobalKey _noFocusedScope = new GlobalKey();
@@ -19,19 +21,30 @@ class _FocusScope extends InheritedWidget {
   _FocusScope({
     Key key,
     this.focusState,
-    this.scopeFocused: true, // are we focused in our ancestor scope?
-    this.focusedScope, // which of our descendant scopes is focused, if any?
+    this.scopeFocused,
+    this.focusedScope,
     this.focusedWidget,
     Widget child
-  }) : super(key: key, child: child);
+  }) : super(key: key, child: child) {
+    assert(scopeFocused != null);
+  }
 
+  /// The state for this focus scope.
+  ///
+  /// This widget is always our direct parent widget.
   final _FocusState focusState;
+
+  /// Whether this scope is focused in our ancestor focus scope.
   final bool scopeFocused;
 
   // These are mutable because we implicitly change them when they're null in
   // certain cases, basically pretending retroactively that we were constructed
   // with the right keys.
+
+  /// Which of our descendant scopes is focused, if any.
   GlobalKey focusedScope;
+
+  /// Which of our descendant widgets is focused, if any.
   GlobalKey focusedWidget;
 
   // The _setFocusedWidgetIfUnset() methodsdon't need to notify descendants
@@ -44,6 +57,7 @@ class _FocusScope extends InheritedWidget {
     focusedScope = focusState._focusedScope == _noFocusedScope ? null : focusState._focusedScope;
   }
 
+  @override
   bool updateShouldNotify(_FocusScope oldWidget) {
     if (scopeFocused != oldWidget.scopeFocused)
       return true;
@@ -58,6 +72,7 @@ class _FocusScope extends InheritedWidget {
     return false;
   }
 
+  @override
   void debugFillDescription(List<String> description) {
     super.debugFillDescription(description);
     if (scopeFocused)
@@ -69,18 +84,60 @@ class _FocusScope extends InheritedWidget {
   }
 }
 
-class Focus extends StatefulComponent {
+/// A scope for managing the focus state of descendant widgets.
+///
+/// The focus represents where the user's attention is directed. If the use
+/// interacts with the system in a way that isn't visually directed at a
+/// particular widget (e.g., by typing on a keyboard), the interaction is
+/// directed to the currently focused widget.
+///
+/// The focus system consists of a tree of Focus widgets, which is embedded in
+/// the widget tree. Focus widgets themselves can be focused in their enclosing
+/// Focus widget, which means that their subtree is the one that has the current
+/// focus. For example, a dialog creates a Focus widget to maintain focus
+/// within the dialog.  When the dialog closes, its Focus widget is removed from
+/// the tree and focus is restored to whichever other part of the Focus tree
+/// previously had focus.
+///
+/// In addition to tracking which enclosed Focus widget has focus, each Focus
+/// widget also tracks a GlobalKey, which represents the currently focused
+/// widget in this part of the focus tree. If this Focus widget is the currently
+/// focused subtree of the focus system (i.e., the path from it to the root is
+/// focused at each level and it hasn't focused any of its enclosed Focus
+/// widgets), then the widget this this global key actually has the focus in the
+/// entire system.
+class Focus extends StatefulWidget {
+  /// Creates a scope for managing focus.
+  ///
+  /// The [key] argument must not be null.
   Focus({
-    GlobalKey key,
+    @required GlobalKey key,
+    this.initiallyFocusedScope,
     this.child
   }) : super(key: key) {
     assert(key != null);
   }
 
+  /// The global key of the [Focus] widget below this widget in the tree that
+  /// will be focused initially.
+  ///
+  /// If non-null, a [Focus] widget with this key must be added to the tree
+  /// before the end of the current microtask in which the [Focus] widget was
+  /// initially constructed.
+  final GlobalKey initiallyFocusedScope;
+
+  /// The widget below this widget in the tree.
   final Widget child;
 
+  /// The key that currently has focus globally in the entire focus tree.
+  ///
+  /// This field is always null except in checked mode.
   static GlobalKey debugOnlyFocusedKey;
 
+  /// Whether the focus is current at the given context.
+  ///
+  /// If autofocus is true, the given context will become focused if no other
+  /// widget is already focused.
   static bool at(BuildContext context, { bool autofocus: false }) {
     assert(context != null);
     assert(context.widget != null);
@@ -98,8 +155,13 @@ class Focus extends StatefulComponent {
       if (debugOnlyFocusedKey?.currentContext == null)
         debugOnlyFocusedKey = context.widget.key;
       if (debugOnlyFocusedKey != context.widget.key) {
-        debugPrint('Tried to focus widgets with two different keys: $debugOnlyFocusedKey and ${context.widget.key}');
-        assert('If you have more than one focusable widget, then you should put them inside a Focus.' == true);
+        throw new FlutterError(
+          'Missing Focus scope.\n'
+          'Two focusable widgets with different keys, $debugOnlyFocusedKey and ${context.widget.key}, '
+          'exist in the widget tree simultaneously, but they have no Focus widget ancestor.\n'
+          'If you have more than one focusable widget, then you should put them inside a Focus. '
+          'Normally, this is done for you using a Route, via Navigator, WidgetsApp, or MaterialApp.'
+        );
       }
       return true;
     });
@@ -134,6 +196,8 @@ class Focus extends StatefulComponent {
     }
   }
 
+  /// Unfocuses the currently focused widget (if any) in the Focus that most
+  /// tightly encloses the given context.
   static void clear(BuildContext context) {
     _FocusScope focusScope = context.ancestorWidgetOfExactType(_FocusScope);
     if (focusScope != null)
@@ -158,23 +222,61 @@ class Focus extends StatefulComponent {
       focusScope.focusState._setFocusedScope(key);
   }
 
+  @override
   _FocusState createState() => new _FocusState();
 }
 
 class _FocusState extends State<Focus> {
+  @override
   void initState() {
     super.initState();
+    _focusedScope = config.initiallyFocusedScope;
     _updateWidgetRemovalListener(_focusedWidget);
     _updateScopeRemovalListener(_focusedScope);
+
+    assert(() {
+      if (_focusedScope != null)
+        scheduleMicrotask(_debugCheckInitiallyFocusedScope);
+      return true;
+    });
   }
 
+  @override
   void dispose() {
     _updateWidgetRemovalListener(null);
     _updateScopeRemovalListener(null);
     super.dispose();
   }
 
-  GlobalKey _focusedWidget; // when null, the first component to ask if it's focused will get the focus
+  void _debugCheckInitiallyFocusedScope() {
+    assert(config.initiallyFocusedScope != null);
+    assert(() {
+      if (!mounted)
+        return true;
+      Widget widget = config.initiallyFocusedScope.currentWidget;
+      if (widget == null) {
+        throw new FlutterError(
+          'The initially focused scope is not in the tree.\n'
+          'When a Focus widget is given an initially focused scope, that focus '
+          'scope must be added to the tree before the end of the microtask in '
+          'which the Focus widget was first built. However, it is the end of '
+          'the microtask and ${config.initiallyFocusedScope} is not in the '
+          'tree.'
+        );
+      }
+      if (widget is! Focus) {
+        throw new FlutterError(
+          'The initially focused scope was not a Focus widget.\n'
+          'The initially focused scope for a Focus widget must be another '
+          'Focus widget. Instead, the initially focused scope was a '
+          '${widget.runtimeType} widget.'
+        );
+      }
+      return true;
+    });
+  }
+
+  GlobalKey _focusedWidget; // when null, the first widget to ask if it's focused will get the focus
   GlobalKey _currentlyRegisteredWidgetRemovalListenerKey;
 
   void _setFocusedWidget(GlobalKey key) {
@@ -249,7 +351,7 @@ class _FocusState extends State<Focus> {
   }
 
   Size _mediaSize;
-  EdgeDims _mediaPadding;
+  EdgeInsets _mediaPadding;
 
   void _ensureVisibleIfFocused() {
     if (!Focus._atScope(context))
@@ -260,16 +362,15 @@ class _FocusState extends State<Focus> {
     Scrollable.ensureVisible(focusedContext);
   }
 
+  @override
   Widget build(BuildContext context) {
     MediaQueryData data = MediaQuery.of(context);
-    if (data != null) {
-      Size newMediaSize = data.size;
-      EdgeDims newMediaPadding = data.padding;
-      if (newMediaSize != _mediaSize || newMediaPadding != _mediaPadding) {
-        _mediaSize = newMediaSize;
-        _mediaPadding = newMediaPadding;
-        scheduleMicrotask(_ensureVisibleIfFocused);
-      }
+    Size newMediaSize = data.size;
+    EdgeInsets newMediaPadding = data.padding;
+    if (newMediaSize != _mediaSize || newMediaPadding != _mediaPadding) {
+      _mediaSize = newMediaSize;
+      _mediaPadding = newMediaPadding;
+      scheduleMicrotask(_ensureVisibleIfFocused);
     }
     return new Semantics(
       container: true,

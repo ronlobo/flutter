@@ -6,6 +6,7 @@ REM found in the LICENSE file.
 SETLOCAL ENABLEDELAYEDEXPANSION
 FOR %%i IN ("%~dp0..") DO SET "flutter_root=%%~fi" REM Get the parent directory
 SET flutter_tools_dir=%flutter_root%\packages\flutter_tools
+SET flutter_dir=%flutter_root%\packages\flutter
 SET snapshot_path=%flutter_root%\bin\cache\flutter_tools.snapshot
 SET stamp_path=%flutter_root%\bin\cache\flutter_tools.stamp
 SET script_path=%flutter_tools_dir%\bin\flutter_tools.dart
@@ -33,8 +34,11 @@ GOTO :after_snapshot
 CD "%flutter_tools_dir%"
 ECHO Updating flutter tool...
 CALL pub.bat get
+CD "%flutter_dir%"
+REM Allows us to check if sky_engine's REVISION is correct
+CALL pub.bat get
 CD "%flutter_root%"
-CALL %dart% --snapshot="%snapshot_path%" --package-root="%flutter_tools_dir%\packages" "%script_path%"
+CALL %dart% --snapshot="%snapshot_path%" --packages="%flutter_tools_dir%\.packages" "%script_path%"
 <nul SET /p=%revision%> "%stamp_path%"
 
 :after_snapshot
@@ -44,6 +48,6 @@ POPD
 CALL %dart% "%snapshot_path%" %*
 
 IF /I "%ERRORLEVEL%" EQU "253" (
-   CALL %dart% --snapshot="%snapshot_path%" --package-root="%flutter_tools_dir%\packages" "%script_path%"
+   CALL %dart% --snapshot="%snapshot_path%" --packages="%flutter_tools_dir%\.packages" "%script_path%"
    CALL %dart% "%snapshot_path%" %*
 )

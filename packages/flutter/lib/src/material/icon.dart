@@ -4,80 +4,126 @@
 
 import 'package:flutter/widgets.dart';
 
-import 'theme.dart';
+import 'icons.dart';
+import 'icon_button.dart';
 import 'icon_theme.dart';
 import 'icon_theme_data.dart';
+import 'theme.dart';
 
-enum IconSize {
-  s18,
-  s24,
-  s36,
-  s48,
-}
-
-const Map<IconSize, int> _kIconSize = const <IconSize, int>{
-  IconSize.s18: 18,
-  IconSize.s24: 24,
-  IconSize.s36: 36,
-  IconSize.s48: 48,
-};
-
-class Icon extends StatelessComponent {
-  Icon({
+/// A material design icon.
+///
+/// Icons are not interactive. For an interactive icon, consider [IconButton].
+///
+/// Icons are identified by their name (as given on that page), with
+/// spaces converted to underscores, from the [Icons] class. For
+/// example, the "alarm add" icon is [Icons.alarm_add].
+///
+/// Available icons are shown on this page:
+/// <https://design.google.com/icons/>
+///
+/// To use this class, make sure you set `uses-material-design: true`
+/// in your project's `flutter.yaml` file. This ensures that the
+/// MaterialIcons font is included in your application. This font is
+/// used to display the icons.
+///
+/// See also:
+///
+///  * [IconButton], for interactive icons.
+///  * [Icons], for the list of available icons for use with this class.
+///  * [IconTheme], which provides ambient configuration for icons.
+///  * [ImageIcon], for showing icons from [AssetImage]s or other [ImageProvider]s.
+class Icon extends StatelessWidget {
+  /// Creates an icon.
+  ///
+  /// The [size] and [color] default to the value given by the current [IconTheme].
+  const Icon(this.icon, {
     Key key,
-    this.size: IconSize.s24,
-    this.icon: '',
-    this.colorTheme,
+    this.size,
     this.color
-  }) : super(key: key) {
-    assert(size != null);
-    assert(icon != null);
-  }
+  }) : super(key: key);
 
-  final IconSize size;
-  final String icon;
-  final IconThemeColor colorTheme;
+  /// The icon to display. The available icons are described in [Icons].
+  ///
+  /// The icon can be null, in which case the widget will render as an empty
+  /// space of the specified [size].
+  final IconData icon;
+
+  /// The size of the icon in logical pixels.
+  ///
+  /// Icons occupy a square with width and height equal to size.
+  ///
+  /// Defaults to the current [IconTheme] size, if any. If there is no
+  /// [IconTheme], or it does not specify an explicit size, then it defaults to
+  /// 24.0.
+  final double size;
+
+  /// The color to use when drawing the icon.
+  ///
+  /// Defaults to the current [IconTheme] color, if any. If there is
+  /// no [IconTheme], then it defaults to white if the theme is dark
+  /// and black if the theme is light. See [Theme] to set the current
+  /// theme and [ThemeData.brightness] for setting the current theme's
+  /// brightness.
+  ///
+  /// The given color will be adjusted by the opacity of the current
+  /// [IconTheme], if any.
+  ///
+  /// Typically, a material design color will be used, as follows:
+  ///
+  /// ```dart
+  ///  new Icon(
+  ///    icon: Icons.widgets,
+  ///    color: Colors.blue[400],
+  ///  ),
+  /// ```
   final Color color;
 
-  String _getColorSuffix(BuildContext context) {
-    IconThemeColor iconThemeColor = colorTheme;
-    if (iconThemeColor == null) {
-      IconThemeData iconThemeData = IconTheme.of(context);
-      iconThemeColor = iconThemeData == null ? null : iconThemeData.color;
-    }
-    if (iconThemeColor == null) {
-      ThemeBrightness themeBrightness = Theme.of(context).brightness;
-      iconThemeColor = themeBrightness == ThemeBrightness.dark ? IconThemeColor.white : IconThemeColor.black;
-    }
-    switch(iconThemeColor) {
-      case IconThemeColor.white:
-        return "white";
-      case IconThemeColor.black:
-        return "black";
-    }
-  }
-
+  @override
   Widget build(BuildContext context) {
-    String category = '';
-    String subtype = '';
-    List<String> parts = icon.split('/');
-    if (parts.length == 2) {
-      category = parts[0];
-      subtype = parts[1];
-    }
-    String colorSuffix = _getColorSuffix(context);
-    int iconSize = _kIconSize[size];
-    return new AssetImage(
-      name: '$category/ic_${subtype}_${colorSuffix}_${iconSize}dp.png',
-      width: iconSize.toDouble(),
-      height: iconSize.toDouble(),
-      color: color
+    final IconThemeData iconTheme = IconTheme.of(context).fallback();
+
+    final double iconSize = size ?? iconTheme.size;
+
+    if (icon == null)
+      return new SizedBox(width: iconSize, height: iconSize);
+
+    final double iconOpacity = iconTheme.opacity;
+    Color iconColor = color ?? iconTheme.color;
+    if (iconOpacity != 1.0)
+      iconColor = iconColor.withOpacity(iconColor.opacity * iconOpacity);
+
+    return new ExcludeSemantics(
+      child: new SizedBox(
+        width: iconSize,
+        height: iconSize,
+        child: new Center(
+          child: new RichText(
+            text: new TextSpan(
+              text: new String.fromCharCode(icon.codePoint),
+              style: new TextStyle(
+                inherit: false,
+                color: iconColor,
+                fontSize: iconSize,
+                fontFamily: 'MaterialIcons'
+              )
+            )
+          )
+        )
+      )
     );
   }
 
+  @override
   void debugFillDescription(List<String> description) {
     super.debugFillDescription(description);
-    description.add('$icon');
-    description.add('size: $size');
+    if (icon != null) {
+      description.add('$icon');
+    } else {
+      description.add('<empty>');
+    }
+    if (size != null)
+      description.add('size: $size');
+    if (color != null)
+      description.add('color: $color');
   }
 }

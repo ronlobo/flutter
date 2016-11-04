@@ -7,6 +7,7 @@ import 'package:flutter/widgets.dart';
 import 'colors.dart';
 import 'debug.dart';
 import 'icon.dart';
+import 'icons.dart';
 import 'tooltip.dart';
 
 const double _kChipHeight = 32.0;
@@ -20,7 +21,24 @@ const TextStyle _kLabelStyle = const TextStyle(
   textBaseline: TextBaseline.alphabetic
 );
 
-class Chip extends StatelessComponent {
+/// A material design chip.
+///
+/// Chips represent complex entities in small blocks, such as a contact.
+///
+/// Supplying a non-null [onDeleted] callback will cause the chip to include a
+/// button for deleting the chip.
+///
+/// Requires one of its ancestors to be a [Material] widget.
+///
+/// See also:
+///
+///  * [CircleAvatar]
+///  * <https://material.google.com/components/chips.html>
+class Chip extends StatelessWidget {
+  /// Creates a material design chip.
+  ///
+  ///  * [onDeleted] determines whether the chip has a delete button. This
+  ///    callback runs when the delete button is pressed.
   const Chip({
     Key key,
     this.avatar,
@@ -28,10 +46,22 @@ class Chip extends StatelessComponent {
     this.onDeleted
   }) : super(key: key);
 
+  /// A widget to display prior to the chip's label.
+  ///
+  /// Typically a [CircleAvatar] widget.
   final Widget avatar;
+
+  /// The primary content of the chip.
+  ///
+  /// Typically a [Text] widget.
   final Widget label;
+
+  /// Called when the user deletes the chip, e.g., by tapping the delete button.
+  ///
+  /// The delete button is included in the chip only if this callback is non-null.
   final VoidCallback onDeleted;
 
+  @override
   Widget build(BuildContext context) {
     assert(debugCheckHasMaterial(context));
     final bool deletable = onDeleted != null;
@@ -44,7 +74,7 @@ class Chip extends StatelessComponent {
       leftPadding = 0.0;
       children.add(new ExcludeSemantics(
         child: new Container(
-          margin: const EdgeDims.only(right: 8.0),
+          margin: const EdgeInsets.only(right: 8.0),
           width: _kAvatarDiamater,
           height: _kAvatarDiamater,
           child: avatar
@@ -64,10 +94,10 @@ class Chip extends StatelessComponent {
         child: new Tooltip(
           message: 'Delete "$label"',
           child: new Container(
-            padding: const EdgeDims.symmetric(horizontal: 4.0),
+            padding: const EdgeInsets.symmetric(horizontal: 4.0),
             child: new Icon(
-              icon: 'navigation/cancel',
-              size: IconSize.s18,
+              Icons.cancel,
+              size: 18.0,
               color: Colors.black54
             )
           )
@@ -79,14 +109,14 @@ class Chip extends StatelessComponent {
       container: true,
       child: new Container(
         height: _kChipHeight,
-        padding: new EdgeDims.only(left: leftPadding, right: rightPadding),
+        padding: new EdgeInsets.only(left: leftPadding, right: rightPadding),
         decoration: new BoxDecoration(
           backgroundColor: Colors.grey[300],
-          borderRadius: 16.0
+          borderRadius: new BorderRadius.circular(16.0)
         ),
         child: new Row(
           children: children,
-          justifyContent: FlexJustifyContent.collapse
+          mainAxisSize: MainAxisSize.min
         )
       )
     );

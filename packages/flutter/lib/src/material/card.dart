@@ -6,24 +6,48 @@ import 'package:flutter/widgets.dart';
 
 import 'material.dart';
 
-const EdgeDims _kCardMargins = const EdgeDims.all(4.0);
-
-/// A material design card
+/// A material design card. A card has slightly rounded corners and a shadow.
 ///
-/// <https://www.google.com/design/spec/components/cards.html>
-class Card extends StatelessComponent {
-  const Card({ Key key, this.child, this.color }) : super(key: key);
+/// A card is a sheet of [Material] used to represent some related information,
+/// for example an album, a geographical location, a meal, contact details, etc.
+///
+/// See also:
+///
+///  * [ListItem], to display icons and text in a card.
+///  * [ButtonBar], to display buttons at the bottom of a card. Typically these
+///    would be styled using a ButtonTheme created with [new ButtonTheme.bar].
+///  * [showDialog], to display a modal card.
+///  * <https://material.google.com/components/cards.html>
+class Card extends StatelessWidget {
+  /// Creates a material design card.
+  const Card({
+    Key key,
+    this.color,
+    this.elevation: 2,
+    this.child
+  }) : super(key: key);
 
+  /// The widget below this widget in the tree.
   final Widget child;
+
+  /// The color of material used for this card.
   final Color color;
 
+  /// The z-coordinate at which to place this card.
+  ///
+  /// The following elevations have defined shadows: 1, 2, 3, 4, 6, 8, 9, 12, 16, 24
+  ///
+  /// Defaults to 2, the appropriate elevation for cards.
+  final int elevation;
+
+  @override
   Widget build(BuildContext context) {
     return new Container(
-      margin: _kCardMargins,
+      margin: const EdgeInsets.all(4.0),
       child: new Material(
         color: color,
         type: MaterialType.card,
-        elevation: 2,
+        elevation: elevation,
         child: child
       )
     );

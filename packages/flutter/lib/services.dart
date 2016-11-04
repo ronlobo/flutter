@@ -2,23 +2,29 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-/// System services exposed to Flutter apps.
+/// Platform services exposed to Flutter apps.
 ///
-/// For example, this library includes [fetch], which fetches data from the
-/// network.
+/// To use, import `package:flutter/services.dart`.
 ///
-/// This library depends only on core Dart libraries as well as the `mojo`,
-/// `mojo_services`, and `sky_services` and packages.
+/// This library depends only on core Dart libraries and the `foundation`
+/// library.
 library services;
 
-export 'src/services/activity.dart';
 export 'src/services/asset_bundle.dart';
 export 'src/services/binding.dart';
-export 'src/services/fetch.dart';
+export 'src/services/clipboard.dart';
+export 'src/services/haptic_feedback.dart';
+export 'src/services/host_messages.dart';
 export 'src/services/image_cache.dart';
 export 'src/services/image_decoder.dart';
-export 'src/services/image_resource.dart';
-export 'src/services/keyboard.dart';
-export 'src/services/print.dart';
-export 'src/services/service_registry.dart';
-export 'src/services/shell.dart';
+export 'src/services/image_provider.dart';
+export 'src/services/image_resolution.dart';
+export 'src/services/image_stream.dart';
+export 'src/services/path_provider.dart';
+export 'src/services/platform_messages.dart';
+export 'src/services/raw_keyboard.dart';
+export 'src/services/system_chrome.dart';
+export 'src/services/system_navigator.dart';
+export 'src/services/system_sound.dart';
+export 'src/services/text_input.dart';
+export 'src/services/url_launcher.dart';

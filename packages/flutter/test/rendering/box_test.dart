@@ -14,9 +14,9 @@ void main() {
       decoration: new BoxDecoration(
         backgroundColor: const Color(0xFF00FF00),
         gradient: new RadialGradient(
-          center: Point.origin, radius: 500.0,
+          center: FractionalOffset.topLeft, radius: 1.8,
           colors: <Color>[Colors.yellow[500], Colors.blue[500]]),
-        boxShadow: elevationToShadow[3])
+        boxShadow: kElevationToShadow[3])
     );
     layout(root);
     expect(root.size.width, equals(800.0));
@@ -34,13 +34,13 @@ void main() {
       child: size
     );
     RenderBox padding = new RenderPadding(
-      padding: new EdgeDims.all(50.0),
+      padding: new EdgeInsets.all(50.0),
       child: inner
     );
     RenderBox flex = new RenderFlex(
       children: <RenderBox>[padding],
-      direction: FlexDirection.vertical,
-      alignItems: FlexAlignItems.stretch
+      direction: Axis.vertical,
+      crossAxisAlignment: CrossAxisAlignment.stretch
     );
     RenderBox outer = new RenderDecoratedBox(
       decoration: new BoxDecoration(
@@ -64,10 +64,10 @@ void main() {
   });
 
   test("should not have a 0 sized colored Box", () {
-    var coloredBox = new RenderDecoratedBox(
+    RenderBox coloredBox = new RenderDecoratedBox(
       decoration: new BoxDecoration()
     );
-    var paddingBox = new RenderPadding(padding: const EdgeDims.all(10.0),
+    RenderBox paddingBox = new RenderPadding(padding: const EdgeInsets.all(10.0),
         child: coloredBox);
     RenderBox root = new RenderDecoratedBox(
       decoration: new BoxDecoration(),
@@ -82,7 +82,7 @@ void main() {
     RenderDecoratedBox coloredBox = new RenderDecoratedBox(
       decoration: new BoxDecoration());
     RenderPadding paddedBox = new RenderPadding(
-      child: coloredBox, padding: const EdgeDims.all(10.0));
+      child: coloredBox, padding: const EdgeInsets.all(10.0));
 
     layout(paddedBox);
 
