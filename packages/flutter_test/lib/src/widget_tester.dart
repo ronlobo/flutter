@@ -8,7 +8,6 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
-import 'package:meta/meta.dart';
 import 'package:test/test.dart' as test_package;
 
 import 'all_elements.dart';
@@ -16,6 +15,7 @@ import 'binding.dart';
 import 'controller.dart';
 import 'finders.dart';
 import 'test_async_utils.dart';
+import 'test_text_input.dart';
 
 export 'package:test/test.dart' hide expect;
 
@@ -36,22 +36,34 @@ typedef Future<Null> WidgetTesterCallback(WidgetTester widgetTester);
 /// provides convenient widget [Finder]s for use with the
 /// [WidgetTester].
 ///
-/// Example:
+/// ## Sample code
 ///
+/// ```dart
 ///     testWidgets('MyWidget', (WidgetTester tester) async {
 ///       await tester.pumpWidget(new MyWidget());
 ///       await tester.tap(find.text('Save'));
-///       expect(tester, hasWidget(find.text('Success')));
+///       expect(find.text('Success'), findsOneWidget);
 ///     });
+/// ```
 void testWidgets(String description, WidgetTesterCallback callback, {
   bool skip: false,
   test_package.Timeout timeout
 }) {
-  TestWidgetsFlutterBinding binding = TestWidgetsFlutterBinding.ensureInitialized();
-  WidgetTester tester = new WidgetTester._(binding);
+  final TestWidgetsFlutterBinding binding = TestWidgetsFlutterBinding.ensureInitialized();
+  final WidgetTester tester = new WidgetTester._(binding);
   timeout ??= binding.defaultTestTimeout;
   test_package.group('-', () {
-    test_package.test(description, () => binding.runTest(() => callback(tester), tester._endOfTestVerifications), skip: skip);
+    test_package.test(
+      description,
+      () {
+        return binding.runTest(
+          () => callback(tester),
+          tester._endOfTestVerifications,
+          description: description ?? '',
+        );
+      },
+      skip: skip,
+    );
     test_package.tearDown(binding.postTest);
   }, timeout: timeout);
 }
@@ -105,11 +117,14 @@ Future<Null> benchmarkWidgets(WidgetTesterCallback callback) {
     print('│                                                        ');
     print('└─────────────────────────────────────────────────╌┄┈  🐢');
     return true;
-  });
-  TestWidgetsFlutterBinding binding = TestWidgetsFlutterBinding.ensureInitialized();
+  }());
+  final TestWidgetsFlutterBinding binding = TestWidgetsFlutterBinding.ensureInitialized();
   assert(binding is! AutomatedTestWidgetsFlutterBinding);
-  WidgetTester tester = new WidgetTester._(binding);
-  return binding.runTest(() => callback(tester), tester._endOfTestVerifications) ?? new Future<Null>.value();
+  final WidgetTester tester = new WidgetTester._(binding);
+  return binding.runTest(
+    () => callback(tester),
+    tester._endOfTestVerifications,
+  ) ?? new Future<Null>.value();
 }
 
 /// Assert that `actual` matches `matcher`.
@@ -119,11 +134,10 @@ Future<Null> benchmarkWidgets(WidgetTesterCallback callback) {
 /// that have not yet resolved.
 void expect(dynamic actual, dynamic matcher, {
   String reason,
-  bool verbose: false,
-  dynamic formatter
+  dynamic skip, // true or a String
 }) {
   TestAsyncUtils.guardSync();
-  test_package.expect(actual, matcher, reason: reason, verbose: verbose, formatter: formatter);
+  test_package.expect(actual, matcher, reason: reason, skip: skip);
 }
 
 /// Assert that `actual` matches `matcher`.
@@ -137,10 +151,8 @@ void expect(dynamic actual, dynamic matcher, {
 /// that asynchronous APIs are not being called.
 void expectSync(dynamic actual, dynamic matcher, {
   String reason,
-  bool verbose: false,
-  dynamic formatter
 }) {
-  test_package.expect(actual, matcher, reason: reason, verbose: verbose, formatter: formatter);
+  test_package.expect(actual, matcher, reason: reason);
 }
 
 /// Class that programmatically interacts with widgets and the test environment.
@@ -163,9 +175,16 @@ class WidgetTester extends WidgetController implements HitTestDispatcher, Ticker
   /// microtasks, by calling [pump] with the same `duration` (if any). The
   /// supplied [EnginePhase] is the final phase reached during the pump pass; if
   /// not supplied, the whole pass is executed.
+  ///
+  /// Subsequent calls to this is different from [pump] in that it forces a full
+  /// rebuild of the tree, even if [widget] is the same as the previous call.
+  /// [pump] will only rebuild the widgets that have changed.
+  ///
+  /// See also [LiveTestWidgetsFlutterBindingFramePolicy], which affects how
+  /// this method works when the test is run with `flutter run`.
   Future<Null> pumpWidget(Widget widget, [
     Duration duration,
-    EnginePhase phase = EnginePhase.sendSemanticsTree
+    EnginePhase phase = EnginePhase.sendSemanticsUpdate,
   ]) {
     return TestAsyncUtils.guard(() {
       binding.attachRootWidget(widget);
@@ -182,23 +201,31 @@ class WidgetTester extends WidgetController implements HitTestDispatcher, Ticker
   ///
   /// This is a convenience function that just calls
   /// [TestWidgetsFlutterBinding.pump].
+  ///
+  /// See also [LiveTestWidgetsFlutterBindingFramePolicy], which affects how
+  /// this method works when the test is run with `flutter run`.
   @override
   Future<Null> pump([
     Duration duration,
-    EnginePhase phase = EnginePhase.sendSemanticsTree
+    EnginePhase phase = EnginePhase.sendSemanticsUpdate,
   ]) {
     return TestAsyncUtils.guard(() => binding.pump(duration, phase));
   }
 
   /// Repeatedly calls [pump] with the given `duration` until there are no
-  /// longer any transient callbacks scheduled. If no transient callbacks are
-  /// scheduled when the function is called, it returns without calling [pump].
+  /// longer any frames scheduled. This will call [pump] at least once, even if
+  /// no frames are scheduled when the function is called, to flush any pending
+  /// microtasks which may themselves schedule a frame.
   ///
   /// This essentially waits for all animations to have completed.
   ///
-  /// This function will never return (and the test will hang and eventually
-  /// time out and fail) if there is an infinite animation in progress (for
-  /// example, if there is an indeterminate progress indicator spinning).
+  /// If it takes longer that the given `timeout` to settle, then the test will
+  /// fail (this method will throw an exception). In particular, this means that
+  /// if there is an infinite animation in progress (for example, if there is an
+  /// indeterminate progress indicator spinning), this method will throw.
+  ///
+  /// The default timeout is ten minutes, which is longer than most reasonable
+  /// finite animations would last.
   ///
   /// If the function returns, it returns the number of pumps that it performed.
   ///
@@ -209,23 +236,58 @@ class WidgetTester extends WidgetController implements HitTestDispatcher, Ticker
   ///
   /// Alternatively, one can check that the return value from this function
   /// matches the expected number of pumps.
-  Future<int> pumpUntilNoTransientCallbacks([
-    @required Duration duration,
-    EnginePhase phase = EnginePhase.sendSemanticsTree
-  ]) {
+  Future<int> pumpAndSettle([
+      Duration duration = const Duration(milliseconds: 100),
+      EnginePhase phase = EnginePhase.sendSemanticsUpdate,
+      Duration timeout = const Duration(minutes: 10),
+    ]) {
     assert(duration != null);
     assert(duration > Duration.ZERO);
+    assert(timeout != null);
+    assert(timeout > Duration.ZERO);
+    assert(() {
+      final WidgetsBinding binding = this.binding;
+      if (binding is LiveTestWidgetsFlutterBinding &&
+          binding.framePolicy == LiveTestWidgetsFlutterBindingFramePolicy.benchmark) {
+        throw 'When using LiveTestWidgetsFlutterBindingFramePolicy.benchmark, '
+              'hasScheduledFrame is never set to true. This means that pumpAndSettle() '
+              'cannot be used, because it has no way to know if the application has '
+              'stopped registering new frames.';
+      }
+      return true;
+    }());
     int count = 0;
     return TestAsyncUtils.guard(() async {
-      while (binding.transientCallbackCount > 0) {
+      final DateTime endTime = binding.clock.fromNowBy(timeout);
+      do {
+        if (binding.clock.now().isAfter(endTime))
+          throw new FlutterError('pumpAndSettle timed out');
         await binding.pump(duration, phase);
         count += 1;
-      }
-    }).then/*<int>*/((Null _) => count);
+      } while (binding.hasScheduledFrame);
+    }).then<int>((Null _) => count);
   }
 
+  /// Whether there are any any transient callbacks scheduled.
+  ///
+  /// This essentially checks whether all animations have completed.
+  ///
+  /// See also:
+  ///
+  ///  * [pumpAndSettle], which essentially calls [pump] until there are no
+  ///    scheduled frames.
+  ///
+  ///  * [SchedulerBinding.transientCallbackCount], which is the value on which
+  ///    this is based.
+  ///
+  ///  * [SchedulerBinding.hasScheduledFrame], which is true whenever a frame is
+  ///    pending. [SchedulerBinding.hasScheduledFrame] is made true when a
+  ///    widget calls [State.setState], even if there are no transient callbacks
+  ///    scheduled. This is what [pumpAndSettle] uses.
+  bool get hasRunningAnimations => binding.transientCallbackCount > 0;
+
   @override
-  HitTestResult hitTestOnBinding(Point location) {
+  HitTestResult hitTestOnBinding(Offset location) {
     location = binding.localToGlobal(location);
     return super.hitTestOnBinding(location);
   }
@@ -395,6 +457,52 @@ class WidgetTester extends WidgetController implements HitTestDispatcher, Ticker
 
   void _endOfTestVerifications() {
     verifyTickersWereDisposed('at the end of the test');
+  }
+
+  /// Returns the TestTextInput singleton.
+  ///
+  /// Typical app tests will not need to use this value. To add text to widgets
+  /// like [TextField] or [TextFormField], call [enterText].
+  TestTextInput get testTextInput => binding.testTextInput;
+
+  /// Give the text input widget specified by [finder] the focus, as if the
+  /// onscreen keyboard had appeared.
+  ///
+  /// The widget specified by [finder] must be an [EditableText] or have
+  /// an [EditableText] descendant. For example `find.byType(TextField)`
+  /// or `find.byType(TextFormField)`, or `find.byType(EditableText)`.
+  ///
+  /// Tests that just need to add text to widgets like [TextField]
+  /// or [TextFormField] only need to call [enterText].
+  Future<Null> showKeyboard(Finder finder) async {
+    return TestAsyncUtils.guard(() async {
+      final EditableTextState editable = state(find.descendant(
+        of: finder,
+        matching: find.byType(EditableText),
+        matchRoot: true,
+      ));
+      if (editable != binding.focusedEditable) {
+        binding.focusedEditable = editable;
+        await pump();
+      }
+    });
+  }
+
+  /// Give the text input widget specified by [finder] the focus and
+  /// enter [text] as if it been provided by the onscreen keyboard.
+  ///
+  /// The widget specified by [finder] must be an [EditableText] or have
+  /// an [EditableText] descendant. For example `find.byType(TextField)`
+  /// or `find.byType(TextFormField)`, or `find.byType(EditableText)`.
+  ///
+  /// To just give [finder] the focus without entering any text,
+  /// see [showKeyboard].
+  Future<Null> enterText(Finder finder, String text) async {
+    return TestAsyncUtils.guard(() async {
+      await showKeyboard(finder);
+      testTextInput.enterText(text);
+      await idle();
+    });
   }
 }
 

@@ -5,6 +5,7 @@
 import 'dart:convert';
 import 'dart:isolate';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -16,13 +17,12 @@ typedef void OnResultListener(String result);
 // The choice of JSON parsing here is meant as an example that might surface
 // in real-world applications.
 class Calculator {
-  Calculator({ this.onProgressListener, this.onResultListener, String data })
-  // In order to keep the example files smaller, we "cheat" a little and
-  // replicate our small json string into a 10,000-element array.
-  : _data = _replicateJson(data, 10000) {
-    assert(onProgressListener != null);
-    assert(onResultListener != null);
-  }
+  Calculator({ @required this.onProgressListener, @required this.onResultListener, String data })
+    : assert(onProgressListener != null),
+      assert(onResultListener != null),
+      // In order to keep the example files smaller, we "cheat" a little and
+      // replicate our small json string into a 10,000-element array.
+      _data = _replicateJson(data, 10000);
 
   final OnProgressListener onProgressListener;
   final OnResultListener onResultListener;
@@ -36,7 +36,7 @@ class Calculator {
   // Run the computation associated with this Calculator.
   void run() {
     int i = 0;
-    JsonDecoder decoder = new JsonDecoder(
+    final JsonDecoder decoder = new JsonDecoder(
       (dynamic key, dynamic value) {
         if (key is int && i++ % _NOTIFY_INTERVAL == 0)
           onProgressListener(i.toDouble(), _NUM_ITEMS.toDouble());
@@ -44,23 +44,23 @@ class Calculator {
       }
     );
     try {
-      List<dynamic> result = decoder.convert(_data);
-      int n = result.length;
-      onResultListener("Decoded $n results");
+      final List<dynamic> result = decoder.convert(_data);
+      final int n = result.length;
+      onResultListener('Decoded $n results');
     } catch (e, stack) {
-      print("Invalid JSON file: $e");
+      print('Invalid JSON file: $e');
       print(stack);
     }
   }
 
   static String _replicateJson(String data, int count) {
-    StringBuffer buffer = new StringBuffer()..write("[");
+    final StringBuffer buffer = new StringBuffer()..write('[');
     for (int i = 0; i < count; i++) {
       buffer.write(data);
       if (i < count - 1)
         buffer.write(',');
     }
-    buffer.write("]");
+    buffer.write(']');
     return buffer.toString();
   }
 }
@@ -85,10 +85,10 @@ class CalculationMessage {
 // This class manages these ports and maintains state related to the
 // progress of the background computation.
 class CalculationManager {
-  CalculationManager({ this.onProgressListener, this.onResultListener })
-  : _receivePort = new ReceivePort() {
-    assert(onProgressListener != null);
-    assert(onResultListener != null);
+  CalculationManager({ @required this.onProgressListener, @required this.onResultListener })
+    : assert(onProgressListener != null),
+      assert(onResultListener != null),
+      _receivePort = new ReceivePort() {
     _receivePort.listen(_handleMessage);
   }
 
@@ -137,12 +137,12 @@ class CalculationManager {
     // the root bundle (see https://github.com/flutter/flutter/issues/3294).
     // However, the loading process is asynchronous, so the UI will not block
     // while the file is loaded.
-    rootBundle.loadString('services/data.json').then((String data) {
+    rootBundle.loadString('services/data.json').then<Null>((String data) {
       if (isRunning) {
-        CalculationMessage message = new CalculationMessage(data, _receivePort.sendPort);
+        final CalculationMessage message = new CalculationMessage(data, _receivePort.sendPort);
         // Spawn an isolate to JSON-parse the file contents. The JSON parsing
         // is synchronous, so if done in the main isolate, the UI would block.
-        Isolate.spawn(_calculate, message).then((Isolate isolate) {
+        Isolate.spawn(_calculate, message).then<Null>((Isolate isolate) {
           if (!isRunning) {
             isolate.kill(priority: Isolate.IMMEDIATE);
           } else {
@@ -178,14 +178,12 @@ class CalculationManager {
   // Static and global variables are initialized anew in the spawned isolate,
   // in a separate memory space.
   static void _calculate(CalculationMessage message) {
-    SendPort sender = message.sendPort;
-    Calculator calculator = new Calculator(
+    final SendPort sender = message.sendPort;
+    final Calculator calculator = new Calculator(
       onProgressListener: (double completed, double total) {
         sender.send(<double>[ completed, total ]);
       },
-      onResultListener: (String result) {
-        sender.send(result);
-      },
+      onResultListener: sender.send,
       data: message.data
     );
     calculator.run();
@@ -245,9 +243,7 @@ class IsolateExampleState extends State<StatefulWidget> with SingleTickerProvide
             child: new Container(
               width: 120.0,
               height: 120.0,
-              decoration: const BoxDecoration(
-                backgroundColor: const Color(0xFF882222)
-              )
+              color: const Color(0xFF882222),
             )
           ),
           new Opacity(
@@ -286,7 +282,7 @@ class IsolateExampleState extends State<StatefulWidget> with SingleTickerProvide
   }
 
   String _getStatus(CalculationState state) {
-      switch(state) {
+      switch (state) {
         case CalculationState.loading:
           return 'Loading...';
         case CalculationState.calculating:

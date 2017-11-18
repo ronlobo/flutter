@@ -3,12 +3,13 @@
 // found in the LICENSE file.
 
 /// Timeline data recorded by the Flutter runtime.
-///
-/// The data is in the `chrome://tracing` format. It can be saved to a file
-/// and loaded in Chrome for visual inspection.
-///
-/// See https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview
 class Timeline {
+  /// Creates a timeline given JSON-encoded timeline data.
+  ///
+  /// [json] is in the `chrome://tracing` format. It can be saved to a file
+  /// and loaded in Chrome for visual inspection.
+  ///
+  /// See https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview
   factory Timeline.fromJson(Map<String, dynamic> json) {
     return new Timeline._(json, _parseEvents(json));
   }
@@ -24,6 +25,7 @@ class Timeline {
 
 /// A single timeline event.
 class TimelineEvent {
+  /// Creates a timeline event given JSON-encoded event data.
   factory TimelineEvent(Map<String, dynamic> json) {
     return new TimelineEvent._(
       json,
@@ -34,6 +36,9 @@ class TimelineEvent {
       json['tid'],
       json['dur'] != null
         ? new Duration(microseconds: json['dur'])
+        : null,
+      json['tdur'] != null
+        ? new Duration(microseconds: json['tdur'])
         : null,
       json['ts'],
       json['tts'],
@@ -49,6 +54,7 @@ class TimelineEvent {
     this.processId,
     this.threadId,
     this.duration,
+    this.threadDuration,
     this.timestampMicros,
     this.threadTimestampMicros,
     this.arguments
@@ -91,6 +97,14 @@ class TimelineEvent {
   /// Corresponds to the "dur" field in the JSON event.
   final Duration duration;
 
+  /// The thread duration of the event.
+  ///
+  /// Note, some events are reported with duration. Others are reported as a
+  /// pair of begin/end events.
+  ///
+  /// Corresponds to the "tdur" field in the JSON event.
+  final Duration threadDuration;
+
   /// Time passed since tracing was enabled, in microseconds.
   ///
   /// Corresponds to the "ts" field in the JSON event.
@@ -108,7 +122,7 @@ class TimelineEvent {
 }
 
 List<TimelineEvent> _parseEvents(Map<String, dynamic> json) {
-  List<Map<String, dynamic>> jsonEvents = json['traceEvents'];
+  final List<Map<String, dynamic>> jsonEvents = json['traceEvents'];
 
   if (jsonEvents == null)
     return null;

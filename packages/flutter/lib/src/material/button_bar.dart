@@ -27,7 +27,7 @@ class ButtonBar extends StatelessWidget {
   /// Creates a button bar.
   ///
   /// The alignment argument defaults to [MainAxisAlignment.end].
-  ButtonBar({
+  const ButtonBar({
     Key key,
     this.alignment: MainAxisAlignment.end,
     this.mainAxisSize: MainAxisSize.max,
@@ -57,7 +57,7 @@ class ButtonBar extends StatelessWidget {
       child: new Row(
         mainAxisAlignment: alignment,
         mainAxisSize: mainAxisSize,
-        children: children.map/*<Widget>*/((Widget child) {
+        children: children.map<Widget>((Widget child) {
           return new Padding(
             padding: new EdgeInsets.symmetric(horizontal: paddingUnit),
             child: child

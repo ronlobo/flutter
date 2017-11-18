@@ -50,10 +50,11 @@ void debugPrintThrottled(String message, { int wrapWidth }) {
     _debugPrintTask();
 }
 int _debugPrintedCharacters = 0;
-const int _kDebugPrintCapacity = 16 * 1024;
-Duration _kDebugPrintPauseTime = const Duration(seconds: 1);
-Queue<String> _debugPrintBuffer = new Queue<String>();
-Stopwatch _debugPrintStopwatch = new Stopwatch();
+const int _kDebugPrintCapacity = 12 * 1024;
+const Duration _kDebugPrintPauseTime = const Duration(seconds: 1);
+final Queue<String> _debugPrintBuffer = new Queue<String>();
+final Stopwatch _debugPrintStopwatch = new Stopwatch();
+Completer<Null> _debugPrintCompleter;
 bool _debugPrintScheduled = false;
 void _debugPrintTask() {
   _debugPrintScheduled = false;
@@ -62,42 +63,53 @@ void _debugPrintTask() {
     _debugPrintStopwatch.reset();
     _debugPrintedCharacters = 0;
   }
-  while (_debugPrintedCharacters < _kDebugPrintCapacity && _debugPrintBuffer.length > 0) {
-    String line = _debugPrintBuffer.removeFirst();
+  while (_debugPrintedCharacters < _kDebugPrintCapacity && _debugPrintBuffer.isNotEmpty) {
+    final String line = _debugPrintBuffer.removeFirst();
     _debugPrintedCharacters += line.length; // TODO(ianh): Use the UTF-8 byte length instead
     print(line);
   }
-  if (_debugPrintBuffer.length > 0) {
+  if (_debugPrintBuffer.isNotEmpty) {
     _debugPrintScheduled = true;
     _debugPrintedCharacters = 0;
     new Timer(_kDebugPrintPauseTime, _debugPrintTask);
+    _debugPrintCompleter ??= new Completer<Null>();
   } else {
     _debugPrintStopwatch.start();
+    _debugPrintCompleter?.complete();
+    _debugPrintCompleter = null;
   }
 }
+
+/// A Future that resolves when there is no longer any buffered content being
+/// printed by [debugPrintThrottled] (which is the default implementation for
+/// [debugPrint], which is used to report errors to the console).
+Future<Null> get debugPrintDone => _debugPrintCompleter?.future ?? new Future<Null>.value();
 
 final RegExp _indentPattern = new RegExp('^ *(?:[-+*] |[0-9]+[.):] )?');
 enum _WordWrapParseMode { inSpace, inWord, atBreak }
 /// Wraps the given string at the given width.
 ///
-/// Wrapping occurs at space characters (U+0020). Lines that start
-/// with an octothorpe ("#", U+0023) are not wrapped (so for example,
-/// Dart stack traces won't be wrapped).
+/// Wrapping occurs at space characters (U+0020). Lines that start with an
+/// octothorpe ("#", U+0023) are not wrapped (so for example, Dart stack traces
+/// won't be wrapped).
 ///
-/// This is not suitable for use with arbitrary Unicode text. For
-/// example, it doesn't implement UAX #14, can't handle ideographic
-/// text, doesn't hyphenate, and so forth. It is only intended for
-/// formatting error messages.
+/// Subsequent lines attempt to duplicate the indentation of the first line, for
+/// example if the first line starts with multiple spaces. In addition, if a
+/// `wrapIndent` argument is provided, each line after the first is prefixed by
+/// that string.
 ///
-/// The default [debugPrint] implementation uses this for its line
-/// wrapping.
-Iterable<String> debugWordWrap(String message, int width) sync* {
-  if (message.length < width || message[0] == '#') {
+/// This is not suitable for use with arbitrary Unicode text. For example, it
+/// doesn't implement UAX #14, can't handle ideographic text, doesn't hyphenate,
+/// and so forth. It is only intended for formatting error messages.
+///
+/// The default [debugPrint] implementation uses this for its line wrapping.
+Iterable<String> debugWordWrap(String message, int width, { String wrapIndent: '' }) sync* {
+  if (message.length < width || message.trimLeft()[0] == '#') {
     yield message;
     return;
   }
-  Match prefixMatch = _indentPattern.matchAsPrefix(message);
-  String prefix = ' ' * prefixMatch.group(0).length;
+  final Match prefixMatch = _indentPattern.matchAsPrefix(message);
+  final String prefix = wrapIndent + ' ' * prefixMatch.group(0).length;
   int start = 0;
   int startForLengthCalculations = 0;
   bool addPrefix = false;

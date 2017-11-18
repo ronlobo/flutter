@@ -5,8 +5,6 @@
 import 'package:flutter/widgets.dart';
 
 import 'colors.dart';
-import 'icon_theme.dart';
-import 'icon_theme_data.dart';
 import 'theme.dart';
 
 /// A header used in a material design [GridTile].
@@ -14,7 +12,7 @@ import 'theme.dart';
 /// Typically used to add a one or two line header or footer on a [GridTile].
 ///
 /// For a one-line header, include a [title] widget. To add a second line, also
-/// include a [subtitle] wiget. Use [leading] or [trailing] to add an icon.
+/// include a [subtitle] widget. Use [leading] or [trailing] to add an icon.
 ///
 /// See also:
 ///
@@ -24,7 +22,7 @@ class GridTileBar extends StatelessWidget {
   /// Creates a grid tile bar.
   ///
   /// Typically used to with [GridTile].
-  GridTileBar({
+  const GridTileBar({
     Key key,
     this.backgroundColor,
     this.leading,
@@ -62,31 +60,28 @@ class GridTileBar extends StatelessWidget {
   Widget build(BuildContext context) {
     BoxDecoration decoration;
     if (backgroundColor != null)
-      decoration = new BoxDecoration(backgroundColor: backgroundColor);
-
-    EdgeInsets padding;
-    if (leading != null && trailing != null)
-      padding = const EdgeInsets.symmetric(vertical: 16.0, horizontal: 8.0);
-    else if (leading != null)
-      padding = const EdgeInsets.only(left: 8.0, right: 16.0, top: 16.0, bottom: 16.0);
-    else // trailing != null || (leading == null && trailing == null)
-      padding = const EdgeInsets.only(left: 16.0, right: 8.0, top: 16.0, bottom: 16.0);
+      decoration = new BoxDecoration(color: backgroundColor);
 
     final List<Widget> children = <Widget>[];
+    final EdgeInsetsDirectional padding = new EdgeInsetsDirectional.only(
+      start: leading != null ? 8.0 : 16.0,
+      end: trailing != null ? 8.0 : 16.0,
+    );
 
     if (leading != null)
-      children.add(new Padding(padding: const EdgeInsets.only(right: 8.0), child: leading));
+      children.add(new Padding(padding: const EdgeInsetsDirectional.only(end: 8.0), child: leading));
 
-    ThemeData theme = Theme.of(context);
-    ThemeData darkTheme = new ThemeData(
+    final ThemeData theme = Theme.of(context);
+    final ThemeData darkTheme = new ThemeData(
       brightness: Brightness.dark,
       accentColor: theme.accentColor,
       accentColorBrightness: theme.accentColorBrightness
     );
     if (title != null && subtitle != null) {
       children.add(
-        new Flexible(
+        new Expanded(
           child: new Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               new DefaultTextStyle(
@@ -107,7 +102,7 @@ class GridTileBar extends StatelessWidget {
       );
     } else if (title != null || subtitle != null) {
       children.add(
-        new Flexible(
+        new Expanded(
           child: new DefaultTextStyle(
             style: darkTheme.textTheme.subhead,
             softWrap: false,
@@ -119,16 +114,16 @@ class GridTileBar extends StatelessWidget {
     }
 
     if (trailing != null)
-      children.add(new Padding(padding: const EdgeInsets.only(left: 8.0), child: trailing));
+      children.add(new Padding(padding: const EdgeInsetsDirectional.only(start: 8.0), child: trailing));
 
     return new Container(
       padding: padding,
       decoration: decoration,
+      height: (title != null && subtitle != null) ? 68.0 : 48.0,
       child: new Theme(
         data: darkTheme,
-        child: new IconTheme.merge(
-          context: context,
-          data: new IconThemeData(color: Colors.white),
+        child: IconTheme.merge(
+          data: const IconThemeData(color: Colors.white),
           child: new Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: children

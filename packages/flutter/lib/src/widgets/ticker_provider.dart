@@ -4,7 +4,6 @@
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:meta/meta.dart';
 
 import 'framework.dart';
 
@@ -20,13 +19,12 @@ class TickerMode extends InheritedWidget {
   /// Creates a widget that enables or disables tickers.
   ///
   /// The [enabled] argument must not be null.
-  TickerMode({
+  const TickerMode({
     Key key,
     @required this.enabled,
     Widget child
-  }) : super(key: key, child: child) {
-    assert(enabled != null);
-  }
+  }) : assert(enabled != null),
+       super(key: key, child: child);
 
   /// The current ticker mode of this subtree.
   ///
@@ -51,7 +49,7 @@ class TickerMode extends InheritedWidget {
   /// bool tickingEnabled = TickerMode.of(context);
   /// ```
   static bool of(BuildContext context) {
-    TickerMode widget = context.inheritFromWidgetOfExactType(TickerMode);
+    final TickerMode widget = context.inheritFromWidgetOfExactType(TickerMode);
     return widget?.enabled ?? true;
   }
 
@@ -59,9 +57,9 @@ class TickerMode extends InheritedWidget {
   bool updateShouldNotify(TickerMode old) => enabled != old.enabled;
 
   @override
-  void debugFillDescription(List<String> description) {
-    super.debugFillDescription(description);
-    description.add('mode: ${ enabled ? "enabled" : "disabled" }');
+  void debugFillProperties(DiagnosticPropertiesBuilder description) {
+    super.debugFillProperties(description);
+    description.add(new FlagProperty('mode', value: enabled, ifTrue: 'enabled', ifFalse: 'disabled', showName: true));
   }
 }
 
@@ -75,7 +73,10 @@ class TickerMode extends InheritedWidget {
 /// This mixin only supports vending a single ticker. If you might have multiple
 /// [AnimationController] objects over the lifetime of the [State], use a full
 /// [TickerProviderStateMixin] instead.
-abstract class SingleTickerProviderStateMixin implements State<dynamic>, TickerProvider { // ignore: TYPE_ARGUMENT_NOT_MATCHING_BOUNDS, https://github.com/dart-lang/sdk/issues/25232
+abstract class SingleTickerProviderStateMixin extends State<dynamic> implements TickerProvider { // ignore: TYPE_ARGUMENT_NOT_MATCHING_BOUNDS, https://github.com/dart-lang/sdk/issues/25232
+  // This class is intended to be used as a mixin, and should not be
+  // extended directly.
+  factory SingleTickerProviderStateMixin._() => null;
 
   Ticker _ticker;
 
@@ -91,8 +92,12 @@ abstract class SingleTickerProviderStateMixin implements State<dynamic>, TickerP
         'objects and those objects might use it more than one time in total, then instead of '
         'mixing in a SingleTickerProviderStateMixin, use a regular TickerProviderStateMixin.'
       );
-    });
+    }());
     _ticker = new Ticker(onTick, debugLabel: 'created by $this');
+    // We assume that this is called from initState, build, or some sort of
+    // event handler, and that thus TickerMode.of(context) would return true. We
+    // can't actually check that here because if we're in initState then we're
+    // not allowed to do inheritance checks yet.
     return _ticker;
   }
 
@@ -110,31 +115,32 @@ abstract class SingleTickerProviderStateMixin implements State<dynamic>, TickerP
         'Otherwise, the ticker will leak.\n'
         'The offending ticker was: ${_ticker.toString(debugIncludeStack: true)}'
       );
-    });
+    }());
     super.dispose();
   }
 
   @override
-  void dependenciesChanged() {
-    _ticker.muted = !TickerMode.of(context);
-    super.dependenciesChanged();
+  void didChangeDependencies() {
+    if (_ticker != null)
+      _ticker.muted = !TickerMode.of(context);
+    super.didChangeDependencies();
   }
 
   @override
-  void debugFillDescription(List<String> description) {
-    super.debugFillDescription(description);
+  void debugFillProperties(DiagnosticPropertiesBuilder description) {
+    super.debugFillProperties(description);
+    String tickerDescription;
     if (_ticker != null) {
       if (_ticker.isActive && _ticker.muted)
-        description.add('ticker active but muted');
+        tickerDescription = 'active but muted';
+      else if (_ticker.isActive)
+        tickerDescription = 'active';
+      else if (_ticker.muted)
+        tickerDescription = 'inactive and muted';
       else
-      if (_ticker.isActive)
-        description.add('ticker active');
-      else
-      if (_ticker.muted)
-        description.add('ticker inactive and muted');
-      else
-        description.add('ticker inactive');
+        tickerDescription = 'inactive';
     }
+    description.add(new DiagnosticsProperty<Ticker>('ticker', _ticker, description: tickerDescription, showSeparator: false, defaultValue: null));
   }
 
 }
@@ -149,7 +155,10 @@ abstract class SingleTickerProviderStateMixin implements State<dynamic>, TickerP
 /// If you only have a single [Ticker] (for example only a single
 /// [AnimationController]) for the lifetime of your [State], then using a
 /// [SingleTickerProviderStateMixin] is more efficient. This is the common case.
-abstract class TickerProviderStateMixin implements State<dynamic>, TickerProvider { // ignore: TYPE_ARGUMENT_NOT_MATCHING_BOUNDS, https://github.com/dart-lang/sdk/issues/25232
+abstract class TickerProviderStateMixin extends State<dynamic> implements TickerProvider { // ignore: TYPE_ARGUMENT_NOT_MATCHING_BOUNDS, https://github.com/dart-lang/sdk/issues/25232
+  // This class is intended to be used as a mixin, and should not be
+  // extended directly.
+  factory TickerProviderStateMixin._() => null;
 
   Set<Ticker> _tickers;
 
@@ -186,25 +195,31 @@ abstract class TickerProviderStateMixin implements State<dynamic>, TickerProvide
         }
       }
       return true;
-    });
+    }());
     super.dispose();
   }
 
   @override
-  void dependenciesChanged() {
+  void didChangeDependencies() {
     final bool muted = !TickerMode.of(context);
     if (_tickers != null) {
       for (Ticker ticker in _tickers)
         ticker.muted = muted;
     }
-    super.dependenciesChanged();
+    super.didChangeDependencies();
   }
 
   @override
-  void debugFillDescription(List<String> description) {
-    super.debugFillDescription(description);
-    if (_tickers != null)
-      description.add('tracking ${_tickers.length} ticker${_tickers.length == 1 ? "" : "s"}');
+  void debugFillProperties(DiagnosticPropertiesBuilder description) {
+    super.debugFillProperties(description);
+    description.add(new DiagnosticsProperty<Set<Ticker>>(
+      'tickers',
+      _tickers,
+      description: _tickers != null ?
+        'tracking ${_tickers.length} ticker${_tickers.length == 1 ? "" : "s"}' :
+        null,
+      defaultValue: null,
+    ));
   }
 
 }

@@ -4,12 +4,15 @@
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:args/args.dart';
-import 'package:path/path.dart' as path;
 
+import '../base/common.dart';
+import '../base/file_system.dart';
+import '../base/io.dart';
 import '../base/logger.dart';
+import '../base/process_manager.dart';
+import '../base/terminal.dart';
 import '../base/utils.dart';
 import '../cache.dart';
 import '../dart/sdk.dart';
@@ -17,9 +20,9 @@ import '../globals.dart';
 import 'analyze_base.dart';
 
 class AnalyzeContinuously extends AnalyzeBase {
-  final List<Directory> repoAnalysisEntryPoints;
+  AnalyzeContinuously(ArgResults argResults, this.repoPackages) : super(argResults);
 
-  AnalyzeContinuously(ArgResults argResults, this.repoAnalysisEntryPoints) : super(argResults);
+  final List<Directory> repoPackages;
 
   String analysisTarget;
   bool firstAnalysis = true;
@@ -30,21 +33,26 @@ class AnalyzeContinuously extends AnalyzeBase {
   Status analysisStatus;
 
   @override
-  Future<int> analyze() async {
+  Future<Null> analyze() async {
     List<String> directories;
 
+    if (argResults['dartdocs'])
+      throwToolExit('The --dartdocs option is currently not supported when using --watch.');
+
     if (argResults['flutter-repo']) {
-      directories = repoAnalysisEntryPoints.map((Directory dir) => dir.path).toList();
+      final PackageDependencyTracker dependencies = new PackageDependencyTracker();
+      dependencies.checkForConflictingDependencies(repoPackages, dependencies);
+      directories = repoPackages.map((Directory dir) => dir.path).toList();
       analysisTarget = 'Flutter repository';
       printTrace('Analyzing Flutter repository:');
       for (String projectPath in directories)
-        printTrace('  ${path.relative(projectPath)}');
+        printTrace('  ${fs.path.relative(projectPath)}');
     } else {
-      directories = <String>[Directory.current.path];
-      analysisTarget = Directory.current.path;
+      directories = <String>[fs.currentDirectory.path];
+      analysisTarget = fs.currentDirectory.path;
     }
 
-    AnalysisServer server = new AnalysisServer(dartSdkPath, directories);
+    final AnalysisServer server = new AnalysisServer(dartSdkPath, directories);
     server.onAnalyzing.listen((bool isAnalyzing) => _handleAnalysisStatus(server, isAnalyzing));
     server.onErrors.listen(_handleAnalysisErrors);
 
@@ -53,8 +61,10 @@ class AnalyzeContinuously extends AnalyzeBase {
     await server.start();
     final int exitCode = await server.onExit;
 
-    printStatus('Analysis server exited with code $exitCode.');
-    return 0;
+    final String message = 'Analysis server exited with code $exitCode.';
+    if (exitCode != 0)
+      throwToolExit(message, exitCode: exitCode);
+    printStatus(message);
   }
 
   void _handleAnalysisStatus(AnalysisServer server, bool isAnalyzing) {
@@ -74,7 +84,7 @@ class AnalyzeContinuously extends AnalyzeBase {
       // Remove errors for deleted files, sort, and print errors.
       final List<AnalysisError> errors = <AnalysisError>[];
       for (String path in analysisErrors.keys.toList()) {
-        if (FileSystemEntity.isFileSync(path)) {
+        if (fs.isFileSync(path)) {
           errors.addAll(analysisErrors[path]);
         } else {
           analysisErrors.remove(path);
@@ -89,13 +99,13 @@ class AnalyzeContinuously extends AnalyzeBase {
           printTrace('error code: ${error.code}');
       }
 
-      dumpErrors(errors.map/*<String>*/((AnalysisError error) => error.toLegacyString()));
+      dumpErrors(errors.map<String>((AnalysisError error) => error.toLegacyString()));
 
       // Print an analysis summary.
       String errorsMessage;
 
-      int issueCount = errors.length;
-      int issueDiff = issueCount - lastErrorCount;
+      final int issueCount = errors.length;
+      final int issueDiff = issueCount - lastErrorCount;
       lastErrorCount = issueCount;
 
       if (firstAnalysis)
@@ -109,13 +119,13 @@ class AnalyzeContinuously extends AnalyzeBase {
       else
         errorsMessage = 'no issues found';
 
-      String files = '${analyzedPaths.length} ${pluralize('file', analyzedPaths.length)}';
-      String seconds = (analysisTimer.elapsedMilliseconds / 1000.0).toStringAsFixed(2);
+      final String files = '${analyzedPaths.length} ${pluralize('file', analyzedPaths.length)}';
+      final String seconds = (analysisTimer.elapsedMilliseconds / 1000.0).toStringAsFixed(2);
       printStatus('$errorsMessage • analyzed $files, $seconds seconds');
 
       if (firstAnalysis && isBenchmarking) {
         writeBenchmark(analysisTimer, issueCount, -1); // TODO(ianh): track members missing dartdocs instead of saying -1
-        server.dispose().then((_) => exit(issueCount > 0 ? 1 : 0));
+        server.dispose().whenComplete(() { exit(issueCount > 0 ? 1 : 0); });
       }
 
       firstAnalysis = false;
@@ -146,23 +156,29 @@ class AnalysisServer {
   final List<String> directories;
 
   Process _process;
-  StreamController<bool> _analyzingController = new StreamController<bool>.broadcast();
-  StreamController<FileAnalysisErrors> _errorsController = new StreamController<FileAnalysisErrors>.broadcast();
+  final StreamController<bool> _analyzingController = new StreamController<bool>.broadcast();
+  final StreamController<FileAnalysisErrors> _errorsController = new StreamController<FileAnalysisErrors>.broadcast();
 
   int _id = 0;
 
   Future<Null> start() async {
-    String snapshot = path.join(sdk, 'bin/snapshots/analysis_server.dart.snapshot');
-    List<String> args = <String>[snapshot, '--sdk', sdk];
+    final String snapshot = fs.path.join(sdk, 'bin/snapshots/analysis_server.dart.snapshot');
+    final List<String> command = <String>[
+      fs.path.join(dartSdkPath, 'bin', 'dart'),
+      snapshot,
+      '--sdk',
+      sdk,
+    ];
 
-    printTrace('dart ${args.join(' ')}');
-    _process = await Process.start(path.join(dartSdkPath, 'bin', 'dart'), args);
-    _process.exitCode.whenComplete(() => _process = null);
+    printTrace('dart ${command.skip(1).join(' ')}');
+    _process = await processManager.start(command);
+    // This callback hookup can't throw.
+    _process.exitCode.whenComplete(() => _process = null); // ignore: unawaited_futures
 
-    Stream<String> errorStream = _process.stderr.transform(UTF8.decoder).transform(const LineSplitter());
-    errorStream.listen((String error) => printError(error));
+    final Stream<String> errorStream = _process.stderr.transform(UTF8.decoder).transform(const LineSplitter());
+    errorStream.listen(printError);
 
-    Stream<String> inStream = _process.stdout.transform(UTF8.decoder).transform(const LineSplitter());
+    final Stream<String> inStream = _process.stdout.transform(UTF8.decoder).transform(const LineSplitter());
     inStream.listen(_handleServerResponse);
 
     // Available options (many of these are obsolete):
@@ -190,7 +206,7 @@ class AnalysisServer {
   Future<int> get onExit => _process.exitCode;
 
   void _sendCommand(String method, Map<String, dynamic> params) {
-    String message = JSON.encode(<String, dynamic> {
+    final String message = JSON.encode(<String, dynamic> {
       'id': (++_id).toString(),
       'method': method,
       'params': params
@@ -202,12 +218,12 @@ class AnalysisServer {
   void _handleServerResponse(String line) {
     printTrace('<== $line');
 
-    dynamic response = JSON.decode(line);
+    final dynamic response = JSON.decode(line);
 
     if (response is Map<dynamic, dynamic>) {
       if (response['event'] != null) {
-        String event = response['event'];
-        dynamic params = response['params'];
+        final String event = response['event'];
+        final dynamic params = response['params'];
 
         if (params is Map<dynamic, dynamic>) {
           if (event == 'server.status')
@@ -219,7 +235,7 @@ class AnalysisServer {
         }
       } else if (response['error'] != null) {
         // Fields are 'code', 'message', and 'stackTrace'.
-        Map<String, dynamic> error = response['error'];
+        final Map<String, dynamic> error = response['error'];
         printError('Error response from the server: ${error['code']} ${error['message']}');
         if (error['stackTrace'] != null)
           printError(error['stackTrace']);
@@ -229,8 +245,8 @@ class AnalysisServer {
 
   void _handleStatus(Map<String, dynamic> statusInfo) {
     // {"event":"server.status","params":{"analysis":{"isAnalyzing":true}}}
-    if (statusInfo['analysis'] != null) {
-      bool isAnalyzing = statusInfo['analysis']['isAnalyzing'];
+    if (statusInfo['analysis'] != null && !_analyzingController.isClosed) {
+      final bool isAnalyzing = statusInfo['analysis']['isAnalyzing'];
       _analyzingController.add(isAnalyzing);
     }
   }
@@ -244,9 +260,10 @@ class AnalysisServer {
 
   void _handleAnalysisIssues(Map<String, dynamic> issueInfo) {
     // {"event":"analysis.errors","params":{"file":"/Users/.../lib/main.dart","errors":[]}}
-    String file = issueInfo['file'];
-    List<AnalysisError> errors = issueInfo['errors'].map((Map<String, dynamic> json) => new AnalysisError(json)).toList();
-    _errorsController.add(new FileAnalysisErrors(file, errors));
+    final String file = issueInfo['file'];
+    final List<AnalysisError> errors = issueInfo['errors'].map((Map<String, dynamic> json) => new AnalysisError(json)).toList();
+    if (!_errorsController.isClosed)
+      _errorsController.add(new FileAnalysisErrors(file, errors));
   }
 
   Future<bool> dispose() async {
@@ -290,7 +307,7 @@ class AnalysisError implements Comparable<AnalysisError> {
     if (offset != other.offset)
       return offset - other.offset;
 
-    int diff = other.severityLevel - severityLevel;
+    final int diff = other.severityLevel - severityLevel;
     if (diff != 0)
       return diff;
 
@@ -299,7 +316,7 @@ class AnalysisError implements Comparable<AnalysisError> {
 
   @override
   String toString() {
-    String relativePath = path.relative(file);
+    final String relativePath = fs.path.relative(file);
     return '${severity.toLowerCase().padLeft(7)} • $message • $relativePath:$startLine:$startColumn';
   }
 

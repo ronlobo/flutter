@@ -2,8 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'package:meta/meta.dart';
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
 /// Provides an iterable that efficiently returns all the elements
@@ -18,15 +17,14 @@ import 'package:flutter/widgets.dart';
 /// one, for example the results of calling `where` on this iterable
 /// are also cached.
 Iterable<Element> collectAllElementsFrom(Element rootElement, {
-  @required bool skipOffstage
+  @required bool skipOffstage,
 }) {
   return new CachingIterable<Element>(new _DepthFirstChildIterator(rootElement, skipOffstage));
 }
 
 class _DepthFirstChildIterator implements Iterator<Element> {
-  _DepthFirstChildIterator(Element rootElement, bool skipOffstage)
-    : skipOffstage = skipOffstage,
-      _stack = _reverseChildrenOf(rootElement, skipOffstage).toList();
+  _DepthFirstChildIterator(Element rootElement, this.skipOffstage)
+    : _stack = _reverseChildrenOf(rootElement, skipOffstage).toList();
 
   final bool skipOffstage;
 
@@ -50,9 +48,10 @@ class _DepthFirstChildIterator implements Iterator<Element> {
   }
 
   static Iterable<Element> _reverseChildrenOf(Element element, bool skipOffstage) {
+    assert(element != null);
     final List<Element> children = <Element>[];
     if (skipOffstage) {
-      element.visitChildrenForSemantics(children.add);
+      element.debugVisitOnstageChildren(children.add);
     } else {
       element.visitChildren(children.add);
     }

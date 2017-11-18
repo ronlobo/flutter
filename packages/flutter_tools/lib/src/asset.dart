@@ -4,61 +4,59 @@
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
-import 'package:json_schema/json_schema.dart';
-import 'package:path/path.dart' as path;
 import 'package:yaml/yaml.dart';
 
+import 'base/file_system.dart';
 import 'build_info.dart';
 import 'cache.dart';
 import 'dart/package_map.dart';
+import 'devfs.dart';
+import 'flutter_manifest.dart';
 import 'globals.dart';
-
-/// An entry in an asset bundle.
-class AssetBundleEntry {
-  /// An entry backed by a File.
-  AssetBundleEntry.fromFile(this.archivePath, this.file)
-      : _contents = null;
-
-  /// An entry backed by a String.
-  AssetBundleEntry.fromString(this.archivePath, this._contents)
-      : file = null;
-
-  /// The path within the bundle.
-  final String archivePath;
-
-  /// The payload.
-  List<int> contentsAsBytes() {
-    if (_contents != null) {
-      return UTF8.encode(_contents);
-    } else {
-      return file.readAsBytesSync();
-    }
-  }
-
-  bool get isStringEntry => _contents != null;
-  int get contentsLength => _contents.length;
-
-  final File file;
-  final String _contents;
-}
 
 /// A bundle of assets.
 class AssetBundle {
-  final Set<AssetBundleEntry> entries = new Set<AssetBundleEntry>();
+  final Map<String, DevFSContent> entries = <String, DevFSContent>{};
 
-  static const String defaultManifestPath = 'flutter.yaml';
+  static const String defaultManifestPath = 'pubspec.yaml';
+  static const String _kAssetManifestJson = 'AssetManifest.json';
+  static const String _kFontManifestJson = 'FontManifest.json';
   static const String _kFontSetMaterial = 'material';
-  static const String _kFontSetRoboto = 'roboto';
+  static const String _kLICENSE = 'LICENSE';
 
+  bool _fixed = false;
   DateTime _lastBuildTimestamp;
 
+  /// Constructs an [AssetBundle] that gathers the set of assets from the
+  /// pubspec.yaml manifest.
+  AssetBundle();
+
+  /// Constructs an [AssetBundle] with a fixed set of assets.
+  /// [projectRoot] The absolute path to the project root.
+  /// [projectAssets] comma separated list of assets.
+  AssetBundle.fixed(String projectRoot, String projectAssets) {
+    _fixed = true;
+    if ((projectRoot == null) || (projectAssets == null))
+      return;
+
+    final List<String> assets = projectAssets.split(',');
+    for (String asset in assets) {
+      if (asset == '')
+        continue;
+      final String assetPath = fs.path.join(projectRoot, asset);
+      final String archivePath = asset;
+      entries[archivePath] = new DevFSFileContent(fs.file(assetPath));
+    }
+  }
+
   bool needsBuild({String manifestPath: defaultManifestPath}) {
+    if (_fixed)
+      return false;
     if (_lastBuildTimestamp == null)
       return true;
 
-    FileStat stat = new File(manifestPath).statSync();
+    final FileStat stat = fs.file(manifestPath).statSync();
     if (stat.type == FileSystemEntityType.NOT_FOUND)
       return true;
 
@@ -70,32 +68,39 @@ class AssetBundle {
     String workingDirPath,
     String packagesPath,
     bool includeDefaultFonts: true,
-    bool includeRobotoFonts: true,
     bool reportLicensedPackages: false
   }) async {
     workingDirPath ??= getAssetBuildDirectory();
-    packagesPath ??= path.absolute(PackageMap.globalPackagesPath);
-    Object manifest = _loadFlutterYamlManifest(manifestPath);
-    if (manifest == null) {
-      // No manifest file found for this application.
+    packagesPath ??= fs.path.absolute(PackageMap.globalPackagesPath);
+    FlutterManifest flutterManifest;
+    try {
+      flutterManifest = await FlutterManifest.createFromPath(manifestPath);
+    } catch (e) {
+      printStatus('Error detected in pubspec.yaml:', emphasis: true);
+      printError('$e');
+      return 1;
+    }
+    if (flutterManifest == null)
+      return 1;
+
+    if (flutterManifest.isEmpty) {
+      entries[_kAssetManifestJson] = new DevFSStringContent('{}');
       return 0;
     }
-    if (manifest != null) {
-     int result = await _validateFlutterYamlManifest(manifest);
-     if (result != 0)
-       return result;
-    }
-    Map<String, dynamic> manifestDescriptor = manifest;
-    assert(manifestDescriptor != null);
-    String assetBasePath = path.dirname(path.absolute(manifestPath));
+
+    final String assetBasePath = fs.path.dirname(fs.path.absolute(manifestPath));
 
     _lastBuildTimestamp = new DateTime.now();
 
     final PackageMap packageMap = new PackageMap(packagesPath);
 
-    Map<_Asset, List<_Asset>> assetVariants = _parseAssets(
+    // The _assetVariants map contains an entry for each asset listed
+    // in the pubspec.yaml file's assets and font and sections. The
+    // value of each image asset is a list of resolution-specific "variants",
+    // see _AssetDirectoryCache.
+    final Map<_Asset, List<_Asset>> assetVariants = _parseAssets(
       packageMap,
-      manifestDescriptor,
+      flutterManifest,
       assetBasePath,
       excludeDirs: <String>[workingDirPath, getBuildDirectory()]
     );
@@ -103,63 +108,101 @@ class AssetBundle {
     if (assetVariants == null)
       return 1;
 
-    final bool usesMaterialDesign = (manifestDescriptor != null) &&
-        manifestDescriptor['uses-material-design'];
+    final List<Map<String, dynamic>> fonts = _parseFonts(
+      flutterManifest,
+      includeDefaultFonts,
+      packageMap,
+    );
 
-    for (_Asset asset in assetVariants.keys) {
-      AssetBundleEntry assetEntry = _createAssetEntry(asset);
-      if (assetEntry == null)
-        return 1;
-      entries.add(assetEntry);
+    // Add fonts and assets from packages.
+    for (String packageName in packageMap.map.keys) {
+      final Uri package = packageMap.map[packageName];
+      if (package != null && package.scheme == 'file') {
+        final String packageManifestPath = package.resolve('../pubspec.yaml').path;
+        final FlutterManifest packageFlutterManifest = await FlutterManifest.createFromPath(packageManifestPath);
+        if (packageFlutterManifest == null)
+          continue;
+        // Skip the app itself
+        if (packageFlutterManifest.appName == flutterManifest.appName)
+          continue;
+        final String packageBasePath = fs.path.dirname(packageManifestPath);
 
-      for (_Asset variant in assetVariants[asset]) {
-        AssetBundleEntry variantEntry = _createAssetEntry(variant);
-        if (variantEntry == null)
+        final Map<_Asset, List<_Asset>> packageAssets = _parseAssets(
+          packageMap,
+          packageFlutterManifest,
+          packageBasePath,
+          packageName: packageName,
+        );
+
+        if (packageAssets == null)
           return 1;
-        entries.add(variantEntry);
+        assetVariants.addAll(packageAssets);
+
+        fonts.addAll(_parseFonts(
+          packageFlutterManifest,
+          includeDefaultFonts,
+          packageMap,
+          packageName: packageName,
+        ));
       }
     }
 
-    List<_Asset> materialAssets = <_Asset>[];
-    if (usesMaterialDesign && includeDefaultFonts) {
+    // Save the contents of each image, image variant, and font
+    // asset in entries.
+    for (_Asset asset in assetVariants.keys) {
+      if (!asset.assetFileExists && assetVariants[asset].isEmpty) {
+        printStatus('Error detected in pubspec.yaml:', emphasis: true);
+        printError('No file or variants found for $asset.\n');
+        return 1;
+      }
+      // The file name for an asset's "main" entry is whatever appears in
+      // the pubspec.yaml file. The main entry's file must always exist for
+      // font assets. It need not exist for an image if resolution-specific
+      // variant files exist. An image's main entry is treated the same as a
+      // "1x" resolution variant and if both exist then the explicit 1x
+      // variant is preferred.
+      if (asset.assetFileExists) {
+        assert(!assetVariants[asset].contains(asset));
+        assetVariants[asset].insert(0, asset);
+      }
+      for (_Asset variant in assetVariants[asset]) {
+        assert(variant.assetFileExists);
+        entries[variant.assetEntry] = new DevFSFileContent(variant.assetFile);
+      }
+    }
+
+    final List<_Asset> materialAssets = <_Asset>[];
+    if (flutterManifest.usesMaterialDesign && includeDefaultFonts) {
       materialAssets.addAll(_getMaterialAssets(_kFontSetMaterial));
-      if (includeRobotoFonts)
-        materialAssets.addAll(_getMaterialAssets(_kFontSetRoboto));
     }
     for (_Asset asset in materialAssets) {
-      AssetBundleEntry assetEntry = _createAssetEntry(asset);
-      if (assetEntry == null)
-        return 1;
-      entries.add(assetEntry);
+      assert(asset.assetFileExists);
+      entries[asset.assetEntry] = new DevFSFileContent(asset.assetFile);
     }
 
-    entries.add(_createAssetManifest(assetVariants));
+    entries[_kAssetManifestJson] = _createAssetManifest(assetVariants);
 
-    AssetBundleEntry fontManifest =
-        _createFontManifest(manifestDescriptor, usesMaterialDesign, includeDefaultFonts, includeRobotoFonts);
-    if (fontManifest != null)
-      entries.add(fontManifest);
+
+    if (fonts.isNotEmpty)
+      entries[_kFontManifestJson] = new DevFSStringContent(JSON.encode(fonts));
 
     // TODO(ianh): Only do the following line if we've changed packages or if our LICENSE file changed
-    entries.add(await _obtainLicenses(packageMap, assetBasePath, reportPackages: reportLicensedPackages));
+    entries[_kLICENSE] = await _obtainLicenses(packageMap, assetBasePath, reportPackages: reportLicensedPackages);
 
     return 0;
   }
 
   void dump() {
     printTrace('Dumping AssetBundle:');
-    for (AssetBundleEntry entry in entries) {
-      printTrace(entry.archivePath);
-    }
+    (entries.keys.toList()..sort()).forEach(printTrace);
   }
 }
 
 class _Asset {
-  _Asset({ this.base, String assetEntry, this.relativePath, this.source }) {
-    this._assetEntry = assetEntry;
-  }
+  _Asset({ this.base, String assetEntry, this.relativePath, this.source })
+    : _assetEntry = assetEntry;
 
-  String _assetEntry;
+  final String _assetEntry;
 
   final String base;
 
@@ -172,7 +215,7 @@ class _Asset {
   final String source;
 
   File get assetFile {
-    return new File(source != null ? '$base/$source' : '$base/$relativePath');
+    return fs.file(source != null ? '$base/$source' : '$base/$relativePath');
   }
 
   bool get assetFileExists => assetFile.existsSync();
@@ -182,19 +225,40 @@ class _Asset {
   String get symbolicPrefix {
     if (_assetEntry == null || _assetEntry == relativePath)
       return null;
-    int index = _assetEntry.indexOf(relativePath);
+    final int index = _assetEntry.indexOf(relativePath);
     return index == -1 ? null : _assetEntry.substring(0, index);
   }
 
   @override
   String toString() => 'asset: $assetEntry';
+
+  @override
+  bool operator ==(dynamic other) {
+    if (identical(other, this))
+      return true;
+    if (other.runtimeType != runtimeType)
+      return false;
+    final _Asset otherAsset = other;
+    return otherAsset.base == base
+        && otherAsset.assetEntry == assetEntry
+        && otherAsset.relativePath == relativePath
+        && otherAsset.source == source;
+  }
+
+  @override
+  int get hashCode {
+    return base.hashCode
+        ^assetEntry.hashCode
+        ^relativePath.hashCode
+        ^ source.hashCode;
+  }
 }
 
 Map<String, dynamic> _readMaterialFontsManifest() {
-  String fontsPath = path.join(path.absolute(Cache.flutterRoot),
+  final String fontsPath = fs.path.join(fs.path.absolute(Cache.flutterRoot),
       'packages', 'flutter_tools', 'schema', 'material_fonts.yaml');
 
-  return loadYaml(new File(fontsPath).readAsStringSync());
+  return loadYaml(fs.file(fontsPath).readAsStringSync());
 }
 
 final Map<String, dynamic> _materialFontsManifest = _readMaterialFontsManifest();
@@ -204,14 +268,14 @@ List<Map<String, dynamic>> _getMaterialFonts(String fontSet) {
 }
 
 List<_Asset> _getMaterialAssets(String fontSet) {
-  List<_Asset> result = <_Asset>[];
+  final List<_Asset> result = <_Asset>[];
 
   for (Map<String, dynamic> family in _getMaterialFonts(fontSet)) {
     for (Map<String, dynamic> font in family['fonts']) {
-      String assetKey = font['asset'];
+      final String assetKey = font['asset'];
       result.add(new _Asset(
-        base: '${Cache.flutterRoot}/bin/cache/artifacts/material_fonts',
-        source: path.basename(assetKey),
+        base: fs.path.join(Cache.flutterRoot, 'bin', 'cache', 'artifacts', 'material_fonts'),
+        source: fs.path.basename(assetKey),
         relativePath: assetKey
       ));
     }
@@ -222,8 +286,8 @@ List<_Asset> _getMaterialAssets(String fontSet) {
 
 final String _licenseSeparator = '\n' + ('-' * 80) + '\n';
 
-/// Returns a AssetBundleEntry representing the license file.
-Future<AssetBundleEntry> _obtainLicenses(
+/// Returns a DevFSContent representing the license file.
+Future<DevFSContent> _obtainLicenses(
   PackageMap packageMap,
   String assetBase,
   { bool reportPackages }
@@ -246,7 +310,7 @@ Future<AssetBundleEntry> _obtainLicenses(
   for (String packageName in packageMap.map.keys) {
     final Uri package = packageMap.map[packageName];
     if (package != null && package.scheme == 'file') {
-      final File file = new File.fromUri(package.resolve('../LICENSE'));
+      final File file = fs.file(package.resolve('../LICENSE'));
       if (file.existsSync()) {
         final List<String> rawLicenses =
             (await file.readAsString()).split(_licenseSeparator);
@@ -280,7 +344,7 @@ Future<AssetBundleEntry> _obtainLicenses(
 
   final List<String> combinedLicensesList = packageLicenses.keys.map(
     (String license) {
-      List<String> packageNames = packageLicenses[license].toList()
+      final List<String> packageNames = packageLicenses[license].toList()
        ..sort();
       return packageNames.join('\n') + '\n\n' + license;
     }
@@ -289,118 +353,173 @@ Future<AssetBundleEntry> _obtainLicenses(
 
   final String combinedLicenses = combinedLicensesList.join(_licenseSeparator);
 
-  return new AssetBundleEntry.fromString('LICENSE', combinedLicenses);
+  return new DevFSStringContent(combinedLicenses);
 }
 
-
-/// Create a [AssetBundleEntry] from the given [_Asset]; the asset must exist.
-AssetBundleEntry _createAssetEntry(_Asset asset) {
-  assert(asset.assetFileExists);
-  return new AssetBundleEntry.fromFile(asset.assetEntry, asset.assetFile);
-}
-
-AssetBundleEntry _createAssetManifest(Map<_Asset, List<_Asset>> assetVariants) {
-  Map<String, List<String>> json = <String, List<String>>{};
+DevFSContent _createAssetManifest(Map<_Asset, List<_Asset>> assetVariants) {
+  final Map<String, List<String>> json = <String, List<String>>{};
   for (_Asset main in assetVariants.keys) {
-    List<String> variants = <String>[];
+    final List<String> variants = <String>[];
     for (_Asset variant in assetVariants[main])
-      variants.add(variant.relativePath);
-    json[main.relativePath] = variants;
+      variants.add(variant.assetEntry);
+    json[main.assetEntry] = variants;
   }
-  return new AssetBundleEntry.fromString('AssetManifest.json', JSON.encode(json));
+  return new DevFSStringContent(JSON.encode(json));
 }
 
-AssetBundleEntry _createFontManifest(Map<String, dynamic> manifestDescriptor,
-                             bool usesMaterialDesign,
-                             bool includeDefaultFonts,
-                             bool includeRobotoFonts) {
-  List<Map<String, dynamic>> fonts = <Map<String, dynamic>>[];
-  if (usesMaterialDesign && includeDefaultFonts) {
-    fonts.addAll(_getMaterialFonts(AssetBundle._kFontSetMaterial));
-    if (includeRobotoFonts)
-      fonts.addAll(_getMaterialFonts(AssetBundle._kFontSetRoboto));
-  }
-  if (manifestDescriptor != null && manifestDescriptor.containsKey('fonts'))
-    fonts.addAll(manifestDescriptor['fonts']);
-  if (fonts.isEmpty)
-    return null;
-  return new AssetBundleEntry.fromString('FontManifest.json', JSON.encode(fonts));
-}
-
-/// Given an assetBase location and a flutter.yaml manifest, return a map of
-/// assets to asset variants.
-///
-/// Returns `null` on missing assets.
-Map<_Asset, List<_Asset>> _parseAssets(
-  PackageMap packageMap,
-  Map<String, dynamic> manifestDescriptor,
-  String assetBase, {
-  List<String> excludeDirs: const <String>[]
+List<Map<String, dynamic>> _parseFonts(
+  FlutterManifest manifest,
+  bool includeDefaultFonts,
+  PackageMap packageMap, {
+  String packageName
 }) {
-  Map<_Asset, List<_Asset>> result = <_Asset, List<_Asset>>{};
+  final List<Map<String, dynamic>> fonts = <Map<String, dynamic>>[];
+  if (manifest.usesMaterialDesign && includeDefaultFonts) {
+    fonts.addAll(_getMaterialFonts(AssetBundle._kFontSetMaterial));
+  }
+  if (packageName == null) {
+    fonts.addAll(manifest.fontsDescriptor);
+  } else {
+    fonts.addAll(_createFontsDescriptor(_parsePackageFonts(
+      manifest,
+      packageName,
+      packageMap,
+    )));
+  }
+  return fonts;
+}
 
-  if (manifestDescriptor == null)
-    return result;
-
-  excludeDirs = excludeDirs.map(
-    (String exclude) => path.absolute(exclude) + Platform.pathSeparator).toList();
-
-  if (manifestDescriptor.containsKey('assets')) {
-    for (String asset in manifestDescriptor['assets']) {
-      _Asset baseAsset = _resolveAsset(packageMap, assetBase, asset);
-
-      if (!baseAsset.assetFileExists) {
-        printError('Error: unable to locate asset entry in flutter.yaml: "$asset".');
-        return null;
-      }
-
-      List<_Asset> variants = <_Asset>[];
-      result[baseAsset] = variants;
-
-      // Find asset variants
-      String assetPath = baseAsset.assetFile.path;
-      String assetFilename = path.basename(assetPath);
-      Directory assetDir = new Directory(path.dirname(assetPath));
-
-      List<FileSystemEntity> files = assetDir.listSync(recursive: true);
-
-      for (FileSystemEntity entity in files) {
-        if (!FileSystemEntity.isFileSync(entity.path))
-          continue;
-
-        // Exclude any files in the given directories.
-        if (excludeDirs.any((String exclude) => entity.path.startsWith(exclude)))
-          continue;
-
-        if (path.basename(entity.path) == assetFilename && entity.path != assetPath) {
-          String key = path.relative(entity.path, from: baseAsset.base);
-          String assetEntry;
-          if (baseAsset.symbolicPrefix != null)
-            assetEntry = path.join(baseAsset.symbolicPrefix, key);
-          variants.add(new _Asset(base: baseAsset.base, assetEntry: assetEntry, relativePath: key));
-        }
+/// Prefixes family names and asset paths of fonts included from packages with
+/// 'packages/<package_name>'
+List<Font> _parsePackageFonts(
+  FlutterManifest manifest,
+  String packageName,
+  PackageMap packageMap,
+) {
+  final List<Font> packageFonts = <Font>[];
+  for (Font font in manifest.fonts) {
+    final List<FontAsset> packageFontAssets = <FontAsset>[];
+    for (FontAsset fontAsset in font.fontAssets) {
+      final String assetPath = fontAsset.asset;
+      if (assetPath.startsWith('packages') &&
+          !fs.isFileSync(packageMap.map[packageName].resolve('../$assetPath').path)) {
+        packageFontAssets.add(new FontAsset(
+          fontAsset.asset,
+          weight: fontAsset.weight,
+          style: fontAsset.style,
+        ));
+      } else {
+        packageFontAssets.add(new FontAsset(
+          'packages/$packageName/${fontAsset.asset}',
+          weight: fontAsset.weight,
+          style: fontAsset.style,
+        ));
       }
     }
+    packageFonts.add(new Font('packages/$packageName/${font.familyName}', packageFontAssets));
+  }
+  return packageFonts;
+}
+
+List<Map<String, dynamic>> _createFontsDescriptor(List<Font> fonts) {
+  return fonts.map((Font font) => font.descriptor).toList();
+}
+
+// Given an assets directory like this:
+//
+// assets/foo
+// assets/var1/foo
+// assets/var2/foo
+// assets/bar
+//
+// variantsFor('assets/foo') => ['/assets/var1/foo', '/assets/var2/foo']
+// variantsFor('assets/bar') => []
+class _AssetDirectoryCache {
+  _AssetDirectoryCache(Iterable<String> excluded) {
+    _excluded = excluded.map<String>((String path) => fs.path.absolute(path) + fs.path.separator);
+  }
+
+  Iterable<String> _excluded;
+  final Map<String, Map<String, List<String>>> _cache = <String, Map<String, List<String>>>{};
+
+  List<String> variantsFor(String assetPath) {
+    final String assetName = fs.path.basename(assetPath);
+    final String directory = fs.path.dirname(assetPath);
+
+    if (!fs.directory(directory).existsSync())
+      return const <String>[];
+
+    if (_cache[directory] == null) {
+      final List<String> paths = <String>[];
+      for (FileSystemEntity entity in fs.directory(directory).listSync(recursive: true)) {
+        final String path = entity.path;
+        if (fs.isFileSync(path) && !_excluded.any((String exclude) => path.startsWith(exclude)))
+          paths.add(path);
+      }
+
+      final Map<String, List<String>> variants = <String, List<String>>{};
+      for (String path in paths) {
+        final String variantName = fs.path.basename(path);
+        if (directory == fs.path.dirname(path))
+          continue;
+        variants[variantName] ??= <String>[];
+        variants[variantName].add(path);
+      }
+      _cache[directory] = variants;
+    }
+
+    return _cache[directory][assetName] ?? const <String>[];
+  }
+}
+
+/// Given an assetBase location and a pubspec.yaml Flutter manifest, return a
+/// map of assets to asset variants.
+///
+/// Returns null on missing assets.
+Map<_Asset, List<_Asset>> _parseAssets(
+  PackageMap packageMap,
+  FlutterManifest flutterManifest,
+  String assetBase, {
+  List<String> excludeDirs: const <String>[],
+  String packageName
+}) {
+  final Map<_Asset, List<_Asset>> result = <_Asset, List<_Asset>>{};
+
+  final _AssetDirectoryCache cache = new _AssetDirectoryCache(excludeDirs);
+  for (String assetName in flutterManifest.assets) {
+    final _Asset asset = _resolveAsset(
+      packageMap,
+      assetBase,
+      assetName,
+      packageName,
+    );
+    final List<_Asset> variants = <_Asset>[];
+    for (String path in cache.variantsFor(asset.assetFile.path)) {
+      final String key = fs.path.relative(path, from: asset.base);
+      String assetEntry;
+      if (asset.symbolicPrefix != null)
+        assetEntry = fs.path.join(asset.symbolicPrefix, key);
+      variants.add(new _Asset(base: asset.base, assetEntry: assetEntry, relativePath: key));
+    }
+
+    result[asset] = variants;
   }
 
   // Add assets referenced in the fonts section of the manifest.
-  if (manifestDescriptor.containsKey('fonts')) {
-    for (Map<String, dynamic> family in manifestDescriptor['fonts']) {
-      List<Map<String, dynamic>> fonts = family['fonts'];
-      if (fonts == null) continue;
-
-      for (Map<String, dynamic> font in fonts) {
-        String asset = font['asset'];
-        if (asset == null) continue;
-
-        _Asset baseAsset = _resolveAsset(packageMap, assetBase, asset);
-        if (!baseAsset.assetFileExists) {
-          printError('Error: unable to locate asset entry in flutter.yaml: "$asset".');
-          return null;
-        }
-
-        result[baseAsset] = <_Asset>[];
+  for (Font font in flutterManifest.fonts) {
+    for (FontAsset fontAsset in font.fontAssets) {
+      final _Asset baseAsset = _resolveAsset(
+        packageMap,
+        assetBase,
+        fontAsset.asset,
+        packageName,
+      );
+      if (!baseAsset.assetFileExists) {
+        printError('Error: unable to locate asset entry in pubspec.yaml: "${fontAsset.asset}".');
+        return null;
       }
+
+      result[baseAsset] = <_Asset>[];
     }
   }
 
@@ -410,52 +529,46 @@ Map<_Asset, List<_Asset>> _parseAssets(
 _Asset _resolveAsset(
   PackageMap packageMap,
   String assetBase,
-  String asset
+  String asset,
+  String packageName,
 ) {
-  if (asset.startsWith('packages/') && !FileSystemEntity.isFileSync(path.join(assetBase, asset))) {
-    // Convert packages/flutter_gallery_assets/clouds-0.png to clouds-0.png.
-    String packageKey = asset.substring(9);
-    String relativeAsset = asset;
+  if (asset.startsWith('packages/') && !fs.isFileSync(fs.path.join(assetBase, asset))) {
+    // The asset is referenced in the pubspec.yaml as
+    // 'packages/PACKAGE_NAME/PATH/TO/ASSET .
+    final _Asset packageAsset = _resolvePackageAsset(asset, packageMap);
+    if (packageAsset != null)
+      return packageAsset;
+  }
 
-    int index = packageKey.indexOf('/');
-    if (index != -1) {
-      relativeAsset = packageKey.substring(index + 1);
-      packageKey = packageKey.substring(0, index);
-    }
+  final String assetEntry = packageName != null
+    ? 'packages/$packageName/$asset' // Asset from, and declared in $packageName.
+    : null; // Asset from the current application.
+  return new _Asset(base: assetBase, assetEntry: assetEntry, relativePath: asset);
+}
 
-    Uri uri = packageMap.map[packageKey];
+_Asset _resolvePackageAsset(String asset, PackageMap packageMap) {
+  assert(asset.startsWith('packages/'));
+  String packageKey = asset.substring('packages/'.length);
+  String relativeAsset = asset;
+
+  final int index = packageKey.indexOf('/');
+  if (index != -1) {
+    relativeAsset = packageKey.substring(index + 1);
+    packageKey = packageKey.substring(0, index);
+
+
+    final Uri uri = packageMap.map[packageKey];
     if (uri != null && uri.scheme == 'file') {
-      File file = new File.fromUri(uri);
-      return new _Asset(base: file.path, assetEntry: asset, relativePath: relativeAsset);
+      final File file = fs.file(uri);
+      final String base = file.path.substring(0, file.path.length - 1);
+      return new _Asset(
+        base: base,
+        assetEntry: asset,
+        relativePath: relativeAsset,
+      );
     }
   }
-
-  return new _Asset(base: assetBase, relativePath: asset);
-}
-
-dynamic _loadFlutterYamlManifest(String manifestPath) {
-  if (manifestPath == null || !FileSystemEntity.isFileSync(manifestPath))
-    return null;
-  String manifestDescriptor = new File(manifestPath).readAsStringSync();
-  return loadYaml(manifestDescriptor);
-}
-
-Future<int> _validateFlutterYamlManifest(Object manifest) async {
-  String schemaPath = path.join(path.absolute(Cache.flutterRoot),
-      'packages', 'flutter_tools', 'schema', 'flutter_yaml.json');
-  Schema schema = await Schema.createSchemaFromUrl('file://$schemaPath');
-
-  Validator validator = new Validator(schema);
-  if (validator.validate(manifest)) {
-    return 0;
-  } else {
-    if (validator.errors.length == 1) {
-      printError('Error in flutter.yaml: ${validator.errors.first}');
-    } else {
-      printError('Error in flutter.yaml:');
-      printError('  ' + validator.errors.join('\n  '));
-    }
-
-    return 1;
-  }
+  printStatus('Error detected in pubspec.yaml:', emphasis: true);
+  printError('Could not resolve package $packageKey for asset $asset.\n');
+  return null;
 }

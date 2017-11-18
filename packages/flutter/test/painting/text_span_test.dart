@@ -8,12 +8,14 @@ import 'package:test/test.dart';
 
 void main() {
   test('TextSpan equals', () {
-    TextSpan a1 = new TextSpan(text: 'a');
-    TextSpan a2 = new TextSpan(text: 'a');
-    TextSpan b1 = new TextSpan(children: <TextSpan>[ a1 ]);
-    TextSpan b2 = new TextSpan(children: <TextSpan>[ a2 ]);
-    TextSpan c1 = new TextSpan();
-    TextSpan c2 = new TextSpan();
+    final String text = 'a'; // we want these instances to be separate instances so that we're not just checking with a single object
+    final TextSpan a1 = new TextSpan(text: text);
+    final TextSpan a2 = new TextSpan(text: text);
+    final TextSpan b1 = new TextSpan(children: <TextSpan>[ a1 ]);
+    final TextSpan b2 = new TextSpan(children: <TextSpan>[ a2 ]);
+    String nullText; // we want these instances to be separate instances so that we're not just checking with a single object
+    final TextSpan c1 = new TextSpan(text: nullText);
+    final TextSpan c2 = new TextSpan(text: nullText);
 
     expect(a1 == a2, isTrue);
     expect(b1 == b2, isTrue);
@@ -28,26 +30,26 @@ void main() {
     expect(c1 == b2, isFalse);
   });
 
-  test('TextSpan', () {
-    final TextSpan test = new TextSpan(
+  test('TextSpan toStringDeep', () {
+    final TextSpan test = const TextSpan(
       text: 'a',
-      style: new TextStyle(
-        fontSize: 10.0
+      style: const TextStyle(
+        fontSize: 10.0,
       ),
-      children: <TextSpan>[
-        new TextSpan(
+      children: const <TextSpan>[
+        const TextSpan(
           text: 'b',
-          children: <TextSpan>[
-            new TextSpan()
-          ]
+          children: const <TextSpan>[
+            const TextSpan(),
+          ],
         ),
         null,
-        new TextSpan(
-          text: 'c'
+        const TextSpan(
+          text: 'c',
         ),
-      ]
+      ],
     );
-    expect(test.toString(), equals(
+    expect(test.toStringDeep(), equals(
       'TextSpan:\n'
       '  inherit: true\n'
       '  size: 10.0\n'
@@ -56,7 +58,7 @@ void main() {
       '    "b"\n'
       '    TextSpan:\n'
       '      (empty)\n'
-      '  <null>\n'
+      '  <null child>\n'
       '  TextSpan:\n'
       '    "c"\n'
     ));

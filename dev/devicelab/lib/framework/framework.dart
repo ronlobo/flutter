@@ -9,13 +9,14 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'package:logging/logging.dart';
+import 'package:stack_trace/stack_trace.dart';
 
 import 'utils.dart';
 
 /// Maximum amount of time a single task is allowed to take to run.
 ///
 /// If exceeded the task is considered to have failed.
-const Duration taskTimeout = const Duration(minutes: 10);
+const Duration _kDefaultTaskTimeout = const Duration(minutes: 15);
 
 /// Represents a unit of work performed in the CI environment that can
 /// succeed, fail and be retried independently of others.
@@ -25,7 +26,7 @@ bool _isTaskRegistered = false;
 
 /// Registers a [task] to run, returns the result when it is complete.
 ///
-/// Note, the task does not run immediately but waits for the request via the
+/// The task does not run immediately but waits for the request via the
 /// VM service protocol to run it.
 ///
 /// It is ok for a [task] to perform many things. However, only one task can be
@@ -42,7 +43,7 @@ Future<TaskResult> task(TaskFunction task) {
     print('${rec.level.name}: ${rec.time}: ${rec.message}');
   });
 
-  _TaskRunner runner = new _TaskRunner(task);
+  final _TaskRunner runner = new _TaskRunner(task);
   runner.keepVmAliveUntilTaskRunRequested();
   return runner.whenDone;
 }
@@ -62,7 +63,10 @@ class _TaskRunner {
   _TaskRunner(this.task) {
     registerExtension('ext.cocoonRunTask',
         (String method, Map<String, String> parameters) async {
-      TaskResult result = await run();
+      final Duration taskTimeout = parameters.containsKey('timeoutInMinutes')
+        ? new Duration(minutes: int.parse(parameters['timeoutInMinutes']))
+        : _kDefaultTaskTimeout;
+      final TaskResult result = await run(taskTimeout);
       return new ServiceExtensionResponse.result(JSON.encode(result.toJson()));
     });
     registerExtension('ext.cocoonRunnerReady',
@@ -74,10 +78,10 @@ class _TaskRunner {
   /// Signals that this task runner finished running the task.
   Future<TaskResult> get whenDone => _completer.future;
 
-  Future<TaskResult> run() async {
+  Future<TaskResult> run(Duration taskTimeout) async {
     try {
       _taskStarted = true;
-      TaskResult result = await _performTask().timeout(taskTimeout);
+      final TaskResult result = await _performTask().timeout(taskTimeout);
       _completer.complete(result);
       return result;
     } on TimeoutException catch (_) {
@@ -115,16 +119,25 @@ class _TaskRunner {
     _keepAlivePort?.close();
   }
 
-  Future<TaskResult> _performTask() async {
-    try {
-      return await task();
-    } catch (taskError, taskErrorStack) {
-      String message = 'Task failed: $taskError';
-      if (taskErrorStack != null) {
-        message += '\n\n$taskErrorStack';
-      }
-      return new TaskResult.failure(message);
-    }
+  Future<TaskResult> _performTask() {
+    final Completer<TaskResult> completer = new Completer<TaskResult>();
+    Chain.capture(() async {
+      completer.complete(await task());
+    }, onError: (dynamic taskError, Chain taskErrorStack) {
+      final String message = 'Task failed: $taskError';
+      stderr
+        ..writeln(message)
+        ..writeln('\nStack trace:')
+        ..writeln(taskErrorStack.terse);
+      // IMPORTANT: We're completing the future _successfully_ but with a value
+      // that indicates a task failure. This is intentional. At this point we
+      // are catching errors coming from arbitrary (and untrustworthy) task
+      // code. Our goal is to convert the failure into a readable message.
+      // Propagating it further is not useful.
+      if (!completer.isCompleted)
+        completer.complete(new TaskResult.failure(message));
+    });
+    return completer.future;
   }
 }
 
@@ -201,7 +214,7 @@ class TaskResult {
   ///       "reason": failure reason string valid only for unsuccessful results
   ///     }
   Map<String, dynamic> toJson() {
-    Map<String, dynamic> json = <String, dynamic>{
+    final Map<String, dynamic> json = <String, dynamic>{
       'success': succeeded,
     };
 

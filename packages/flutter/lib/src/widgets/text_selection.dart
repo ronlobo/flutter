@@ -2,13 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:meta/meta.dart';
 
 import 'basic.dart';
 import 'container.dart';
-import 'editable.dart';
+import 'editable_text.dart';
 import 'framework.dart';
 import 'gesture_detector.dart';
 import 'overlay.dart';
@@ -42,41 +45,128 @@ enum TextSelectionHandleType {
 /// [start] handle always moves the [start]/[baseOffset] of the selection.
 enum _TextSelectionHandlePosition { start, end }
 
-/// Signature for reporting changes to the selection component of an
-/// [InputValue] for the purposes of a [TextSelectionOverlay]. The [caretRect]
-/// argument gives the location of the caret in the coordinate space of the
-/// [RenderBox] given by the [TextSelectionOverlay.renderObject].
+/// Signature for reporting changes to the selection component of a
+/// [TextEditingValue] for the purposes of a [TextSelectionOverlay]. The
+/// [caretRect] argument gives the location of the caret in the coordinate space
+/// of the [RenderBox] given by the [TextSelectionOverlay.renderObject].
 ///
 /// Used by [TextSelectionOverlay.onSelectionOverlayChanged].
-typedef void TextSelectionOverlayChanged(InputValue value, Rect caretRect);
+typedef void TextSelectionOverlayChanged(TextEditingValue value, Rect caretRect);
 
 /// An interface for manipulating the selection, to be used by the implementor
 /// of the toolbar widget.
 abstract class TextSelectionDelegate {
   /// Gets the current text input.
-  InputValue get inputValue;
+  TextEditingValue get textEditingValue;
 
   /// Sets the current text input (replaces the whole line).
-  set inputValue(InputValue value);
+  set textEditingValue(TextEditingValue value);
 
   /// Hides the text selection toolbar.
   void hideToolbar();
 }
 
-// An interface for building the selection UI, to be provided by the
-// implementor of the toolbar widget.
+/// An interface for building the selection UI, to be provided by the
+/// implementor of the toolbar widget.
+///
+/// Override text operations such as [handleCut] if needed.
 abstract class TextSelectionControls {
   /// Builds a selection handle of the given type.
-  Widget buildHandle(BuildContext context, TextSelectionHandleType type);
+  ///
+  /// The top left corner of this widget is positioned at the bottom of the
+  /// selection position.
+  Widget buildHandle(BuildContext context, TextSelectionHandleType type, double textLineHeight);
 
   /// Builds a toolbar near a text selection.
   ///
   /// Typically displays buttons for copying and pasting text.
-  // TODO(mpcomplete): A single position is probably insufficient.
-  Widget buildToolbar(BuildContext context, Point position, TextSelectionDelegate delegate);
+  Widget buildToolbar(BuildContext context, Rect globalEditableRegion, Offset position, TextSelectionDelegate delegate);
 
   /// Returns the size of the selection handle.
   Size get handleSize;
+
+  /// Copy the current selection of the text field managed by the given
+  /// `delegate` to the [Clipboard]. Then, remove the selected text from the
+  /// text field and hide the toolbar.
+  ///
+  /// This is called by subclasses when their cut affordance is activated by
+  /// the user.
+  void handleCut(TextSelectionDelegate delegate) {
+    final TextEditingValue value = delegate.textEditingValue;
+    Clipboard.setData(new ClipboardData(
+      text: value.selection.textInside(value.text),
+    ));
+    delegate.textEditingValue = new TextEditingValue(
+      text: value.selection.textBefore(value.text)
+          + value.selection.textAfter(value.text),
+      selection: new TextSelection.collapsed(
+        offset: value.selection.start
+      ),
+    );
+    delegate.hideToolbar();
+  }
+
+  /// Copy the current selection of the text field managed by the given
+  /// `delegate` to the [Clipboard]. Then, move the cursor to the end of the
+  /// text (collapsing the selection in the process), and hide the toolbar.
+  ///
+  /// This is called by subclasses when their copy affordance is activated by
+  /// the user.
+  void handleCopy(TextSelectionDelegate delegate) {
+    final TextEditingValue value = delegate.textEditingValue;
+    Clipboard.setData(new ClipboardData(
+      text: value.selection.textInside(value.text),
+    ));
+    delegate.textEditingValue = new TextEditingValue(
+      text: value.text,
+      selection: new TextSelection.collapsed(offset: value.selection.end),
+    );
+    delegate.hideToolbar();
+  }
+
+  /// Paste the current clipboard selection (obtained from [Clipboard]) into
+  /// the text field managed by the given `delegate`, replacing its current
+  /// selection, if any. Then, hide the toolbar.
+  ///
+  /// This is called by subclasses when their paste affordance is activated by
+  /// the user.
+  ///
+  /// This function is asynchronous since interacting with the clipboard is
+  /// asynchronous. Race conditions may exist with this API as currently
+  /// implemented.
+  // TODO(ianh): https://github.com/flutter/flutter/issues/11427
+  Future<Null> handlePaste(TextSelectionDelegate delegate) async {
+    final TextEditingValue value = delegate.textEditingValue;  // Snapshot the input before using `await`.
+    final ClipboardData data = await Clipboard.getData(Clipboard.kTextPlain);
+    if (data != null) {
+      delegate.textEditingValue = new TextEditingValue(
+        text: value.selection.textBefore(value.text)
+            + data.text
+            + value.selection.textAfter(value.text),
+        selection: new TextSelection.collapsed(
+          offset: value.selection.start + data.text.length
+        ),
+      );
+    }
+    delegate.hideToolbar();
+  }
+
+  /// Adjust the selection of the text field managed by the given `delegate` so
+  /// that everything is selected.
+  ///
+  /// Does not hide the toolbar.
+  ///
+  /// This is called by subclasses when their select-all affordance is activated
+  /// by the user.
+  void handleSelectAll(TextSelectionDelegate delegate) {
+    delegate.textEditingValue = new TextEditingValue(
+      text: delegate.textEditingValue.text,
+      selection: new TextSelection(
+        baseOffset: 0,
+        extentOffset: delegate.textEditingValue.text.length
+      ),
+    );
+  }
 }
 
 /// An object that manages a pair of text selection handles.
@@ -88,14 +178,16 @@ class TextSelectionOverlay implements TextSelectionDelegate {
   ///
   /// The [context] must not be null and must have an [Overlay] as an ancestor.
   TextSelectionOverlay({
-    InputValue input,
+    @required TextEditingValue value,
     @required this.context,
     this.debugRequiredFor,
-    this.renderObject,
+    @required this.layerLink,
+    @required this.renderObject,
     this.onSelectionOverlayChanged,
     this.selectionControls,
-  }): _input = input {
-    assert(context != null);
+  }): assert(value != null),
+      assert(context != null),
+      _value = value {
     final OverlayState overlay = Overlay.of(context);
     assert(overlay != null);
     _handleController = new AnimationController(duration: _kFadeDuration, vsync: overlay);
@@ -110,6 +202,10 @@ class TextSelectionOverlay implements TextSelectionDelegate {
 
   /// Debugging information for explaining why the [Overlay] is required.
   final Widget debugRequiredFor;
+
+  /// The object supplied to the [CompositedTransformTarget] that wraps the text
+  /// field.
+  final LayerLink layerLink;
 
   // TODO(mpcomplete): what if the renderObject is removed or replaced, or
   // moves? Not sure what cases I need to handle, or how to handle them.
@@ -132,7 +228,7 @@ class TextSelectionOverlay implements TextSelectionDelegate {
   Animation<double> get _handleOpacity => _handleController.view;
   Animation<double> get _toolbarOpacity => _toolbarController.view;
 
-  InputValue _input;
+  TextEditingValue _value;
 
   /// A pair of handles. If this is non-null, there are always 2, though the
   /// second is hidden when the selection is collapsed.
@@ -141,14 +237,14 @@ class TextSelectionOverlay implements TextSelectionDelegate {
   /// A copy/paste toolbar.
   OverlayEntry _toolbar;
 
-  TextSelection get _selection => _input.selection;
+  TextSelection get _selection => _value.selection;
 
   /// Shows the handles by inserting them into the [context]'s overlay.
   void showHandles() {
     assert(_handles == null);
     _handles = <OverlayEntry>[
-      new OverlayEntry(builder: (BuildContext c) => _buildHandle(c, _TextSelectionHandlePosition.start)),
-      new OverlayEntry(builder: (BuildContext c) => _buildHandle(c, _TextSelectionHandlePosition.end)),
+      new OverlayEntry(builder: (BuildContext context) => _buildHandle(context, _TextSelectionHandlePosition.start)),
+      new OverlayEntry(builder: (BuildContext context) => _buildHandle(context, _TextSelectionHandlePosition.end)),
     ];
     Overlay.of(context, debugRequiredFor: debugRequiredFor).insertAll(_handles);
     _handleController.forward(from: 0.0);
@@ -162,24 +258,32 @@ class TextSelectionOverlay implements TextSelectionDelegate {
     _toolbarController.forward(from: 0.0);
   }
 
-  /// Updates the overlay after the [selection] has changed.
+  /// Updates the overlay after the selection has changed.
   ///
   /// If this method is called while the [SchedulerBinding.schedulerPhase] is
-  /// [SchedulerBinding.persistentCallbacks], i.e. during the build, layout, or
-  /// paint phases (see [WidgetsBinding.beginFrame]), then the update is delayed
+  /// [SchedulerPhase.persistentCallbacks], i.e. during the build, layout, or
+  /// paint phases (see [WidgetsBinding.drawFrame]), then the update is delayed
   /// until the post-frame callbacks phase. Otherwise the update is done
   /// synchronously. This means that it is safe to call during builds, but also
   /// that if you do call this during a build, the UI will not update until the
   /// next frame (i.e. many milliseconds later).
-  void update(InputValue newInput) {
-    if (_input == newInput)
+  void update(TextEditingValue newValue) {
+    if (_value == newValue)
       return;
-    _input = newInput;
+    _value = newValue;
     if (SchedulerBinding.instance.schedulerPhase == SchedulerPhase.persistentCallbacks) {
       SchedulerBinding.instance.addPostFrameCallback(_markNeedsBuild);
     } else {
       _markNeedsBuild();
     }
+  }
+
+  /// Causes the overlay to update its rendering.
+  ///
+  /// This is intended to be called when the [renderObject] may have changed its
+  /// text metrics (e.g. because the text was scrolled).
+  void updateForScroll() {
+    _markNeedsBuild();
   }
 
   void _markNeedsBuild([Duration duration]) {
@@ -221,10 +325,11 @@ class TextSelectionOverlay implements TextSelectionDelegate {
       child: new _TextSelectionHandleOverlay(
         onSelectionHandleChanged: (TextSelection newSelection) { _handleSelectionHandleChanged(newSelection, position); },
         onSelectionHandleTapped: _handleSelectionHandleTapped,
+        layerLink: layerLink,
         renderObject: renderObject,
         selection: _selection,
         selectionControls: selectionControls,
-        position: position
+        position: position,
       )
     );
   }
@@ -234,17 +339,27 @@ class TextSelectionOverlay implements TextSelectionDelegate {
       return new Container();
 
     // Find the horizontal midpoint, just above the selected text.
-    List<TextSelectionPoint> endpoints = renderObject.getEndpointsForSelection(_selection);
-    Point midpoint = new Point(
+    final List<TextSelectionPoint> endpoints = renderObject.getEndpointsForSelection(_selection);
+    final Offset midpoint = new Offset(
       (endpoints.length == 1) ?
-        endpoints[0].point.x :
-        (endpoints[0].point.x + endpoints[1].point.x) / 2.0,
-      endpoints[0].point.y - renderObject.size.height
+        endpoints[0].point.dx :
+        (endpoints[0].point.dx + endpoints[1].point.dx) / 2.0,
+      endpoints[0].point.dy - renderObject.preferredLineHeight,
+    );
+
+    final Rect editingRegion = new Rect.fromPoints(
+      renderObject.localToGlobal(Offset.zero),
+      renderObject.localToGlobal(renderObject.size.bottomRight(Offset.zero)),
     );
 
     return new FadeTransition(
       opacity: _toolbarOpacity,
-      child: selectionControls.buildToolbar(context, midpoint, this)
+      child: new CompositedTransformFollower(
+        link: layerLink,
+        showWhenUnlinked: false,
+        offset: -editingRegion.topLeft,
+        child: selectionControls.buildToolbar(context, editingRegion, midpoint, this),
+      ),
     );
   }
 
@@ -258,13 +373,13 @@ class TextSelectionOverlay implements TextSelectionDelegate {
         caretRect = renderObject.getLocalRectForCaret(newSelection.extent);
         break;
     }
-    update(_input.copyWith(selection: newSelection, composing: TextRange.empty));
+    update(_value.copyWith(selection: newSelection, composing: TextRange.empty));
     if (onSelectionOverlayChanged != null)
-      onSelectionOverlayChanged(_input, caretRect);
+      onSelectionOverlayChanged(_value, caretRect);
   }
 
   void _handleSelectionHandleTapped() {
-    if (inputValue.selection.isCollapsed) {
+    if (_value.selection.isCollapsed) {
       if (_toolbar != null) {
         _toolbar?.remove();
         _toolbar = null;
@@ -275,14 +390,14 @@ class TextSelectionOverlay implements TextSelectionDelegate {
   }
 
   @override
-  InputValue get inputValue => _input;
+  TextEditingValue get textEditingValue => _value;
 
   @override
-  set inputValue(InputValue value) {
-    update(value);
+  set textEditingValue(TextEditingValue newValue) {
+    update(newValue);
     if (onSelectionOverlayChanged != null) {
-      Rect caretRect = renderObject.getLocalRectForCaret(value.selection.extent);
-      onSelectionOverlayChanged(value, caretRect);
+      final Rect caretRect = renderObject.getLocalRectForCaret(newValue.selection.extent);
+      onSelectionOverlayChanged(newValue, caretRect);
     }
   }
 
@@ -294,18 +409,20 @@ class TextSelectionOverlay implements TextSelectionDelegate {
 
 /// This widget represents a single draggable text selection handle.
 class _TextSelectionHandleOverlay extends StatefulWidget {
-  _TextSelectionHandleOverlay({
+  const _TextSelectionHandleOverlay({
     Key key,
-    this.selection,
-    this.position,
-    this.renderObject,
-    this.onSelectionHandleChanged,
-    this.onSelectionHandleTapped,
-    this.selectionControls
+    @required this.selection,
+    @required this.position,
+    @required this.layerLink,
+    @required this.renderObject,
+    @required this.onSelectionHandleChanged,
+    @required this.onSelectionHandleTapped,
+    @required this.selectionControls
   }) : super(key: key);
 
   final TextSelection selection;
   final _TextSelectionHandlePosition position;
+  final LayerLink layerLink;
   final RenderEditable renderObject;
   final ValueChanged<TextSelection> onSelectionHandleChanged;
   final VoidCallback onSelectionHandleTapped;
@@ -316,32 +433,32 @@ class _TextSelectionHandleOverlay extends StatefulWidget {
 }
 
 class _TextSelectionHandleOverlayState extends State<_TextSelectionHandleOverlay> {
-  Point _dragPosition;
+  Offset _dragPosition;
 
   void _handleDragStart(DragStartDetails details) {
-    _dragPosition = details.globalPosition + new Offset(0.0, -config.selectionControls.handleSize.height);
+    _dragPosition = details.globalPosition + new Offset(0.0, -widget.selectionControls.handleSize.height);
   }
 
   void _handleDragUpdate(DragUpdateDetails details) {
     _dragPosition += details.delta;
-    TextPosition position = config.renderObject.getPositionForPoint(_dragPosition);
+    final TextPosition position = widget.renderObject.getPositionForPoint(_dragPosition);
 
-    if (config.selection.isCollapsed) {
-      config.onSelectionHandleChanged(new TextSelection.fromPosition(position));
+    if (widget.selection.isCollapsed) {
+      widget.onSelectionHandleChanged(new TextSelection.fromPosition(position));
       return;
     }
 
     TextSelection newSelection;
-    switch (config.position) {
+    switch (widget.position) {
       case _TextSelectionHandlePosition.start:
         newSelection = new TextSelection(
           baseOffset: position.offset,
-          extentOffset: config.selection.extentOffset
+          extentOffset: widget.selection.extentOffset
         );
         break;
       case _TextSelectionHandlePosition.end:
         newSelection = new TextSelection(
-          baseOffset: config.selection.baseOffset,
+          baseOffset: widget.selection.baseOffset,
           extentOffset: position.offset
         );
         break;
@@ -350,20 +467,20 @@ class _TextSelectionHandleOverlayState extends State<_TextSelectionHandleOverlay
     if (newSelection.baseOffset >= newSelection.extentOffset)
       return; // don't allow order swapping.
 
-    config.onSelectionHandleChanged(newSelection);
+    widget.onSelectionHandleChanged(newSelection);
   }
 
   void _handleTap() {
-    config.onSelectionHandleTapped();
+    widget.onSelectionHandleTapped();
   }
 
   @override
   Widget build(BuildContext context) {
-    List<TextSelectionPoint> endpoints = config.renderObject.getEndpointsForSelection(config.selection);
-    Point point;
+    final List<TextSelectionPoint> endpoints = widget.renderObject.getEndpointsForSelection(widget.selection);
+    Offset point;
     TextSelectionHandleType type;
 
-    switch (config.position) {
+    switch (widget.position) {
       case _TextSelectionHandlePosition.start:
         point = endpoints[0].point;
         type = _chooseType(endpoints[0], TextSelectionHandleType.left, TextSelectionHandleType.right);
@@ -377,19 +494,27 @@ class _TextSelectionHandleOverlayState extends State<_TextSelectionHandleOverlay
         break;
     }
 
-    return new GestureDetector(
-      onPanStart: _handleDragStart,
-      onPanUpdate: _handleDragUpdate,
-      onTap: _handleTap,
-      child: new Stack(
-        children: <Widget>[
-          new Positioned(
-            left: point.x,
-            top: point.y,
-            child: config.selectionControls.buildHandle(context, type)
-          )
-        ]
-      )
+    return new CompositedTransformFollower(
+      link: widget.layerLink,
+      showWhenUnlinked: false,
+      child: new GestureDetector(
+        onPanStart: _handleDragStart,
+        onPanUpdate: _handleDragUpdate,
+        onTap: _handleTap,
+        child: new Stack(
+          children: <Widget>[
+            new Positioned(
+              left: point.dx,
+              top: point.dy,
+              child: widget.selectionControls.buildHandle(
+                context,
+                type,
+                widget.renderObject.preferredLineHeight,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -398,16 +523,16 @@ class _TextSelectionHandleOverlayState extends State<_TextSelectionHandleOverlay
     TextSelectionHandleType ltrType,
     TextSelectionHandleType rtlType
   ) {
-    if (config.selection.isCollapsed)
+    if (widget.selection.isCollapsed)
       return TextSelectionHandleType.collapsed;
 
+    assert(endpoint.direction != null);
     switch (endpoint.direction) {
       case TextDirection.ltr:
         return ltrType;
       case TextDirection.rtl:
         return rtlType;
     }
-    assert(endpoint.direction != null);
     return null;
   }
 }

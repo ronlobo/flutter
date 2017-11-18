@@ -4,46 +4,56 @@
 
 import 'dart:async';
 
-import 'platform_messages.dart';
+import 'package:flutter/foundation.dart';
 
-/// Data stored on the system clip board.
+import 'system_channels.dart';
+
+/// Data stored on the system clipboard.
 ///
-/// The system clip board can contain data of various media types. This data
-/// structure currently supports only plain text data in the [text] property.
+/// The system clipboard can contain data of various media types. This data
+/// structure currently supports only plain text data, in the [text] property.
+@immutable
 class ClipboardData {
   /// Creates data for the system clipboard.
   const ClipboardData({ this.text });
 
-  /// Plain text data on the clip board.
+  /// Plain text variant of this clipboard data.
   final String text;
 }
 
-const String _kChannelName = 'flutter/platform';
-
-/// An interface to the system's clipboard.
+/// Utility methods for interacting with the system's clipboard.
 class Clipboard {
-  /// Constants for common [getData] [format] types.
-  static final String kTextPlain = 'text/plain';
-
   Clipboard._();
+
+  // Constants for common [getData] [format] types.
+
+  /// Plain text data format string.
+  ///
+  /// Used with [getData].
+  static const String kTextPlain = 'text/plain';
 
   /// Stores the given clipboard data on the clipboard.
   static Future<Null> setData(ClipboardData data) async {
-    await PlatformMessages.invokeMethod(
-       _kChannelName,
+    await SystemChannels.platform.invokeMethod(
       'Clipboard.setData',
-      <Map<String, dynamic>>[<String, dynamic>{
+      <String, dynamic>{
         'text': data.text,
-      }],
+      },
     );
   }
 
   /// Retrieves data from the clipboard that matches the given format.
   ///
-  ///  * `format` is a media type, such as `text/plain`.
+  /// The `format` argument specifies the media type, such as `text/plain`, of
+  /// the data to obtain.
+  ///
+  /// Returns a future which completes to null if the data could not be
+  /// obtained, and to a [ClipboardData] object if it could.
   static Future<ClipboardData> getData(String format) async {
-    Map<String, dynamic> result = await PlatformMessages.invokeMethod(
-        _kChannelName, 'Clipboard.getData', <String>[format]);
+    final Map<String, dynamic> result = await SystemChannels.platform.invokeMethod(
+      'Clipboard.getData',
+      format,
+    );
     if (result == null)
       return null;
     return new ClipboardData(text: result['text']);

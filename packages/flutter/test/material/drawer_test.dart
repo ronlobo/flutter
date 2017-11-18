@@ -7,31 +7,33 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   testWidgets('Drawer control test', (WidgetTester tester) async {
-    final Key containerKey = new Key('container');
+    final Key containerKey = const Key('container');
 
     await tester.pumpWidget(
-      new Scaffold(
-        drawer: new Drawer(
-          child: new Block(
-            children: <Widget>[
-              new DrawerHeader(
-                child: new Container(
-                  key: containerKey,
-                  child: new Text('header')
-                )
-              ),
-              new DrawerItem(
-                icon: new Icon(Icons.archive),
-                child: new Text('Archive')
-              )
-            ]
-          )
-        )
-      )
+      new MaterialApp(
+        home: new Scaffold(
+          drawer: new Drawer(
+            child: new ListView(
+              children: <Widget>[
+                new DrawerHeader(
+                  child: new Container(
+                    key: containerKey,
+                    child: const Text('header'),
+                  ),
+                ),
+                const ListTile(
+                  leading: const Icon(Icons.archive),
+                  title: const Text('Archive'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
 
     expect(find.text('Archive'), findsNothing);
-    ScaffoldState state = tester.firstState(find.byType(Scaffold));
+    final ScaffoldState state = tester.firstState(find.byType(Scaffold));
     state.openDrawer();
 
     await tester.pump();
@@ -46,7 +48,7 @@ void main() {
 
     box = tester.renderObject(find.byKey(containerKey));
     expect(box.size.width, equals(drawerWidth - 2 * 16.0));
-    expect(box.size.height, equals(drawerHeight - 2 * 16.0 - 1.0)); // bottom edge
+    expect(box.size.height, equals(drawerHeight - 2 * 16.0));
 
     expect(find.text('header'), findsOneWidget);
   });

@@ -2,9 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'basic.dart';
+import 'focus_manager.dart';
 import 'framework.dart';
 
 /// A widget that calls a callback whenever the user presses or releases a key
@@ -14,32 +16,29 @@ import 'framework.dart';
 /// hardware buttons that are represented as keys. Typically used by games and
 /// other apps that use keyboards for purposes other than text entry.
 ///
-/// For text entry, consider using a [RawInput], which integrates with
+/// For text entry, consider using a [EditableText], which integrates with
 /// on-screen keyboards and input method editors (IMEs).
 ///
 /// See also:
 ///
-///  * [RawInput], which should be used instead of this widget for text
+///  * [EditableText], which should be used instead of this widget for text
 ///    entry.
 class RawKeyboardListener extends StatefulWidget {
   /// Creates a widget that receives raw keyboard events.
   ///
-  /// For text entry, consider using a [RawInput], which integrates with
+  /// For text entry, consider using a [EditableText], which integrates with
   /// on-screen keyboards and input method editors (IMEs).
-  RawKeyboardListener({
+  const RawKeyboardListener({
     Key key,
-    this.focused: false,
-    this.onKey,
-    this.child
-  }) : super(key: key) {
-    assert(child != null);
-  }
+    @required this.focusNode,
+    @required this.onKey,
+    @required this.child,
+  }) : assert(focusNode != null),
+       assert(child != null),
+       super(key: key);
 
-  /// Whether this widget should actually listen for raw keyboard events.
-  ///
-  /// Typically set to the value returned by [Focus.at] for the [GlobalKey] of
-  /// the widget that builds the raw keyboard listener.
-  final bool focused;
+  /// Controls whether this widget has keyboard focus.
+  final FocusNode focusNode;
 
   /// Called whenever this widget receives a raw keyboard event.
   final ValueChanged<RawKeyEvent> onKey;
@@ -49,28 +48,39 @@ class RawKeyboardListener extends StatefulWidget {
 
   @override
   _RawKeyboardListenerState createState() => new _RawKeyboardListenerState();
+
+  @override
+  void debugFillProperties(DiagnosticPropertiesBuilder description) {
+    super.debugFillProperties(description);
+    description.add(new DiagnosticsProperty<FocusNode>('focusNode', focusNode));
+  }
 }
 
 class _RawKeyboardListenerState extends State<RawKeyboardListener> {
   @override
   void initState() {
     super.initState();
-    _attachOrDetachKeyboard();
+    widget.focusNode.addListener(_handleFocusChanged);
   }
 
   @override
-  void didUpdateConfig(RawKeyboardListener oldConfig) {
-    _attachOrDetachKeyboard();
+  void didUpdateWidget(RawKeyboardListener oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.focusNode != oldWidget.focusNode) {
+      oldWidget.focusNode.removeListener(_handleFocusChanged);
+      widget.focusNode.addListener(_handleFocusChanged);
+    }
   }
 
   @override
   void dispose() {
+    widget.focusNode.removeListener(_handleFocusChanged);
     _detachKeyboardIfAttached();
     super.dispose();
   }
 
-  void _attachOrDetachKeyboard() {
-    if (config.focused)
+  void _handleFocusChanged() {
+    if (widget.focusNode.hasFocus)
       _attachKeyboardIfDetached();
     else
       _detachKeyboardIfAttached();
@@ -82,21 +92,21 @@ class _RawKeyboardListenerState extends State<RawKeyboardListener> {
     if (_listening)
       return;
     RawKeyboard.instance.addListener(_handleRawKeyEvent);
+    _listening = true;
   }
 
   void _detachKeyboardIfAttached() {
     if (!_listening)
       return;
     RawKeyboard.instance.removeListener(_handleRawKeyEvent);
+    _listening = false;
   }
 
   void _handleRawKeyEvent(RawKeyEvent event) {
-    if (config.onKey != null)
-      config.onKey(event);
+    if (widget.onKey != null)
+      widget.onKey(event);
   }
 
   @override
-  Widget build(BuildContext context) {
-    return config.child;
-  }
+  Widget build(BuildContext context) => widget.child;
 }

@@ -11,12 +11,14 @@ void beginFrame(Duration timeStamp) {
   final double devicePixelRatio = ui.window.devicePixelRatio;
   final ui.Size logicalSize = ui.window.physicalSize / devicePixelRatio;
 
-  final ui.ParagraphBuilder paragraphBuilder = new ui.ParagraphBuilder(new ui.ParagraphStyle())
+  final ui.ParagraphBuilder paragraphBuilder = new ui.ParagraphBuilder(
+    new ui.ParagraphStyle(textDirection: ui.TextDirection.ltr),
+  )
     ..addText('Hello, world.');
   final ui.Paragraph paragraph = paragraphBuilder.build()
     ..layout(new ui.ParagraphConstraints(width: logicalSize.width));
 
-  final ui.Rect physicalBounds = ui.Point.origin & (logicalSize * devicePixelRatio);
+  final ui.Rect physicalBounds = ui.Offset.zero & (logicalSize * devicePixelRatio);
   final ui.PictureRecorder recorder = new ui.PictureRecorder();
   final ui.Canvas canvas = new ui.Canvas(recorder, physicalBounds);
   canvas.scale(devicePixelRatio, devicePixelRatio);

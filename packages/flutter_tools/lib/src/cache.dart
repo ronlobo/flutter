@@ -3,26 +3,33 @@
 // found in the LICENSE file.
 
 import 'dart:async';
-import 'dart:io';
 
-import 'package:flutter_tools/src/dart/pub.dart';
-import 'package:flutter_tools/src/dart/summary.dart';
-import 'package:path/path.dart' as path;
+import 'package:meta/meta.dart';
 
 import 'base/context.dart';
+import 'base/file_system.dart';
 import 'base/logger.dart';
 import 'base/net.dart';
 import 'base/os.dart';
+import 'base/platform.dart';
 import 'globals.dart';
 
 /// A wrapper around the `bin/cache/` directory.
 class Cache {
   /// [rootOverride] is configurable for testing.
-  Cache({ Directory rootOverride }) {
-    this._rootOverride = rootOverride;
+  /// [artifacts] is configurable for testing.
+  Cache({ Directory rootOverride, List<CachedArtifact> artifacts }) : _rootOverride = rootOverride {
+    if (artifacts == null) {
+      _artifacts.add(new MaterialFonts(this));
+      _artifacts.add(new FlutterEngine(this));
+      _artifacts.add(new GradleWrapper(this));
+    } else {
+      _artifacts.addAll(artifacts);
+    }
   }
 
-  Directory _rootOverride;
+  final Directory _rootOverride;
+  final List<CachedArtifact> _artifacts = <CachedArtifact>[];
 
   // Initialized by FlutterCommandRunner on startup.
   static String flutterRoot;
@@ -38,8 +45,17 @@ class Cache {
   ///
   /// This is used by the tests since they run simultaneously and all in one
   /// process and so it would be a mess if they had to use the lock.
+  @visibleForTesting
   static void disableLocking() {
     _lockEnabled = false;
+  }
+
+  /// Turn on the [lock]/[releaseLockEarly] mechanism.
+  ///
+  /// This is used by the tests.
+  @visibleForTesting
+  static void enableLocking() {
+    _lockEnabled = true;
   }
 
   /// Lock the cache directory.
@@ -53,7 +69,7 @@ class Cache {
     if (!_lockEnabled)
       return null;
     assert(_lock == null);
-    _lock = new File(path.join(flutterRoot, 'bin', 'cache', 'lockfile')).openSync(mode: FileMode.WRITE);
+    _lock = await fs.file(fs.path.join(flutterRoot, 'bin', 'cache', 'lockfile')).open(mode: FileMode.WRITE);
     bool locked = false;
     bool printed = false;
     while (!locked) {
@@ -79,39 +95,44 @@ class Cache {
     _lock = null;
   }
 
+  /// Checks if the current process owns the lock for the cache directory at
+  /// this very moment; throws a [StateError] if it doesn't.
+  static void checkLockAcquired() {
+    if (_lockEnabled && _lock == null && platform.environment['FLUTTER_ALREADY_LOCKED'] != 'true') {
+      throw new StateError(
+        'The current process does not own the lock for the cache directory. This is a bug in Flutter CLI tools.',
+      );
+    }
+  }
+
   static String _dartSdkVersion;
 
-  static String get dartSdkVersion {
-    if (_dartSdkVersion == null) {
-      _dartSdkVersion = Platform.version;
-    }
-    return _dartSdkVersion;
-  }
+  static String get dartSdkVersion => _dartSdkVersion ??= platform.version;
 
   static String _engineRevision;
 
   static String get engineRevision {
     if (_engineRevision == null) {
-      File revisionFile = new File(path.join(flutterRoot, 'bin', 'internal', 'engine.version'));
+      final File revisionFile = fs.file(fs.path.join(flutterRoot, 'bin', 'internal', 'engine.version'));
       if (revisionFile.existsSync())
         _engineRevision = revisionFile.readAsStringSync().trim();
     }
     return _engineRevision;
   }
 
-  static Cache get instance => context[Cache] ?? (context[Cache] = new Cache());
+  static Cache get instance => context[Cache];
 
   /// Return the top-level directory in the cache; this is `bin/cache`.
   Directory getRoot() {
     if (_rootOverride != null)
-      return new Directory(path.join(_rootOverride.path, 'bin', 'cache'));
+      return fs.directory(fs.path.join(_rootOverride.path, 'bin', 'cache'));
     else
-      return new Directory(path.join(flutterRoot, 'bin', 'cache'));
+      return fs.directory(fs.path.join(flutterRoot, 'bin', 'cache'));
   }
 
   /// Return a directory in the cache dir. For `pkg`, this will return `bin/cache/pkg`.
   Directory getCacheDir(String name) {
-    Directory dir = new Directory(path.join(getRoot().path, name));
+    final Directory dir = fs.directory(fs.path.join(getRoot().path, name));
     if (!dir.existsSync())
       dir.createSync(recursive: true);
     return dir;
@@ -123,16 +144,16 @@ class Cache {
   /// Get a named directory from with the cache's artifact directory; for example,
   /// `material_fonts` would return `bin/cache/artifacts/material_fonts`.
   Directory getArtifactDirectory(String name) {
-    return new Directory(path.join(getCacheArtifacts().path, name));
+    return fs.directory(fs.path.join(getCacheArtifacts().path, name));
   }
 
   String getVersionFor(String artifactName) {
-    File versionFile = new File(path.join(_rootOverride?.path ?? flutterRoot, 'bin', 'internal', '$artifactName.version'));
+    final File versionFile = fs.file(fs.path.join(_rootOverride?.path ?? flutterRoot, 'bin', 'internal', '$artifactName.version'));
     return versionFile.existsSync() ? versionFile.readAsStringSync().trim() : null;
   }
 
   String getStampFor(String artifactName) {
-    File stampFile = getStampFileFor(artifactName);
+    final File stampFile = getStampFileFor(artifactName);
     return stampFile.existsSync() ? stampFile.readAsStringSync().trim() : null;
   }
 
@@ -141,33 +162,26 @@ class Cache {
   }
 
   File getStampFileFor(String artifactName) {
-    return new File(path.join(getRoot().path, '$artifactName.stamp'));
+    return fs.file(fs.path.join(getRoot().path, '$artifactName.stamp'));
   }
 
-  bool isUpToDate() {
-    MaterialFonts materialFonts = new MaterialFonts(cache);
-    FlutterEngine engine = new FlutterEngine(cache);
+  bool isUpToDate() => _artifacts.every((CachedArtifact artifact) => artifact.isUpToDate());
 
-    return materialFonts.isUpToDate() && engine.isUpToDate();
-  }
+  Future<String> getThirdPartyFile(String urlStr, String serviceName) async {
+    final Uri url = Uri.parse(urlStr);
+    final Directory thirdPartyDir = getArtifactDirectory('third_party');
 
-  Future<String> getThirdPartyFile(String urlStr, String serviceName, {
-    bool unzip: false
-  }) async {
-    Uri url = Uri.parse(urlStr);
-    Directory thirdPartyDir = getArtifactDirectory('third_party');
-
-    Directory serviceDir = new Directory(path.join(thirdPartyDir.path, serviceName));
+    final Directory serviceDir = fs.directory(fs.path.join(thirdPartyDir.path, serviceName));
     if (!serviceDir.existsSync())
       serviceDir.createSync(recursive: true);
 
-    File cachedFile = new File(path.join(serviceDir.path, url.pathSegments.last));
+    final File cachedFile = fs.file(fs.path.join(serviceDir.path, url.pathSegments.last));
     if (!cachedFile.existsSync()) {
       try {
-        await _downloadFileToCache(url, cachedFile, unzip);
+        await _downloadFile(url, cachedFile);
       } catch (e) {
         printError('Failed to fetch third-party artifact $url: $e');
-        throw e;
+        rethrow;
       }
     }
 
@@ -177,221 +191,252 @@ class Cache {
   Future<Null> updateAll() async {
     if (!_lockEnabled)
       return null;
-    MaterialFonts materialFonts = new MaterialFonts(cache);
-    if (!materialFonts.isUpToDate())
-      await materialFonts.download();
-
-    FlutterEngine engine = new FlutterEngine(cache);
-    if (!engine.isUpToDate())
-      await engine.download();
-  }
-
-  /// Download a file from the given url and write it to the cache.
-  /// If [unzip] is true, treat the url as a zip file, and unzip it to the
-  /// directory given.
-  static Future<Null> _downloadFileToCache(Uri url, FileSystemEntity location, bool unzip) async {
-    if (!location.parent.existsSync())
-      location.parent.createSync(recursive: true);
-
-    List<int> fileBytes = await fetchUrl(url);
-    if (unzip) {
-      if (location is Directory && !location.existsSync())
-        location.createSync(recursive: true);
-
-      File tempFile = new File(path.join(Directory.systemTemp.path, '${url.toString().hashCode}.zip'));
-      tempFile.writeAsBytesSync(fileBytes, flush: true);
-      os.unzip(tempFile, location);
-      tempFile.deleteSync();
-    } else {
-      File file = location;
-      file.writeAsBytesSync(fileBytes, flush: true);
+    for (CachedArtifact artifact in _artifacts) {
+      if (!artifact.isUpToDate())
+        await artifact.update();
     }
   }
 }
 
-class MaterialFonts {
-  MaterialFonts(this.cache);
+/// An artifact managed by the cache.
+abstract class CachedArtifact {
+  CachedArtifact(this.name, this.cache);
 
-  static const String kName = 'material_fonts';
-
+  final String name;
   final Cache cache;
 
+  Directory get location => cache.getArtifactDirectory(name);
+  String get version => cache.getVersionFor(name);
+
   bool isUpToDate() {
-    if (!cache.getArtifactDirectory(kName).existsSync())
+    if (!location.existsSync())
       return false;
-    return cache.getVersionFor(kName) == cache.getStampFor(kName);
+    if (version != cache.getStampFor(name))
+      return false;
+    return isUpToDateInner();
   }
 
-  Future<Null> download() {
-    Status status = logger.startProgress('Downloading Material fonts...');
-
-    Directory fontsDir = cache.getArtifactDirectory(kName);
-    if (fontsDir.existsSync())
-      fontsDir.deleteSync(recursive: true);
-
-    return Cache._downloadFileToCache(
-      Uri.parse(cache.getVersionFor(kName)), fontsDir, true
-    ).then((_) {
-      cache.setStampFor(kName, cache.getVersionFor(kName));
-      status.stop();
-    }).whenComplete(() {
-      status.cancel();
+  Future<Null> update() async {
+    if (location.existsSync())
+      location.deleteSync(recursive: true);
+    location.createSync(recursive: true);
+    return updateInner().then<Null>((_) {
+      cache.setStampFor(name, version);
     });
+  }
+
+  /// Hook method for extra checks for being up-to-date.
+  bool isUpToDateInner() => true;
+
+  /// Template method to perform artifact update.
+  Future<Null> updateInner();
+}
+
+/// A cached artifact containing fonts used for Material Design.
+class MaterialFonts extends CachedArtifact {
+  MaterialFonts(Cache cache): super('material_fonts', cache);
+
+  @override
+  Future<Null> updateInner() {
+    final Status status = logger.startProgress('Downloading Material fonts...', expectSlowOperation: true);
+    return _downloadZipArchive(Uri.parse(version), location).then<Null>((_) {
+      status.stop();
+    }).whenComplete(status.cancel);
   }
 }
 
-class FlutterEngine {
+/// A cached artifact containing the Flutter engine binaries.
+class FlutterEngine extends CachedArtifact {
+  FlutterEngine(Cache cache): super('engine', cache);
 
-  FlutterEngine(this.cache);
-
-  static const String kName = 'engine';
-  static const String kSkyEngine = 'sky_engine';
-  static const String kSdkBundle = 'sdk.ds';
-
-  final Cache cache;
-
-  List<String> _getPackageDirs() => const <String>[kSkyEngine];
-
-  List<String> _getEngineDirs() {
-    List<String> dirs = <String>[
-      'android-arm',
-      'android-arm-profile',
-      'android-arm-release',
-      'android-x64',
-      'android-x86',
-    ];
-
-    if (cache.includeAllPlatforms)
-      dirs.addAll(<String>['ios', 'ios-profile', 'ios-release', 'linux-x64']);
-    else if (Platform.isMacOS)
-      dirs.addAll(<String>['ios', 'ios-profile', 'ios-release']);
-    else if (Platform.isLinux)
-      dirs.add('linux-x64');
-
-    return dirs;
-  }
+  List<String> _getPackageDirs() => const <String>['sky_engine'];
 
   // Return a list of (cache directory path, download URL path) tuples.
-  List<List<String>> _getToolsDirs() {
+  List<List<String>> _getBinaryDirs() {
+    final List<List<String>> binaryDirs = <List<String>>[];
+
+    binaryDirs.add(<String>['common', 'flutter_patched_sdk.zip']);
+
     if (cache.includeAllPlatforms)
-      return <List<String>>[]
-        ..addAll(_osxToolsDirs)
-        ..addAll(_linuxToolsDirs);
-    else if (Platform.isMacOS)
-      return _osxToolsDirs;
-    else if (Platform.isLinux)
-      return _linuxToolsDirs;
-    else
-      return <List<String>>[];
+      binaryDirs
+        ..addAll(_osxBinaryDirs)
+        ..addAll(_linuxBinaryDirs)
+        ..addAll(_windowsBinaryDirs)
+        ..addAll(_androidBinaryDirs)
+        ..addAll(_iosBinaryDirs);
+    else if (platform.isLinux)
+      binaryDirs
+        ..addAll(_linuxBinaryDirs)
+        ..addAll(_androidBinaryDirs);
+    else if (platform.isMacOS)
+      binaryDirs
+        ..addAll(_osxBinaryDirs)
+        ..addAll(_androidBinaryDirs)
+        ..addAll(_iosBinaryDirs);
+    else if (platform.isWindows)
+      binaryDirs
+        ..addAll(_windowsBinaryDirs)
+        ..addAll(_androidBinaryDirs);
+
+    return binaryDirs;
   }
 
-  List<List<String>> get _osxToolsDirs => <List<String>>[
+  List<List<String>> get _osxBinaryDirs => <List<String>>[
     <String>['darwin-x64', 'darwin-x64/artifacts.zip'],
+    <String>['darwin-x64', 'dart-sdk-darwin-x64.zip'],
     <String>['android-arm-profile/darwin-x64', 'android-arm-profile/darwin-x64.zip'],
     <String>['android-arm-release/darwin-x64', 'android-arm-release/darwin-x64.zip'],
   ];
 
-  List<List<String>> get _linuxToolsDirs => <List<String>>[
+  List<List<String>> get _linuxBinaryDirs => <List<String>>[
     <String>['linux-x64', 'linux-x64/artifacts.zip'],
+    <String>['linux-x64', 'dart-sdk-linux-x64.zip'],
     <String>['android-arm-profile/linux-x64', 'android-arm-profile/linux-x64.zip'],
     <String>['android-arm-release/linux-x64', 'android-arm-release/linux-x64.zip'],
   ];
 
-  bool isUpToDate() {
-    Directory pkgDir = cache.getCacheDir('pkg');
+  List<List<String>> get _windowsBinaryDirs => <List<String>>[
+    <String>['windows-x64', 'windows-x64/artifacts.zip'],
+    <String>['windows-x64', 'dart-sdk-windows-x64.zip'],
+    <String>['android-arm-profile/windows-x64', 'android-arm-profile/windows-x64.zip'],
+    <String>['android-arm-release/windows-x64', 'android-arm-release/windows-x64.zip'],
+  ];
+
+  List<List<String>> get _androidBinaryDirs => <List<String>>[
+    <String>['android-x86', 'android-x86/artifacts.zip'],
+    <String>['android-x64', 'android-x64/artifacts.zip'],
+    <String>['android-arm', 'android-arm/artifacts.zip'],
+    <String>['android-arm-profile', 'android-arm-profile/artifacts.zip'],
+    <String>['android-arm-release', 'android-arm-release/artifacts.zip'],
+  ];
+
+  List<List<String>> get _iosBinaryDirs => <List<String>>[
+    <String>['ios', 'ios/artifacts.zip'],
+    <String>['ios-profile', 'ios-profile/artifacts.zip'],
+    <String>['ios-release', 'ios-release/artifacts.zip'],
+  ];
+
+  @override
+  bool isUpToDateInner() {
+    final Directory pkgDir = cache.getCacheDir('pkg');
     for (String pkgName in _getPackageDirs()) {
-      String pkgPath = path.join(pkgDir.path, pkgName);
-      String dotPackagesPath = path.join(pkgPath, '.packages');
-      if (!new Directory(pkgPath).existsSync())
-        return false;
-      if (!new File(dotPackagesPath).existsSync())
+      final String pkgPath = fs.path.join(pkgDir.path, pkgName);
+      if (!fs.directory(pkgPath).existsSync())
         return false;
     }
 
-    if (!new File(path.join(pkgDir.path, kSkyEngine, kSdkBundle)).existsSync())
-      return false;
-
-    Directory engineDir = cache.getArtifactDirectory(kName);
-    for (String dirName in _getEngineDirs()) {
-      Directory dir = new Directory(path.join(engineDir.path, dirName));
+    for (List<String> toolsDir in _getBinaryDirs()) {
+      final Directory dir = fs.directory(fs.path.join(location.path, toolsDir[0]));
       if (!dir.existsSync())
         return false;
     }
-
-    for (List<String> toolsDir in _getToolsDirs()) {
-      Directory dir = new Directory(path.join(engineDir.path, toolsDir[0]));
-      if (!dir.existsSync())
-        return false;
-    }
-
-    return cache.getVersionFor(kName) == cache.getStampFor(kName);
+    return true;
   }
 
-  Future<Null> download() async {
-    String engineVersion = cache.getVersionFor(kName);
-    String url = 'https://storage.googleapis.com/flutter_infra/flutter/$engineVersion/';
+  @override
+  Future<Null> updateInner() async {
+    final String url = 'https://storage.googleapis.com/flutter_infra/flutter/$version/';
 
-    Directory pkgDir = cache.getCacheDir('pkg');
+    final Directory pkgDir = cache.getCacheDir('pkg');
     for (String pkgName in _getPackageDirs()) {
-      String pkgPath = path.join(pkgDir.path, pkgName);
-      Directory dir = new Directory(pkgPath);
+      final String pkgPath = fs.path.join(pkgDir.path, pkgName);
+      final Directory dir = fs.directory(pkgPath);
       if (dir.existsSync())
         dir.deleteSync(recursive: true);
       await _downloadItem('Downloading package $pkgName...', url + pkgName + '.zip', pkgDir);
-      await pubGet(directory: pkgPath);
     }
 
-    Status summaryStatus = logger.startProgress('Building Dart SDK summary...');
-    try {
-      String skyEnginePath = path.join(pkgDir.path, kSkyEngine);
-      buildSkyEngineSdkSummary(skyEnginePath, kSdkBundle);
-    } finally {
-      summaryStatus.stop();
-    }
+    for (List<String> toolsDir in _getBinaryDirs()) {
+      final String cacheDir = toolsDir[0];
+      final String urlPath = toolsDir[1];
+      final Directory dir = fs.directory(fs.path.join(location.path, cacheDir));
+      await _downloadItem('Downloading $cacheDir tools...', url + urlPath, dir);
 
-    Directory engineDir = cache.getArtifactDirectory(kName);
-    if (engineDir.existsSync())
-      engineDir.deleteSync(recursive: true);
+      _makeFilesExecutable(dir);
 
-    for (String dirName in _getEngineDirs()) {
-      Directory dir = new Directory(path.join(engineDir.path, dirName));
-      await _downloadItem('Downloading engine artifacts $dirName...',
-        url + dirName + '/artifacts.zip', dir);
-      File frameworkZip = new File(path.join(dir.path, 'Flutter.framework.zip'));
+      final File frameworkZip = fs.file(fs.path.join(dir.path, 'Flutter.framework.zip'));
       if (frameworkZip.existsSync()) {
-        Directory framework = new Directory(path.join(dir.path, 'Flutter.framework'));
+        final Directory framework = fs.directory(fs.path.join(dir.path, 'Flutter.framework'));
         framework.createSync();
         os.unzip(frameworkZip, framework);
       }
     }
-
-    for (List<String> toolsDir in _getToolsDirs()) {
-      String cacheDir = toolsDir[0];
-      String urlPath = toolsDir[1];
-      Directory dir = new Directory(path.join(engineDir.path, cacheDir));
-      await _downloadItem('Downloading $cacheDir tools...', url + urlPath, dir);
-      _makeFilesExecutable(dir);
-    }
-
-    cache.setStampFor(kName, cache.getVersionFor(kName));
   }
 
   void _makeFilesExecutable(Directory dir) {
     for (FileSystemEntity entity in dir.listSync()) {
       if (entity is File) {
-        String name = path.basename(entity.path);
-        if (name == 'sky_snapshot' || name == 'sky_shell')
+        final String name = fs.path.basename(entity.path);
+        if (name == 'flutter_tester')
           os.makeExecutable(entity);
       }
     }
   }
 
   Future<Null> _downloadItem(String message, String url, Directory dest) {
-    Status status = logger.startProgress(message);
-    return Cache._downloadFileToCache(Uri.parse(url), dest, true).then((_) {
+    final Status status = logger.startProgress(message, expectSlowOperation: true);
+    return _downloadZipArchive(Uri.parse(url), dest).then<Null>((_) {
       status.stop();
-    }).whenComplete(() {
-      status.cancel();
-    });
+    }).whenComplete(status.cancel);
   }
+}
+
+/// A cached artifact containing Gradle Wrapper scripts and binaries.
+class GradleWrapper extends CachedArtifact {
+  GradleWrapper(Cache cache): super('gradle_wrapper', cache);
+
+  @override
+  Future<Null> updateInner() async {
+    final Status status = logger.startProgress('Downloading Gradle Wrapper...', expectSlowOperation: true);
+
+    final String url = 'https://android.googlesource.com'
+        '/platform/tools/base/+archive/$version/templates/gradle/wrapper.tgz';
+    await _downloadZippedTarball(Uri.parse(url), location).then<Null>((_) {
+      // Delete property file, allowing templates to provide it.
+      fs.file(fs.path.join(location.path, 'gradle', 'wrapper', 'gradle-wrapper.properties')).deleteSync();
+      status.stop();
+    }).whenComplete(status.cancel);
+  }
+}
+
+/// Download a file from the given [url] and write it to [location].
+Future<Null> _downloadFile(Uri url, File location) async {
+  _ensureExists(location.parent);
+  final List<int> fileBytes = await fetchUrl(url);
+  location.writeAsBytesSync(fileBytes, flush: true);
+}
+
+/// Download a zip archive from the given [url] and unzip it to [location].
+Future<Null> _downloadZipArchive(Uri url, Directory location) {
+  return _withTemporaryFile('download.zip', (File tempFile) async {
+    await _downloadFile(url, tempFile);
+    _ensureExists(location);
+    os.unzip(tempFile, location);
+  });
+}
+
+/// Download a gzipped tarball from the given [url] and unpack it to [location].
+Future<Null> _downloadZippedTarball(Uri url, Directory location) {
+  return _withTemporaryFile('download.tgz', (File tempFile) async {
+    await _downloadFile(url, tempFile);
+    _ensureExists(location);
+    os.unpack(tempFile, location);
+  });
+}
+
+/// Create a file with the given name in a new temporary directory, invoke
+/// [onTemporaryFile] with the file as argument, then delete the temporary
+/// directory.
+Future<Null> _withTemporaryFile(String name, Future<Null> onTemporaryFile(File file)) async {
+  final Directory tempDir = fs.systemTempDirectory.createTempSync();
+  final File tempFile = fs.file(fs.path.join(tempDir.path, name));
+  await onTemporaryFile(tempFile).whenComplete(() {
+    tempDir.delete(recursive: true);
+  });
+}
+
+/// Create the given [directory] and parents, as necessary.
+void _ensureExists(Directory directory) {
+  if (!directory.existsSync())
+    directory.createSync(recursive: true);
 }

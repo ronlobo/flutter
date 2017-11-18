@@ -2,12 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
-import 'package:meta/meta.dart';
 
 import 'colors.dart';
-import 'icon_theme_data.dart';
-import 'icon_theme.dart';
 import 'ink_well.dart';
 import 'material.dart';
 import 'theme.dart';
@@ -17,7 +15,12 @@ import 'tooltip.dart';
 // http://material.google.com/layout/metrics-keylines.html#metrics-keylines-keylines-spacing
 const double _kSize = 56.0;
 const double _kSizeMini = 40.0;
-final Object _kDefaultHeroTag = new Object();
+
+class _DefaultHeroTag {
+  const _DefaultHeroTag();
+  @override
+  String toString() => '<default FloatingActionButton tag>';
+}
 
 /// A material design floating action button.
 ///
@@ -29,8 +32,8 @@ final Object _kDefaultHeroTag = new Object();
 /// buttons should be used for positive actions such as "create", "share", or
 /// "navigate".
 ///
-/// If the [onPressed] callback is not specified or null, then the button will
-/// be disabled and will not react to touch.
+/// If the [onPressed] callback is null, then the button will be disabled and
+/// will not react to touch.
 ///
 /// See also:
 ///
@@ -44,12 +47,12 @@ class FloatingActionButton extends StatefulWidget {
   /// Most commonly used in the [Scaffold.floatingActionButton] field.
   const FloatingActionButton({
     Key key,
-    @required this.child,
+    this.child,
     this.tooltip,
     this.backgroundColor,
-    this.heroTag,
-    this.elevation: 6,
-    this.highlightElevation: 12,
+    this.heroTag: const _DefaultHeroTag(),
+    this.elevation: 6.0,
+    this.highlightElevation: 12.0,
     @required this.onPressed,
     this.mini: false
   }) : super(key: key);
@@ -71,6 +74,15 @@ class FloatingActionButton extends StatefulWidget {
   /// The tag to apply to the button's [Hero] widget.
   ///
   /// Defaults to a tag that matches other floating action buttons.
+  ///
+  /// Set this to null explicitly if you don't want the floating action button to
+  /// have a hero tag.
+  ///
+  /// If this is not explicitly set, then there can only be one
+  /// [FloatingActionButton] per route (that is, per screen), since otherwise
+  /// there would be a tag conflict (multiple heroes on one route can't have the
+  /// same tag). The material design specification recommends only using one
+  /// floating action button per screen.
   final Object heroTag;
 
   /// The callback that is called when the button is tapped or otherwise activated.
@@ -78,20 +90,23 @@ class FloatingActionButton extends StatefulWidget {
   /// If this is set to null, the button will be disabled.
   final VoidCallback onPressed;
 
-  /// The z-coordinate at which to place this button.
-  ///
-  /// The following elevations have defined shadows: 1, 2, 3, 4, 6, 8, 9, 12, 16, 24
+  /// The z-coordinate at which to place this button. This controls the size of
+  /// the shadow below the floating action button.
   ///
   /// Defaults to 6, the appropriate elevation for floating action buttons.
-  final int elevation;
+  final double elevation;
 
-  /// The z-coordinate at which to place this button when the user is touching the button.
-  ///
-  /// The following elevations have defined shadows: 1, 2, 3, 4, 6, 8, 9, 12, 16, 24
+  /// The z-coordinate at which to place this button when the user is touching
+  /// the button. This controls the size of the shadow below the floating action
+  /// button.
   ///
   /// Defaults to 12, the appropriate elevation for floating action buttons
   /// while they are being touched.
-  final int highlightElevation;
+  ///
+  /// See also:
+  ///
+  ///  * [elevation], the default elevation.
+  final double highlightElevation;
 
   /// Controls the size of this button.
   ///
@@ -116,44 +131,53 @@ class _FloatingActionButtonState extends State<FloatingActionButton> {
   @override
   Widget build(BuildContext context) {
     Color iconColor = Colors.white;
-    Color materialColor = config.backgroundColor;
+    Color materialColor = widget.backgroundColor;
     if (materialColor == null) {
       final ThemeData themeData = Theme.of(context);
       materialColor = themeData.accentColor;
-      iconColor = themeData.accentColorBrightness == Brightness.dark ? Colors.white : Colors.black;
+      iconColor = themeData.accentIconTheme.color;
     }
 
-    Widget result = new Center(
-      child: new IconTheme.merge(
-        context: context,
-        data: new IconThemeData(color: iconColor),
-        child: config.child
-      )
-    );
+    Widget result;
 
-    if (config.tooltip != null) {
-      result = new Tooltip(
-        message: config.tooltip,
-        child: result
+    if (widget.child != null) {
+      result = new Center(
+        child: IconTheme.merge(
+          data: new IconThemeData(color: iconColor),
+          child: widget.child,
+        ),
       );
     }
 
-    return new Hero(
-      tag: config.heroTag ?? _kDefaultHeroTag,
-      child: new Material(
-        color: materialColor,
-        type: MaterialType.circle,
-        elevation: _highlight ? config.highlightElevation : config.elevation,
-        child: new Container(
-          width: config.mini ? _kSizeMini : _kSize,
-          height: config.mini ? _kSizeMini : _kSize,
-          child: new InkWell(
-            onTap: config.onPressed,
-            onHighlightChanged: _handleHighlightChanged,
-            child: result
-          )
-        )
-      )
+    if (widget.tooltip != null) {
+      result = new Tooltip(
+        message: widget.tooltip,
+        child: result,
+      );
+    }
+
+    result = new Material(
+      color: materialColor,
+      type: MaterialType.circle,
+      elevation: _highlight ? widget.highlightElevation : widget.elevation,
+      child: new Container(
+        width: widget.mini ? _kSizeMini : _kSize,
+        height: widget.mini ? _kSizeMini : _kSize,
+        child: new InkWell(
+          onTap: widget.onPressed,
+          onHighlightChanged: _handleHighlightChanged,
+          child: result,
+        ),
+      ),
     );
+
+    if (widget.heroTag != null) {
+      result = new Hero(
+        tag: widget.heroTag,
+        child: result,
+      );
+    }
+
+    return result;
   }
 }

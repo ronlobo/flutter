@@ -2,22 +2,32 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'package:meta/meta.dart';
+import 'package:flutter/foundation.dart';
 
 import 'framework.dart';
+import 'navigator.dart';
+import 'will_pop_scope.dart';
 
-/// A container for grouping together multiple form field widgets (e.g.
-/// [Input] widgets).
+/// An optional container for grouping together multiple form field widgets
+/// (e.g. [TextField] widgets).
+///
+/// Each individual form field should be wrapped in a [FormField] widget, with
+/// the [Form] widget as a common ancestor of all of those. Call methods on
+/// [FormState] to save, reset, or validate each [FormField] that is a
+/// descendant of this [Form]. To obtain the [FormState], you may use [Form.of]
+/// with a context whose ancestor is the [Form], or pass a [GlobalKey] to the
+/// [Form] constructor and call [GlobalKey.currentState].
 class Form extends StatefulWidget {
   /// Creates a container for form fields.
   ///
   /// The [child] argument must not be null.
-  Form({
+  const Form({
     Key key,
     @required this.child,
-  }) : super(key: key) {
-    assert(child != null);
-  }
+    this.autovalidate: false,
+    this.onWillPop,
+  }) : assert(child != null),
+       super(key: key);
 
   /// Returns the closest [FormState] which encloses the given context.
   ///
@@ -28,23 +38,46 @@ class Form extends StatefulWidget {
   /// form.save();
   /// ```
   static FormState of(BuildContext context) {
-    _FormScope scope = context.inheritFromWidgetOfExactType(_FormScope);
+    final _FormScope scope = context.inheritFromWidgetOfExactType(_FormScope);
     return scope?._formState;
   }
 
   /// Root of the widget hierarchy that contains this form.
   final Widget child;
 
+  /// If true, form fields will validate and update their error text
+  /// immediately after every change. Otherwise, you must call
+  /// [FormState.validate] to validate.
+  final bool autovalidate;
+
+  /// Enables the form to veto attempts by the user to dismiss the [ModalRoute]
+  /// that contains the form.
+  ///
+  /// If the callback returns a Future that resolves to false, the form's route
+  /// will not be popped.
+  ///
+  /// See also:
+  ///
+  ///  * [WillPopScope], another widget that provides a way to intercept the
+  ///    back button.
+  final WillPopCallback onWillPop;
+
   @override
   FormState createState() => new FormState();
 }
 
+/// State associated with a [Form] widget.
+///
+/// A [FormState] object can be used to [save], [reset], and [validate] every
+/// [FormField] that is a descendant of the associated [Form].
+///
+/// Typically obtained via [Form.of].
 class FormState extends State<Form> {
   int _generation = 0;
-  Set<FormFieldState<dynamic>> _fields = new Set<FormFieldState<dynamic>>();
+  final Set<FormFieldState<dynamic>> _fields = new Set<FormFieldState<dynamic>>();
 
-  /// Called when a form field has changed. This will cause all form fields
-  /// to rebuild, useful if form fields have interdependencies.
+  // Called when a form field has changed. This will cause all form fields
+  // to rebuild, useful if form fields have interdependencies.
   void _fieldDidChange() {
     setState(() {
       ++_generation;
@@ -61,20 +94,25 @@ class FormState extends State<Form> {
 
   @override
   Widget build(BuildContext context) {
-    return new _FormScope(
-      formState: this,
-      generation: _generation,
-      child: config.child
+    if (widget.autovalidate)
+      _validate();
+    return new WillPopScope(
+      onWillPop: widget.onWillPop,
+      child: new _FormScope(
+        formState: this,
+        generation: _generation,
+        child: widget.child,
+      ),
     );
   }
 
-  /// Saves every FormField that is a descendant of this Form.
+  /// Saves every [FormField] that is a descendant of this [Form].
   void save() {
     for (FormFieldState<dynamic> field in _fields)
       field.save();
   }
 
-  /// Resets every FormField that is a descendant of this Form back to its
+  /// Resets every [FormField] that is a descendant of this [Form] back to its
   /// initialState.
   void reset() {
     for (FormFieldState<dynamic> field in _fields)
@@ -82,18 +120,23 @@ class FormState extends State<Form> {
     _fieldDidChange();
   }
 
-  /// Returns true if any descendant FormField has an error, false otherwise.
-  bool get hasErrors {
-    for (FormFieldState<dynamic> field in _fields) {
-      if (field.hasError)
-        return true;
-    }
-    return false;
+  /// Validates every [FormField] that is a descendant of this [Form], and
+  /// returns true if there are no errors.
+  bool validate() {
+    _fieldDidChange();
+    return _validate();
+  }
+
+  bool _validate() {
+    bool hasError = false;
+    for (FormFieldState<dynamic> field in _fields)
+      hasError = !field.validate() || hasError;
+    return !hasError;
   }
 }
 
 class _FormScope extends InheritedWidget {
-  _FormScope({
+  const _FormScope({
     Key key,
     Widget child,
     FormState formState,
@@ -109,7 +152,7 @@ class _FormScope extends InheritedWidget {
   final int _generation;
 
   /// The [Form] associated with this widget.
-  Form get form => _formState.config;
+  Form get form => _formState.widget;
 
   @override
   bool updateShouldNotify(_FormScope old) => _generation != old._generation;
@@ -130,9 +173,10 @@ typedef void FormFieldSetter<T>(T newValue);
 /// Used by [FormField.builder].
 typedef Widget FormFieldBuilder<T>(FormFieldState<T> field);
 
-/// A single form field. This widget maintains the current state of the form
-/// field, so that updates and validation errors are visually reflected in the
-/// UI.
+/// A single form field.
+///
+/// This widget maintains the current state of the form field, so that updates
+/// and validation errors are visually reflected in the UI.
 ///
 /// When used inside a [Form], you can use methods on [FormState] to query or
 /// manipulate the form data as a whole. For example, calling [FormState.save]
@@ -141,17 +185,28 @@ typedef Widget FormFieldBuilder<T>(FormFieldState<T> field);
 /// Use a [GlobalKey] with [FormField] if you want to retrieve its current
 /// state, for example if you want one form field to depend on another.
 ///
-/// See also: [Form], [InputFormField]
+/// A [Form] ancestor is not required. The [Form] simply makes it easier to
+/// save, reset, or validate multiple fields at once. To use without a [Form],
+/// pass a [GlobalKey] to the constructor and use [GlobalKey.currentState] to
+/// save or reset the form field.
+///
+/// See also:
+///
+///  * [Form], which is the widget that aggregates the form fields.
+///  * [TextField], which is a commonly used form field for entering text.
 class FormField<T> extends StatefulWidget {
-  FormField({
+  /// Creates a single form field.
+  ///
+  /// The [builder] argument must not be null.
+  const FormField({
     Key key,
     @required this.builder,
     this.onSaved,
     this.validator,
     this.initialValue,
-  }) : super(key: key) {
-    assert(builder != null);
-  }
+    this.autovalidate: false,
+  }) : assert(builder != null),
+       super(key: key);
 
   /// An optional method to call with the final value when the form is saved via
   /// Form.save().
@@ -169,10 +224,18 @@ class FormField<T> extends StatefulWidget {
   /// An optional value to initialize the form field to, or null otherwise.
   final T initialValue;
 
+  /// If true, this form field will validate and update its error text
+  /// immediately after every change. Otherwise, you must call
+  /// [FormFieldState.validate] to validate. If part of a [Form] that
+  /// autovalidates, this value will be ignored.
+  final bool autovalidate;
+
   @override
   FormFieldState<T> createState() => new FormFieldState<T>();
 }
 
+/// The current state of a [FormField]. Passed to the [FormFieldBuilder] method
+/// for use in constructing the form field's widget.
 class FormFieldState<T> extends State<FormField<T>> {
   T _value;
   String _errorText;
@@ -180,8 +243,9 @@ class FormFieldState<T> extends State<FormField<T>> {
   /// The current value of the form field.
   T get value => _value;
 
-  /// The current validation error returned by [FormField]'s [validator]
-  /// callback, or null if no errors.
+  /// The current validation error returned by the [FormField.validator]
+  /// callback, or null if no errors have been triggered. This only updates when
+  /// [validate] is called.
   String get errorText => _errorText;
 
   /// True if this field has any validation errors.
@@ -189,16 +253,31 @@ class FormFieldState<T> extends State<FormField<T>> {
 
   /// Calls the [FormField]'s onSaved method with the current value.
   void save() {
-    if (config.onSaved != null)
-      config.onSaved(value);
+    if (widget.onSaved != null)
+      widget.onSaved(value);
   }
 
   /// Resets the field to its initial value.
   void reset() {
     setState(() {
-      _value = config.initialValue;
+      _value = widget.initialValue;
       _errorText = null;
     });
+  }
+
+  /// Calls [FormField.validator] to set the [errorText]. Returns true if there
+  /// were no errors.
+  bool validate() {
+    setState(() {
+      _validate();
+    });
+    return !hasError;
+  }
+
+  bool _validate() {
+    if (widget.validator != null)
+      _errorText = widget.validator(_value);
+    return !hasError;
   }
 
   /// Updates this field's state to the new value. Useful for responding to
@@ -210,10 +289,22 @@ class FormFieldState<T> extends State<FormField<T>> {
     Form.of(context)?._fieldDidChange();
   }
 
+  /// Sets the value associated with this form field.
+  ///
+  /// This method should be only be called by subclasses that need to update
+  /// the form field value due to state changes identified during the widget
+  /// build phase, when calling `setState` is prohibited. In all other cases,
+  /// the value should be set by a call to [onChanged], which ensures that
+  /// `setState` is called.
+  @protected
+  void setValue(T value) {
+    _value = value;
+  }
+
   @override
   void initState() {
     super.initState();
-    _value = config.initialValue;
+    _value = widget.initialValue;
   }
 
   @override
@@ -224,10 +315,9 @@ class FormFieldState<T> extends State<FormField<T>> {
 
   @override
   Widget build(BuildContext context) {
-    if (config.validator != null)
-      _errorText = config.validator(_value);
-
+    if (widget.autovalidate)
+      _validate();
     Form.of(context)?._register(this);
-    return config.builder(this);
+    return widget.builder(this);
   }
 }

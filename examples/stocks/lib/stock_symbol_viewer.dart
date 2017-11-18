@@ -4,25 +4,26 @@
 
 import 'package:flutter/material.dart';
 
-import 'stock_data.dart';
 import 'stock_arrow.dart';
+import 'stock_data.dart';
 
 class _StockSymbolView extends StatelessWidget {
-  _StockSymbolView({ this.stock, this.arrow });
+  const _StockSymbolView({ this.stock, this.arrow });
 
   final Stock stock;
   final Widget arrow;
 
   @override
   Widget build(BuildContext context) {
-    String lastSale = "\$${stock.lastSale.toStringAsFixed(2)}";
-    String changeInPrice = "${stock.percentChange.toStringAsFixed(2)}%";
+    assert(stock != null);
+    final String lastSale = '\$${stock.lastSale.toStringAsFixed(2)}';
+    String changeInPrice = '${stock.percentChange.toStringAsFixed(2)}%';
     if (stock.percentChange > 0)
-      changeInPrice = "+" + changeInPrice;
+      changeInPrice = '+' + changeInPrice;
 
-    TextStyle headings = Theme.of(context).textTheme.body2;
+    final TextStyle headings = Theme.of(context).textTheme.body2;
     return new Container(
-      padding: new EdgeInsets.all(20.0),
+      padding: const EdgeInsets.all(20.0),
       child: new Column(
         children: <Widget>[
           new Row(
@@ -47,11 +48,11 @@ class _StockSymbolView extends StatelessWidget {
           ),
           new RichText(
             text: new TextSpan(
-              style: DefaultTextStyle.of(context).style.merge(new TextStyle(fontSize: 8.0)),
+              style: DefaultTextStyle.of(context).style.merge(const TextStyle(fontSize: 8.0)),
               text: 'Prices may be delayed by ',
               children: <TextSpan>[
-                new TextSpan(text: 'several', style: new TextStyle(fontStyle: FontStyle.italic)),
-                new TextSpan(text: ' years.'),
+                const TextSpan(text: 'several', style: const TextStyle(fontStyle: FontStyle.italic)),
+                const TextSpan(text: ' years.'),
               ]
             )
           ),
@@ -63,48 +64,64 @@ class _StockSymbolView extends StatelessWidget {
 }
 
 class StockSymbolPage extends StatelessWidget {
-  StockSymbolPage({ this.stock });
+  const StockSymbolPage({ this.symbol, this.stocks });
 
-  final Stock stock;
+  final String symbol;
+  final StockData stocks;
 
   @override
   Widget build(BuildContext context) {
-    return new Scaffold(
-      appBar: new AppBar(
-        title: new Text(stock.name)
-      ),
-      body: new Block(
-        children: <Widget>[
-          new Container(
-            margin: new EdgeInsets.all(20.0),
-            child: new Card(
-              child: new _StockSymbolView(
-                stock: stock,
-                arrow: new Hero(
-                  tag: stock,
-                  turns: 2,
-                  child: new StockArrow(percentChange: stock.percentChange)
-                )
+    return new AnimatedBuilder(
+      animation: stocks,
+      builder: (BuildContext context, Widget child) {
+        final Stock stock = stocks[symbol];
+        return new Scaffold(
+          appBar: new AppBar(
+            title: new Text(stock?.name ?? symbol)
+          ),
+          body: new SingleChildScrollView(
+            child: new Container(
+              margin: const EdgeInsets.all(20.0),
+              child: new Card(
+                child: new AnimatedCrossFade(
+                  duration: const Duration(milliseconds: 300),
+                  firstChild: const Padding(
+                    padding: const EdgeInsets.all(20.0),
+                    child: const Center(child: const CircularProgressIndicator()),
+                  ),
+                  secondChild: stock != null
+                    ? new _StockSymbolView(
+                      stock: stock,
+                      arrow: new Hero(
+                        tag: stock,
+                        child: new StockArrow(percentChange: stock.percentChange),
+                      ),
+                    ) : new Padding(
+                        padding: const EdgeInsets.all(20.0),
+                        child: new Center(child: new Text('$symbol not found')),
+                    ),
+                  crossFadeState: stock == null && stocks.loading ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+                ),
               )
             )
           )
-        ]
-      )
+        );
+      },
     );
   }
 }
 
 class StockSymbolBottomSheet extends StatelessWidget {
-  StockSymbolBottomSheet({ this.stock });
+  const StockSymbolBottomSheet({ this.stock });
 
   final Stock stock;
 
   @override
   Widget build(BuildContext context) {
     return new Container(
-      padding: new EdgeInsets.all(10.0),
-      decoration: new BoxDecoration(
-        border: new Border(top: new BorderSide(color: Colors.black26))
+      padding: const EdgeInsets.all(10.0),
+      decoration: const BoxDecoration(
+        border: const Border(top: const BorderSide(color: Colors.black26))
       ),
       child: new _StockSymbolView(
         stock: stock,

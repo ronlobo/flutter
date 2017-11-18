@@ -4,13 +4,18 @@
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
 import 'button.dart';
 import 'button_bar.dart';
 import 'colors.dart';
+import 'ink_well.dart';
 import 'material.dart';
 import 'theme.dart';
+
+// Examples can assume:
+// enum Department { treasury, state }
 
 /// A material design dialog.
 ///
@@ -21,42 +26,35 @@ import 'theme.dart';
 ///
 /// See also:
 ///
-///  * [AlertDialog]
-///  * [SimpleDialog]
-///  * [showDialog]
+///  * [AlertDialog], for dialogs that have a message and some buttons.
+///  * [SimpleDialog], for dialogs that offer a variety of options.
+///  * [showDialog], which actually displays the dialog and returns its result.
 ///  * <https://material.google.com/components/dialogs.html>
 class Dialog extends StatelessWidget {
   /// Creates a dialog.
   ///
   /// Typically used in conjunction with [showDialog].
-  Dialog({
+  const Dialog({
     Key key,
     this.child,
   }) : super(key: key);
 
+  /// The widget below this widget in the tree.
   final Widget child;
 
   Color _getColor(BuildContext context) {
-    Brightness brightness = Theme.of(context).brightness;
-    assert(brightness != null);
-    switch (brightness) {
-      case Brightness.light:
-        return Colors.white;
-      case Brightness.dark:
-        return Colors.grey[800];
-    }
-    return null;
+    return Theme.of(context).dialogBackgroundColor;
   }
 
   @override
   Widget build(BuildContext context) {
     return new Center(
       child: new Container(
-        margin: new EdgeInsets.symmetric(horizontal: 40.0, vertical: 24.0),
+        margin: const EdgeInsets.symmetric(horizontal: 40.0, vertical: 24.0),
         child: new ConstrainedBox(
-          constraints: new BoxConstraints(minWidth: 280.0),
+          constraints: const BoxConstraints(minWidth: 280.0),
           child: new Material(
-            elevation: 24,
+            elevation: 24.0,
             color: _getColor(context),
             type: MaterialType.card,
             child: child
@@ -76,7 +74,8 @@ class Dialog extends StatelessWidget {
 ///
 /// If the content is too large to fit on the screen vertically, the dialog will
 /// display the title and the actions and let the content overflow. Consider
-/// using a scrolling widget, such as [Block], for [content] to avoid overflow.
+/// using a scrolling widget, such as [ListView], for [content] to avoid
+/// overflow.
 ///
 /// For dialogs that offer the user a choice between several options, consider
 /// using a [SimpleDialog].
@@ -84,17 +83,50 @@ class Dialog extends StatelessWidget {
 /// Typically passed as the child widget to [showDialog], which displays the
 /// dialog.
 ///
+/// ## Sample code
+///
+/// This snippet shows a method in a [State] which, when called, displays a dialog box
+/// and returns a [Future] that completes when the dialog is dismissed.
+///
+/// ```dart
+/// Future<Null> _neverSatisfied() async {
+///   return showDialog<Null>(
+///     context: context,
+///     barrierDismissible: false, // user must tap button!
+///     child: new AlertDialog(
+///       title: new Text('Rewind and remember'),
+///       content: new SingleChildScrollView(
+///         child: new ListBody(
+///           children: <Widget>[
+///             new Text('You will never be satisfied.'),
+///             new Text('You\’re like me. I’m never satisfied.'),
+///           ],
+///         ),
+///       ),
+///       actions: <Widget>[
+///         new FlatButton(
+///           child: new Text('Regret'),
+///           onPressed: () {
+///             Navigator.of(context).pop();
+///           },
+///         ),
+///       ],
+///     ),
+///   );
+/// }
+/// ```
+///
 /// See also:
 ///
-///  * [SimpleDialog]
-///  * [Dialog]
-///  * [showDialog]
+///  * [SimpleDialog], which handles the scrolling of the contents but has no [actions].
+///  * [Dialog], on which [AlertDialog] and [SimpleDialog] are based.
+///  * [showDialog], which actually displays the dialog and returns its result.
 ///  * <https://material.google.com/components/dialogs.html#dialogs-alerts>
 class AlertDialog extends StatelessWidget {
   /// Creates an alert dialog.
   ///
   /// Typically used in conjunction with [showDialog].
-  AlertDialog({
+  const AlertDialog({
     Key key,
     this.title,
     this.titlePadding,
@@ -113,20 +145,20 @@ class AlertDialog extends StatelessWidget {
   ///
   /// Uses material design default if none is supplied. If there is no title, no
   /// padding will be provided.
-  final EdgeInsets titlePadding;
+  final EdgeInsetsGeometry titlePadding;
 
   /// The (optional) content of the dialog is displayed in the center of the
   /// dialog in a lighter font.
   ///
-  /// Typically, this is a [Block] containing the contents of the dialog. Using
-  /// a [Block] ensures that the contents can scroll if they are too big to fit
-  /// on the display.
+  /// Typically, this is a [ListView] containing the contents of the dialog.
+  /// Using a [ListView] ensures that the contents can scroll if they are too
+  /// big to fit on the display.
   final Widget content;
 
   /// Padding around the content.
   ///
   /// Uses material design default if none is supplied.
-  final EdgeInsets contentPadding;
+  final EdgeInsetsGeometry contentPadding;
 
   /// The (optional) set of actions that are displayed at the bottom of the
   /// dialog.
@@ -138,36 +170,35 @@ class AlertDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final List<Widget> children = new List<Widget>();
+    final List<Widget> children = <Widget>[];
 
     if (title != null) {
       children.add(new Padding(
-        padding: titlePadding ?? new EdgeInsets.fromLTRB(24.0, 24.0, 24.0, content == null ? 20.0 : 0.0),
+        padding: titlePadding ?? new EdgeInsetsDirectional.fromSTEB(24.0, 24.0, 24.0, content == null ? 20.0 : 0.0),
         child: new DefaultTextStyle(
           style: Theme.of(context).textTheme.title,
-          child: title
-        )
+          child: title,
+        ),
       ));
     }
 
     if (content != null) {
       children.add(new Flexible(
-        fit: FlexFit.loose,
         child: new Padding(
-          padding: contentPadding ?? const EdgeInsets.fromLTRB(24.0, 20.0, 24.0, 24.0),
+          padding: contentPadding ?? const EdgeInsetsDirectional.fromSTEB(24.0, 20.0, 24.0, 24.0),
           child: new DefaultTextStyle(
             style: Theme.of(context).textTheme.subhead,
-            child: content
-          )
-        )
+            child: content,
+          ),
+        ),
       ));
     }
 
     if (actions != null) {
       children.add(new ButtonTheme.bar(
         child: new ButtonBar(
-          children: actions
-        )
+          children: actions,
+        ),
       ));
     }
 
@@ -176,9 +207,65 @@ class AlertDialog extends StatelessWidget {
         child: new Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: children
-        )
-      )
+          children: children,
+        ),
+      ),
+    );
+  }
+}
+
+/// An option used in a [SimpleDialog].
+///
+/// A simple dialog offers the user a choice between several options. This
+/// widget is commonly used to represent each of the options. If the user
+/// selects this option, the widget will call the [onPressed] callback, which
+/// typically uses [Navigator.pop] to close the dialog.
+///
+/// ## Sample code
+///
+/// ```dart
+/// new SimpleDialogOption(
+///   onPressed: () { Navigator.pop(context, Department.treasury); },
+///   child: const Text('Treasury department'),
+/// )
+/// ```
+///
+/// See also:
+///
+///  * [SimpleDialog], for a dialog in which to use this widget.
+///  * [showDialog], which actually displays the dialog and returns its result.
+///  * [FlatButton], which are commonly used as actions in other kinds of
+///    dialogs, such as [AlertDialog]s.
+///  * <https://material.google.com/components/dialogs.html#dialogs-simple-dialogs>
+class SimpleDialogOption extends StatelessWidget {
+  /// Creates an option for a [SimpleDialog].
+  const SimpleDialogOption({
+    Key key,
+    this.onPressed,
+    this.child,
+  }) : super(key: key);
+
+  /// The callback that is called when this option is selected.
+  ///
+  /// If this is set to null, the option cannot be selected.
+  ///
+  /// When used in a [SimpleDialog], this will typically call [Navigator.pop]
+  /// with a value for [showDialog] to complete its future with.
+  final VoidCallback onPressed;
+
+  /// The widget below this widget in the tree.
+  ///
+  /// Typically a [Text] widget.
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return new InkWell(
+      onTap: onPressed,
+      child: new Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 24.0),
+        child: child
+      ),
     );
   }
 }
@@ -194,17 +281,60 @@ class AlertDialog extends StatelessWidget {
 /// Typically passed as the child widget to [showDialog], which displays the
 /// dialog.
 ///
+/// ## Sample code
+///
+/// In this example, the user is asked to select between two options. These
+/// options are represented as an enum. The [showDialog] method here returns
+/// a [Future] that completes to a value of that enum. If the user cancels
+/// the dialog (e.g. by hitting the back button on Android, or tapping on the
+/// mask behind the dialog) then the future completes with the null value.
+///
+/// The return value in this example is used as the index for a switch statement.
+/// One advantage of using an enum as the return value and then using that to
+/// drive a switch statement is that the analyzer will flag any switch statement
+/// that doesn't mention every value in the enum.
+///
+/// ```dart
+/// Future<Null> _askedToLead() async {
+///   switch (await showDialog<Department>(
+///     context: context,
+///     child: new SimpleDialog(
+///       title: const Text('Select assignment'),
+///       children: <Widget>[
+///         new SimpleDialogOption(
+///           onPressed: () { Navigator.pop(context, Department.treasury); },
+///           child: const Text('Treasury department'),
+///         ),
+///         new SimpleDialogOption(
+///           onPressed: () { Navigator.pop(context, Department.state); },
+///           child: const Text('State department'),
+///         ),
+///       ],
+///     ),
+///   )) {
+///     case Department.treasury:
+///       // Let's go.
+///       // ...
+///     break;
+///     case Department.state:
+///       // ...
+///     break;
+///   }
+/// }
+/// ```
+///
 /// See also:
 ///
-///  * [AlertDialog]
-///  * [Dialog]
-///  * [showDialog]
+///  * [SimpleDialogOption], which are options used in this type of dialog.
+///  * [AlertDialog], for dialogs that have a row of buttons below the body.
+///  * [Dialog], on which [SimpleDialog] and [AlertDialog] are based.
+///  * [showDialog], which actually displays the dialog and returns its result.
 ///  * <https://material.google.com/components/dialogs.html#dialogs-simple-dialogs>
 class SimpleDialog extends StatelessWidget {
   /// Creates a simple dialog.
   ///
   /// Typically used in conjunction with [showDialog].
-  SimpleDialog({
+  const SimpleDialog({
     Key key,
     this.title,
     this.titlePadding,
@@ -222,19 +352,18 @@ class SimpleDialog extends StatelessWidget {
   ///
   /// Uses material design default if none is supplied. If there is no title, no
   /// padding will be provided.
-  final EdgeInsets titlePadding;
+  final EdgeInsetsGeometry titlePadding;
 
-  /// The (optional) content of the dialog is displayed in a [Block] underneath
-  /// the title.
+  /// The (optional) content of the dialog is displayed in a
+  /// [SingleChildScrollView] underneath the title.
   ///
-  /// The children are assumed to have 8.0 pixels of vertical and 24.0 pixels of
-  /// horizontal padding internally.
+  /// Typically a list of [SimpleDialogOption]s.
   final List<Widget> children;
 
   /// Padding around the content.
   ///
   /// Uses material design default if none is supplied.
-  final EdgeInsets contentPadding;
+  final EdgeInsetsGeometry contentPadding;
 
   @override
   Widget build(BuildContext context) {
@@ -242,7 +371,7 @@ class SimpleDialog extends StatelessWidget {
 
     if (title != null) {
       body.add(new Padding(
-        padding: titlePadding ?? const EdgeInsets.fromLTRB(24.0, 24.0, 24.0, 0.0),
+        padding: titlePadding ?? const EdgeInsetsDirectional.fromSTEB(24.0, 24.0, 24.0, 0.0),
         child: new DefaultTextStyle(
           style: Theme.of(context).textTheme.title,
           child: title
@@ -252,10 +381,9 @@ class SimpleDialog extends StatelessWidget {
 
     if (children != null) {
       body.add(new Flexible(
-        fit: FlexFit.loose,
-        child: new Block(
-          padding: contentPadding ?? const EdgeInsets.fromLTRB(0.0, 12.0, 0.0, 16.0),
-          children: children
+        child: new SingleChildScrollView(
+          padding: contentPadding ?? const EdgeInsetsDirectional.fromSTEB(0.0, 12.0, 0.0, 16.0),
+          child: new ListBody(children: children),
         )
       ));
     }
@@ -268,7 +396,7 @@ class SimpleDialog extends StatelessWidget {
           child: new Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: body
+            children: body,
           )
         )
       )
@@ -278,9 +406,11 @@ class SimpleDialog extends StatelessWidget {
 
 class _DialogRoute<T> extends PopupRoute<T> {
   _DialogRoute({
-    this.child,
-    this.theme,
-  });
+    @required this.theme,
+    bool barrierDismissible: true,
+    @required this.child,
+  }) : assert(barrierDismissible != null),
+       _barrierDismissible = barrierDismissible;
 
   final Widget child;
   final ThemeData theme;
@@ -289,18 +419,19 @@ class _DialogRoute<T> extends PopupRoute<T> {
   Duration get transitionDuration => const Duration(milliseconds: 150);
 
   @override
-  bool get barrierDismissable => true;
+  bool get barrierDismissible => _barrierDismissible;
+  final bool _barrierDismissible;
 
   @override
   Color get barrierColor => Colors.black54;
 
   @override
-  Widget buildPage(BuildContext context, Animation<double> animation, Animation<double> forwardAnimation) {
+  Widget buildPage(BuildContext context, Animation<double> animation, Animation<double> secondaryAnimation) {
     return theme != null ? new Theme(data: theme, child: child) : child;
   }
 
   @override
-  Widget buildTransitions(BuildContext context, Animation<double> animation, Animation<double> forwardAnimation, Widget child) {
+  Widget buildTransitions(BuildContext context, Animation<double> animation, Animation<double> secondaryAnimation, Widget child) {
     return new FadeTransition(
       opacity: new CurvedAnimation(
         parent: animation,
@@ -316,15 +447,23 @@ class _DialogRoute<T> extends PopupRoute<T> {
 /// This function typically receives a [Dialog] widget as its child argument.
 /// Content below the dialog is dimmed with a [ModalBarrier].
 ///
-/// Returns a `Future` that resolves to the value (if any) that was passed to
+/// Returns a [Future] that resolves to the value (if any) that was passed to
 /// [Navigator.pop] when the dialog was closed.
 ///
 /// See also:
-///  * [Dialog]
+///  * [AlertDialog], for dialogs that have a row of buttons below a body.
+///  * [SimpleDialog], which handles the scrolling of the contents and does
+///    not show buttons below its body.
+///  * [Dialog], on which [SimpleDialog] and [AlertDialog] are based.
 ///  * <https://material.google.com/components/dialogs.html>
-Future<dynamic/*=T*/> showDialog/*<T>*/({ BuildContext context, Widget child }) {
-  return Navigator.push(context, new _DialogRoute<dynamic/*=T*/>(
+Future<T> showDialog<T>({
+  @required BuildContext context,
+  bool barrierDismissible: true,
+  @required Widget child,
+}) {
+  return Navigator.of(context, rootNavigator: true).push(new _DialogRoute<T>(
     child: child,
     theme: Theme.of(context, shadowThemeOnly: true),
+    barrierDismissible: barrierDismissible,
   ));
 }

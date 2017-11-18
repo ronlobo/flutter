@@ -2,24 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
-enum EnginePhase {
-  layout,
-  compositingBits,
-  paint,
-  composite,
-  flushSemantics
-}
+import 'package:flutter_test/flutter_test.dart' show EnginePhase;
+export 'package:flutter_test/flutter_test.dart' show EnginePhase;
 
 class TestRenderingFlutterBinding extends BindingBase with SchedulerBinding, ServicesBinding, RendererBinding, GestureBinding {
   EnginePhase phase = EnginePhase.composite;
 
   @override
-  void beginFrame() {
+  void drawFrame() {
+    assert(phase != EnginePhase.build, 'rendering_tester does not support testing the build phase; use flutter_test instead');
     pipelineOwner.flushLayout();
     if (phase == EnginePhase.layout)
       return;
@@ -33,7 +30,10 @@ class TestRenderingFlutterBinding extends BindingBase with SchedulerBinding, Ser
     if (phase == EnginePhase.composite)
       return;
     pipelineOwner.flushSemantics();
-    assert(phase == EnginePhase.flushSemantics);
+    if (phase == EnginePhase.flushSemantics)
+      return;
+    assert(phase == EnginePhase.flushSemantics ||
+           phase == EnginePhase.sendSemanticsUpdate);
   }
 }
 
@@ -45,10 +45,20 @@ TestRenderingFlutterBinding get renderer {
 
 /// Place the box in the render tree, at the given size and with the given
 /// alignment on the screen.
+///
+/// If you've updated `box` and want to lay it out again, use [pumpFrame].
+///
+/// Once a particular [RenderBox] has been passed to [layout], it cannot easily
+/// be put in a different place in the tree or passed to [layout] again, because
+/// [layout] places the given object into another [RenderBox] which you would
+/// need to unparent it from (but that box isn't itself made available).
+///
+/// The EnginePhase must not be [EnginePhase.build], since the rendering layer
+/// has no build phase.
 void layout(RenderBox box, {
   BoxConstraints constraints,
-  FractionalOffset alignment: FractionalOffset.center,
-  EnginePhase phase: EnginePhase.layout
+  Alignment alignment: Alignment.center,
+  EnginePhase phase: EnginePhase.layout,
 }) {
   assert(box != null); // If you want to just repump the last box, call pumpFrame().
   assert(box.parent == null); // We stick the box in another, so you can't reuse it easily, sorry.
@@ -70,8 +80,10 @@ void layout(RenderBox box, {
 
 void pumpFrame({ EnginePhase phase: EnginePhase.layout }) {
   assert(renderer != null);
+  assert(renderer.renderView != null);
+  assert(renderer.renderView.child != null); // call layout() first!
   renderer.phase = phase;
-  renderer.beginFrame();
+  renderer.drawFrame();
 }
 
 class TestCallbackPainter extends CustomPainter {
@@ -124,4 +136,7 @@ class RenderSizedBox extends RenderBox {
 
   @override
   void performLayout() { }
+
+  @override
+  bool hitTestSelf(Offset position) => true;
 }

@@ -11,17 +11,21 @@ import 'asset_bundle.dart';
 import 'image_cache.dart';
 import 'platform_messages.dart';
 
-/// Listens for platform messages and directs them to [PlatformMessages].
+/// Listens for platform messages and directs them to [BinaryMessages].
 ///
 /// The ServicesBinding also registers a [LicenseEntryCollector] that exposes
-/// the licenses found in the LICENSE file stored at the root of the asset
+/// the licenses found in the `LICENSE` file stored at the root of the asset
 /// bundle.
 abstract class ServicesBinding extends BindingBase {
+  // This class is intended to be used as a mixin, and should not be
+  // extended directly.
+  factory ServicesBinding._() => null;
+
   @override
   void initInstances() {
     super.initInstances();
     ui.window
-      ..onPlatformMessage = PlatformMessages.handlePlatformMessage;
+      ..onPlatformMessage = BinaryMessages.handlePlatformMessage;
     LicenseRegistry.addLicense(_addLicenses);
   }
 
@@ -52,8 +56,8 @@ abstract class ServicesBinding extends BindingBase {
       // out the cache of resources that have changed.
       // TODO(ianh): find a way to only evict affected images, not all images
       name: 'evict',
-      getter: () => '',
-      setter: (String value) {
+      getter: () async => '',
+      setter: (String value) async {
         rootBundle.evict(value);
         imageCache.clear();
       }

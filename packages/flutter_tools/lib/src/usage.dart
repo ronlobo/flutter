@@ -4,23 +4,35 @@
 
 import 'dart:async';
 
-import 'package:usage/src/usage_impl_io.dart'; // ignore: implementation_imports
-import 'package:usage/usage.dart';
+import 'package:meta/meta.dart';
+import 'package:usage/usage_io.dart';
 
 import 'base/context.dart';
+import 'base/os.dart';
+import 'base/platform.dart';
 import 'base/utils.dart';
 import 'globals.dart';
 import 'version.dart';
 
-// TODO(devoncarew): We'll want to find a way to send (sanitized) command parameters.
-
 const String _kFlutterUA = 'UA-67589403-6';
+
+Usage get flutterUsage => Usage.instance;
 
 class Usage {
   /// Create a new Usage instance; [versionOverride] is used for testing.
   Usage({ String settingsName: 'flutter', String versionOverride }) {
-    String version = versionOverride ?? FlutterVersion.getVersionString(whitelistBranchName: true);
+    final FlutterVersion flutterVersion = FlutterVersion.instance;
+    final String version = versionOverride ?? flutterVersion.getVersionString(whitelistBranchName: true);
     _analytics = new AnalyticsIO(_kFlutterUA, settingsName, version);
+
+    // Report a more detailed OS version string than package:usage does by default.
+    _analytics.setSessionValue('cd1', os.name);
+    // Send the branch name as the "channel".
+    _analytics.setSessionValue('cd2', flutterVersion.getBranchName(whitelistBranchName: true));
+    // Record the host as the application installer ID - the context that flutter_tools is running in.
+    if (platform.environment.containsKey('FLUTTER_HOST')) {
+      _analytics.setSessionValue('aiid', platform.environment['FLUTTER_HOST']);
+    }
 
     bool runningOnCI = false;
 
@@ -37,11 +49,11 @@ class Usage {
   }
 
   /// Returns [Usage] active in the current app context.
-  static Usage get instance => context[Usage] ?? (context[Usage] = new Usage());
+  static Usage get instance => context.putIfAbsent(Usage, () => new Usage());
 
   Analytics _analytics;
 
-  bool _printedUsage = false;
+  bool _printedWelcome = false;
   bool _suppressAnalytics = false;
 
   bool get isFirstRun => _analytics.firstRun;
@@ -60,82 +72,88 @@ class Usage {
     _analytics.enabled = value;
   }
 
-  void sendCommand(String command) {
-    if (!suppressAnalytics)
-      _analytics.sendScreenView(command);
-  }
+  /// A stable randomly generated UUID used to deduplicate multiple identical
+  /// reports coming from the same computer.
+  String get clientId => _analytics.clientId;
 
-  void sendEvent(String category, String parameter) {
-    if (!suppressAnalytics)
-      _analytics.sendEvent(category, parameter);
-  }
-
-  void sendTiming(String category, String variableName, Duration duration) {
-    _analytics.sendTiming(variableName, duration.inMilliseconds, category: category);
-  }
-
-  UsageTimer startTimer(String event) {
+  void sendCommand(String command, { Map<String, String> parameters }) {
     if (suppressAnalytics)
-      return new _MockUsageTimer();
-    else
-      return new UsageTimer._(event, _analytics.startTimer(event, category: 'flutter'));
+      return;
+
+    parameters ??= const <String, String>{};
+
+    _analytics.sendScreenView(command, parameters: parameters);
+  }
+
+  void sendEvent(String category, String parameter,
+      { Map<String, String> parameters }) {
+    if (suppressAnalytics)
+      return;
+
+    parameters ??= const <String, String>{};
+
+    _analytics.sendEvent(category, parameter, parameters: parameters);
+  }
+
+  void sendTiming(
+    String category,
+    String variableName,
+    Duration duration, {
+    String label,
+    }) {
+    if (!suppressAnalytics) {
+      _analytics.sendTiming(
+        variableName,
+        duration.inMilliseconds,
+        category: category,
+        label: label,
+      );
+    }
   }
 
   void sendException(dynamic exception, StackTrace trace) {
     if (!suppressAnalytics)
-      _analytics.sendException('${exception.runtimeType}; ${sanitizeStacktrace(trace)}');
+      _analytics.sendException('${exception.runtimeType}\n${sanitizeStacktrace(trace)}');
   }
 
-  /// Fires whenever analytics data is sent over the network; public for testing.
+  /// Fires whenever analytics data is sent over the network.
+  @visibleForTesting
   Stream<Map<String, dynamic>> get onSend => _analytics.onSend;
 
   /// Returns when the last analytics event has been sent, or after a fixed
   /// (short) delay, whichever is less.
-  Future<Null> ensureAnalyticsSent() {
+  Future<Null> ensureAnalyticsSent() async {
     // TODO(devoncarew): This may delay tool exit and could cause some analytics
     // events to not be reported. Perhaps we could send the analytics pings
     // out-of-process from flutter_tools?
-    return _analytics.waitForLastPing(timeout: new Duration(milliseconds: 250));
+    await _analytics.waitForLastPing(timeout: const Duration(milliseconds: 250));
   }
 
-  void printUsage() {
-    if (_printedUsage)
+  void printWelcome() {
+    // This gets called if it's the first run by the selected command, if any,
+    // and on exit, in case there was no command.
+    if (_printedWelcome)
       return;
-    _printedUsage = true;
+    _printedWelcome = true;
 
     printStatus('');
     printStatus('''
   ╔════════════════════════════════════════════════════════════════════════════╗
   ║                 Welcome to Flutter! - https://flutter.io                   ║
   ║                                                                            ║
-  ║ The Flutter tool anonymously reports feature usage statistics and basic    ║
-  ║ crash reports to Google in order to help Google contribute improvements to ║
-  ║ Flutter over time. See Google's privacy policy:                            ║
+  ║ The Flutter tool anonymously reports feature usage statistics and crash    ║
+  ║ reports to Google in order to help Google contribute improvements to       ║
+  ║ Flutter over time.                                                         ║
+  ║                                                                            ║
+  ║ Read about data we send with crash reports:                                ║
+  ║ https://github.com/flutter/flutter/wiki/Flutter-CLI-crash-reporting        ║
+  ║                                                                            ║
+  ║ See Google's privacy policy:                                               ║
   ║ https://www.google.com/intl/en/policies/privacy/                           ║
   ║                                                                            ║
-  ║ Use "flutter config --no-analytics" to disable analytics reporting.        ║
+  ║ Use "flutter config --no-analytics" to disable analytics and crash         ║
+  ║ reporting.                                                                 ║
   ╚════════════════════════════════════════════════════════════════════════════╝
   ''', emphasis: true);
   }
-}
-
-class UsageTimer {
-  UsageTimer._(this.event, this._timer);
-
-  final String event;
-  final AnalyticsTimer _timer;
-
-  void finish() {
-    _timer.finish();
-  }
-}
-
-class _MockUsageTimer implements UsageTimer {
-  @override
-  String event;
-  @override
-  AnalyticsTimer _timer;
-
-  @override
-  void finish() { }
 }

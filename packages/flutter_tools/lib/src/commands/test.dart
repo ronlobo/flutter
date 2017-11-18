@@ -3,24 +3,46 @@
 // found in the LICENSE file.
 
 import 'dart:async';
-import 'dart:io';
 
-import 'package:path/path.dart' as path;
-import 'package:test/src/executable.dart' as executable; // ignore: implementation_imports
-
+import '../base/common.dart';
+import '../base/file_system.dart';
+import '../base/io.dart';
 import '../base/logger.dart';
 import '../base/os.dart';
+import '../base/platform.dart';
+import '../base/process_manager.dart';
 import '../cache.dart';
-import '../dart/package_map.dart';
 import '../globals.dart';
 import '../runner/flutter_command.dart';
 import '../test/coverage_collector.dart';
-import '../test/flutter_platform.dart' as loader;
-import '../toolchain.dart';
+import '../test/event_printer.dart';
+import '../test/runner.dart';
+import '../test/watcher.dart';
 
 class TestCommand extends FlutterCommand {
-  TestCommand() {
+  TestCommand({ bool verboseHelp: false }) {
+    requiresPubspecYaml();
     usesPubOption();
+    argParser.addOption('name',
+      help: 'A regular expression matching substrings of the names of tests to run.',
+      valueHelp: 'regexp',
+      allowMultiple: true,
+      splitCommas: false,
+    );
+    argParser.addOption('plain-name',
+      help: 'A plain-text substring of the names of tests to run.',
+      valueHelp: 'substring',
+      allowMultiple: true,
+      splitCommas: false,
+    );
+    argParser.addFlag('start-paused',
+        defaultsTo: false,
+        negatable: false,
+        help: 'Start in a paused mode and wait for a debugger to connect.\n'
+              'You must specify a single test file to run, explicitly.\n'
+              'Instructions for connecting with a debugger and printed to the\n'
+              'console once the test has started.'
+    );
     argParser.addFlag('coverage',
       defaultsTo: false,
       negatable: false,
@@ -29,24 +51,23 @@ class TestCommand extends FlutterCommand {
     argParser.addFlag('merge-coverage',
       defaultsTo: false,
       negatable: false,
-      help: 'Whether to merge converage data with "coverage/lcov.base.info". '
+      help: 'Whether to merge converage data with "coverage/lcov.base.info".\n'
             'Implies collecting coverage data. (Requires lcov)'
+    );
+    argParser.addFlag('ipv6',
+        negatable: false,
+        hide: true,
+        help: 'Whether to use IPv6 for the test harness server socket.'
     );
     argParser.addOption('coverage-path',
       defaultsTo: 'coverage/lcov.info',
       help: 'Where to store coverage information (if coverage is enabled).'
     );
-    commandValidator = () {
-      if (!FileSystemEntity.isFileSync('pubspec.yaml')) {
-        printError(
-          'Error: No pubspec.yaml file found in the current working directory.\n'
-          'Run this command from the root of your project. Test files must be\n'
-          'called *_test.dart and must reside in the package\'s \'test\'\n'
-          'directory (or one of its subdirectories).');
-        return false;
-      }
-      return true;
-    };
+    argParser.addFlag('machine',
+        hide: !verboseHelp,
+        negatable: false,
+        help: 'Handle machine structured JSON command input\n'
+            'and provide output and progress in machine friendly format.');
   }
 
   @override
@@ -55,53 +76,25 @@ class TestCommand extends FlutterCommand {
   @override
   String get description => 'Run Flutter unit tests for the current project.';
 
-  Iterable<String> _findTests(Directory directory) {
-    return directory.listSync(recursive: true, followLinks: false)
-                    .where((FileSystemEntity entity) => entity.path.endsWith('_test.dart') &&
-                      FileSystemEntity.isFileSync(entity.path))
-                    .map((FileSystemEntity entity) => path.absolute(entity.path));
-  }
-
-  Directory get _currentPackageTestDir {
-    // We don't scan the entire package, only the test/ subdirectory, so that
-    // files with names like like "hit_test.dart" don't get run.
-    return new Directory('test');
-  }
-
-  Future<int> _runTests(List<String> testArgs, Directory testDirectory) async {
-    Directory currentDirectory = Directory.current;
-    try {
-      if (testDirectory != null) {
-        printTrace('switching to directory $testDirectory to run tests');
-        PackageMap.globalPackagesPath = path.normalize(path.absolute(PackageMap.globalPackagesPath));
-        Directory.current = testDirectory;
-      }
-      printTrace('running test package with arguments: $testArgs');
-      await executable.main(testArgs);
-      printTrace('test package returned with exit code $exitCode');
-
-      return exitCode;
-    } finally {
-      Directory.current = currentDirectory;
-    }
-  }
-
   Future<bool> _collectCoverageData(CoverageCollector collector, { bool mergeCoverageData: false }) async {
-    Status status = logger.startProgress('Collecting coverage information...');
-    String coverageData = await collector.finalizeCoverage();
+    final Status status = logger.startProgress('Collecting coverage information...');
+    final String coverageData = await collector.finalizeCoverage(
+      timeout: const Duration(seconds: 30),
+    );
     status.stop();
+    printTrace('coverage information collection complete');
     if (coverageData == null)
       return false;
 
-    String coveragePath = argResults['coverage-path'];
-    File coverageFile = new File(coveragePath)
+    final String coveragePath = argResults['coverage-path'];
+    final File coverageFile = fs.file(coveragePath)
       ..createSync(recursive: true)
       ..writeAsStringSync(coverageData, flush: true);
     printTrace('wrote coverage data to $coveragePath (size=${coverageData.length})');
 
-    String baseCoverageData = 'coverage/lcov.base.info';
+    final String baseCoverageData = 'coverage/lcov.base.info';
     if (mergeCoverageData) {
-      if (!os.isLinux) {
+      if (!platform.isLinux) {
         printError(
           'Merging coverage data is supported only on Linux because it '
           'requires the "lcov" tool.'
@@ -109,25 +102,26 @@ class TestCommand extends FlutterCommand {
         return false;
       }
 
-      if (!FileSystemEntity.isFileSync(baseCoverageData)) {
+      if (!fs.isFileSync(baseCoverageData)) {
         printError('Missing "$baseCoverageData". Unable to merge coverage data.');
         return false;
       }
 
       if (os.which('lcov') == null) {
         String installMessage = 'Please install lcov.';
-        if (os.isLinux)
+        if (platform.isLinux)
           installMessage = 'Consider running "sudo apt-get install lcov".';
-        else if (os.isMacOS)
+        else if (platform.isMacOS)
           installMessage = 'Consider running "brew install lcov".';
         printError('Missing "lcov" tool. Unable to merge coverage data.\n$installMessage');
         return false;
       }
 
-      Directory tempDir = Directory.systemTemp.createTempSync('flutter_tools');
+      final Directory tempDir = fs.systemTempDirectory.createTempSync('flutter_tools');
       try {
-        File sourceFile = coverageFile.copySync(path.join(tempDir.path, 'lcov.source.info'));
-        ProcessResult result = Process.runSync('lcov', <String>[
+        final File sourceFile = coverageFile.copySync(fs.path.join(tempDir.path, 'lcov.source.info'));
+        final ProcessResult result = processManager.runSync(<String>[
+          'lcov',
           '--add-tracefile', baseCoverageData,
           '--add-tracefile', sourceFile.path,
           '--output-file', coverageFile.path,
@@ -142,50 +136,99 @@ class TestCommand extends FlutterCommand {
   }
 
   @override
-  Future<int> runCommand() async {
-    List<String> testArgs = argResults.rest.map((String testPath) => path.absolute(testPath)).toList();
+  Future<Null> validateCommand() async {
+    await super.validateCommand();
+    if (!fs.isFileSync('pubspec.yaml')) {
+      throwToolExit(
+          'Error: No pubspec.yaml file found in the current working directory.\n'
+              'Run this command from the root of your project. Test files must be\n'
+              'called *_test.dart and must reside in the package\'s \'test\'\n'
+              'directory (or one of its subdirectories).');
+    }
+  }
 
-    if (!commandValidator())
-      return 1;
-
-    Directory testDir;
-
-    if (testArgs.isEmpty) {
-      testDir = _currentPackageTestDir;
-      if (!testDir.existsSync()) {
-        printError("Test directory '${testDir.path}' not found.");
-        return 1;
-      }
-
-      testArgs.addAll(_findTests(testDir));
+  @override
+  Future<FlutterCommandResult> runCommand() async {
+    if (platform.isWindows) {
+      throwToolExit(
+          'The test command is currently not supported on Windows: '
+          'https://github.com/flutter/flutter/issues/8516'
+      );
     }
 
-    testArgs.insert(0, '--');
-    if (!terminal.supportsColor)
-      testArgs.insertAll(0, <String>['--no-color', '-rexpanded']);
+    final List<String> names = argResults['name'];
+    final List<String> plainNames = argResults['plain-name'];
 
-    if (argResults['coverage'])
-      testArgs.insert(0, '--concurrency=1');
+    Iterable<String> files = argResults.rest.map<String>((String testPath) => fs.path.absolute(testPath)).toList();
 
-    loader.installHook();
-    loader.shellPath = tools.getHostToolPath(HostTool.SkyShell);
-    if (!FileSystemEntity.isFileSync(loader.shellPath)) {
-        printError('Cannot find Flutter shell at ${loader.shellPath}');
-      return 1;
+    final bool startPaused = argResults['start-paused'];
+    if (startPaused && files.length != 1) {
+      throwToolExit(
+          'When using --start-paused, you must specify a single test file to run.',
+          exitCode: 1);
+    }
+
+    Directory workDir;
+    if (files.isEmpty) {
+      // We don't scan the entire package, only the test/ subdirectory, so that
+      // files with names like like "hit_test.dart" don't get run.
+      workDir = fs.directory('test');
+      if (!workDir.existsSync())
+        throwToolExit('Test directory "${workDir.path}" not found.');
+      files = _findTests(workDir).toList();
+      if (files.isEmpty) {
+        throwToolExit(
+            'Test directory "${workDir.path}" does not appear to contain any test files.\n'
+                'Test files must be in that directory and end with the pattern "_test.dart".'
+        );
+      }
+    }
+
+    CoverageCollector collector;
+    if (argResults['coverage'] || argResults['merge-coverage']) {
+      collector = new CoverageCollector();
+    }
+
+    final bool machine = argResults['machine'];
+    if (collector != null && machine) {
+      throwToolExit(
+          "The test command doesn't support --machine and coverage together");
+    }
+
+    TestWatcher watcher;
+    if (collector != null) {
+      watcher = collector;
+    } else if (machine) {
+      watcher = new EventPrinter();
     }
 
     Cache.releaseLockEarly();
 
-    CoverageCollector collector = CoverageCollector.instance;
-    collector.enabled = argResults['coverage'] || argResults['merge-coverage'];
+    final int result = await runTests(files,
+        workDir: workDir,
+        names: names,
+        plainNames: plainNames,
+        watcher: watcher,
+        enableObservatory: collector != null || startPaused,
+        startPaused: startPaused,
+        ipv6: argResults['ipv6'],
+        machine: machine,
+        );
 
-    int result = await _runTests(testArgs, testDir);
-
-    if (collector.enabled) {
+    if (collector != null) {
       if (!await _collectCoverageData(collector, mergeCoverageData: argResults['merge-coverage']))
-        return 1;
+        throwToolExit(null);
     }
 
-    return result;
+    if (result != 0)
+      throwToolExit(null);
+    return const FlutterCommandResult(ExitStatus.success);
   }
+}
+
+Iterable<String> _findTests(Directory directory) {
+  return directory.listSync(recursive: true, followLinks: false)
+      .where((FileSystemEntity entity) => entity.path.endsWith('_test.dart') &&
+      fs.isFileSync(entity.path))
+      .map((FileSystemEntity entity) => fs.path.absolute(entity.path));
 }

@@ -9,13 +9,13 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 class TestImageInfo implements ImageInfo {
-  const TestImageInfo(this.value) : image = null, scale = null;
+  const TestImageInfo(this.value, { this.image, this.scale });
 
   @override
-  final ui.Image image; // ignored in test
+  final ui.Image image;
 
   @override
-  final double scale; // ignored in test
+  final double scale;
 
   final int value;
 
@@ -23,8 +23,8 @@ class TestImageInfo implements ImageInfo {
   String toString() => '$runtimeType($value)';
 }
 
-class TestProvider extends ImageProvider<int> {
-  const TestProvider(this.key, this.imageValue);
+class TestImageProvider extends ImageProvider<int> {
+  const TestImageProvider(this.key, this.imageValue);
   final int key;
   final int imageValue;
 
@@ -45,7 +45,7 @@ class TestProvider extends ImageProvider<int> {
 }
 
 Future<ImageInfo> extractOneFrame(ImageStream stream) {
-  Completer<ImageInfo> completer = new Completer<ImageInfo>();
+  final Completer<ImageInfo> completer = new Completer<ImageInfo>();
   void listener(ImageInfo image, bool synchronousCall) {
     completer.complete(image);
     stream.removeListener(listener);

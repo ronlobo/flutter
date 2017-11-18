@@ -3,29 +3,27 @@
 // found in the LICENSE file.
 
 import 'dart:async';
-import 'dart:io';
 
-import '../application_package.dart';
 import '../base/common.dart';
+import '../base/file_system.dart';
+import '../base/io.dart';
 import '../base/utils.dart';
 import '../build_info.dart';
 import '../cache.dart';
 import '../device.dart';
 import '../globals.dart';
-import '../hot.dart';
 import '../ios/mac.dart';
-import '../vmservice.dart';
 import '../resident_runner.dart';
-import '../run.dart';
+import '../run_cold.dart';
+import '../run_hot.dart';
 import '../runner/flutter_command.dart';
-import 'build_apk.dart';
 import 'daemon.dart';
-import 'install.dart';
-import 'trace.dart';
 
 abstract class RunCommandBase extends FlutterCommand {
+  // Used by run and drive commands.
   RunCommandBase() {
     addBuildModeFlags(defaultToRelease: false);
+    usesFlavorOption();
     argParser.addFlag('trace-startup',
         negatable: true,
         defaultsTo: false,
@@ -33,10 +31,31 @@ abstract class RunCommandBase extends FlutterCommand {
     argParser.addOption('route',
         help: 'Which route to load when running the app.');
     usesTargetOption();
+    usesPortOptions();
+    usesPubOption();
   }
 
   bool get traceStartup => argResults['trace-startup'];
   String get route => argResults['route'];
+
+  void usesPortOptions() {
+    argParser.addOption('observatory-port',
+        help: 'Listen to the given port for an observatory debugger connection.\n'
+              'Specifying port 0 will find a random free port.\n'
+              'Defaults to the first available port after $kDefaultObservatoryPort.'
+    );
+  }
+
+  int get observatoryPort {
+    if (argResults['observatory-port'] != null) {
+      try {
+        return int.parse(argResults['observatory-port']);
+      } catch (error) {
+        throwToolExit('Invalid port for `--observatory-port`: $error');
+      }
+    }
+    return null;
+  }
 }
 
 class RunCommand extends RunCommandBase {
@@ -47,6 +66,8 @@ class RunCommand extends RunCommandBase {
   final String description = 'Run your Flutter app on an attached device.';
 
   RunCommand({ bool verboseHelp: false }) {
+    requiresPubspecYaml();
+
     argParser.addFlag('full-restart',
         defaultsTo: true,
         help: 'Stop any currently running application process before running the app.');
@@ -54,73 +75,108 @@ class RunCommand extends RunCommandBase {
         defaultsTo: false,
         negatable: false,
         help: 'Start in a paused mode and wait for a debugger to connect.');
-    argParser.addOption('debug-port',
-        help: 'Listen to the given port for a debug connection (defaults to $kDefaultObservatoryPort).');
+    argParser.addFlag('enable-software-rendering',
+        defaultsTo: false,
+        negatable: false,
+        help: 'Enable rendering using the Skia software backend. This is useful\n'
+              'when testing Flutter on emulators. By default, Flutter will\n'
+              'attempt to either use OpenGL or Vulkan and fall back to software\n'
+              'when neither is available.');
+    argParser.addFlag('trace-skia',
+        defaultsTo: false,
+        negatable: false,
+        help: 'Enable tracing of Skia code. This is useful when debugging\n'
+              'the GPU thread. By default, Flutter will not log skia code.');
+    argParser.addFlag('use-test-fonts',
+        negatable: true,
+        defaultsTo: false,
+        help: 'Enable (and default to) the "Ahem" font. This is a special font\n'
+              'used in tests to remove any dependencies on the font metrics. It\n'
+              'is enabled when you use "flutter test". Set this flag when running\n'
+              'a test using "flutter run" for debugging purposes. This flag is\n'
+              'only available when running in debug mode.');
     argParser.addFlag('build',
         defaultsTo: true,
         help: 'If necessary, build the app before running.');
     argParser.addOption('use-application-binary',
         hide: !verboseHelp,
         help: 'Specify a pre-built application binary to use when running.');
+    argParser.addFlag('preview-dart-2',
+        hide: !verboseHelp,
+        defaultsTo: false,
+        help: 'Preview Dart 2.0 functionality.');
+    argParser.addOption('packages',
+        hide: !verboseHelp,
+        help: 'Specify the path to the .packages file.');
+    argParser.addOption('project-root',
+        hide: !verboseHelp,
+        help: 'Specify the project root directory.');
+    argParser.addOption('project-assets',
+        hide: !verboseHelp,
+        help: 'Specify the project assets relative to the root directory.');
     argParser.addFlag('machine',
         hide: !verboseHelp,
         help: 'Handle machine structured JSON command input\n'
               'and provide output and progress in machine friendly format.');
-    usesPubOption();
+    argParser.addFlag('hot',
+        negatable: true,
+        defaultsTo: kHotReloadDefault,
+        help: 'Run with support for hot reloading.');
+    argParser.addOption('pid-file',
+        help: 'Specify a file to write the process id to.\n'
+              'You can send SIGUSR1 to trigger a hot reload\n'
+              'and SIGUSR2 to trigger a full restart.');
+    argParser.addFlag('resident',
+        negatable: true,
+        defaultsTo: true,
+        hide: !verboseHelp,
+        help: 'Stay resident after launching the application.');
 
-    // Option to enable hot reloading.
-    argParser.addFlag(
-      'hot',
-      negatable: true,
-      defaultsTo: kHotReloadDefault,
-      help: 'Run with support for hot reloading.'
-    );
+    argParser.addFlag('benchmark',
+      negatable: false,
+      hide: !verboseHelp,
+      help: 'Enable a benchmarking mode. This will run the given application,\n'
+            'measure the startup time and the app restart time, write the\n'
+            'results out to "refresh_benchmark.json", and exit. This flag is\n'
+            'intended for use in generating automated flutter benchmarks.');
 
-    // Option to write the pid to a file.
-    argParser.addOption(
-      'pid-file',
-      help: 'Specify a file to write the process id to.\n'
-            'You can send SIGUSR1 to trigger a hot reload\n'
-            'and SIGUSR2 to trigger a full restart.'
-    );
-
-    // Hidden option to enable a benchmarking mode. This will run the given
-    // application, measure the startup time and the app restart time, write the
-    // results out to 'refresh_benchmark.json', and exit. This flag is intended
-    // for use in generating automated flutter benchmarks.
-    argParser.addFlag('benchmark', negatable: false, hide: !verboseHelp);
-
-    commandValidator = () {
-      if (!runningWithPrebuiltApplication) {
-        return commonCommandValidator();
-      }
-      // When running with a prebuilt application, no command validation is
-      // necessary.
-      return true;
-    };
+    argParser.addOption(FlutterOptions.kExtraFrontEndOptions, hide: true);
+    argParser.addOption(FlutterOptions.kExtraGenSnapshotOptions, hide: true);
   }
 
-  Device device;
+  List<Device> devices;
 
   @override
-  String get usagePath {
-    String command = shouldUseHotMode() ? 'hotrun' : name;
+  Future<String> get usagePath async {
+    final String command = shouldUseHotMode() ? 'hotrun' : name;
 
-    if (device == null)
+    if (devices == null)
       return command;
 
     // Return 'run/ios'.
-    return '$command/${getNameForTargetPlatform(device.platform)}';
+    if (devices.length > 1)
+      return '$command/all';
+    else
+      return '$command/${getNameForTargetPlatform(await devices[0].targetPlatform)}';
+  }
+
+  @override
+  Future<Map<String, String>> get usageValues async {
+    final bool isEmulator = await devices[0].isLocalEmulator;
+    final String deviceType = devices.length == 1
+            ? getNameForTargetPlatform(await devices[0].targetPlatform)
+            : 'multiple';
+
+    return <String, String>{ 'cd3': '$isEmulator', 'cd4': deviceType };
   }
 
   @override
   void printNoConnectedDevices() {
     super.printNoConnectedDevices();
     if (getCurrentHostPlatform() == HostPlatform.darwin_x64 &&
-        XCode.instance.isInstalledAndMeetsVersionCheck) {
+        xcode.isInstalledAndMeetsVersionCheck) {
       printStatus('');
-      printStatus('To run on a simulator, launch it first:');
-      printStatus('open -a Simulator.app');
+      printStatus('To run on a simulator, launch it first: open -a Simulator.app');
       printStatus('');
       printStatus('If you expected your device to be detected, please run "flutter doctor" to diagnose');
       printStatus('potential issues, or visit https://flutter.io/setup/ for troubleshooting tips.');
@@ -137,27 +193,47 @@ class RunCommand extends RunCommandBase {
   }
 
   bool shouldUseHotMode() {
-    bool hotArg = argResults['hot'] ?? false;
-    final bool shouldUseHotMode = hotArg && !runningWithPrebuiltApplication;
-    return (getBuildMode() == BuildMode.debug) && shouldUseHotMode;
+    final bool hotArg = argResults['hot'] ?? false;
+    final bool shouldUseHotMode = hotArg;
+    return getBuildInfo().isDebug && shouldUseHotMode;
   }
 
   bool get runningWithPrebuiltApplication =>
       argResults['use-application-binary'] != null;
 
+  bool get stayResident => argResults['resident'];
+
   @override
-  Future<int> verifyThenRunCommand() async {
-    if (!commandValidator())
-      return 1;
-    device = await findTargetDevice();
-    if (device == null)
-      return 1;
-    return super.verifyThenRunCommand();
+  Future<Null> validateCommand() async {
+    // When running with a prebuilt application, no command validation is
+    // necessary.
+    if (!runningWithPrebuiltApplication)
+      await super.validateCommand();
+    devices = await findAllTargetDevices();
+    if (devices == null)
+      throwToolExit(null);
+    if (deviceManager.hasSpecifiedAllDevices && runningWithPrebuiltApplication)
+      throwToolExit('Using -d all with --use-application-binary is not supported');
+  }
+
+  DebuggingOptions _createDebuggingOptions() {
+    final BuildInfo buildInfo = getBuildInfo();
+    if (buildInfo.isRelease) {
+      return new DebuggingOptions.disabled(buildInfo);
+    } else {
+      return new DebuggingOptions.enabled(
+        buildInfo,
+        startPaused: argResults['start-paused'],
+        useTestFonts: argResults['use-test-fonts'],
+        enableSoftwareRendering: argResults['enable-software-rendering'],
+        traceSkia: argResults['trace-skia'],
+        observatoryPort: observatoryPort,
+      );
+    }
   }
 
   @override
-  Future<int> runCommand() async {
-
+  Future<FlutterCommandResult> runCommand() async {
     Cache.releaseLockEarly();
 
     // Enable hot mode by default if `--no-hot` was not passed and we are in
@@ -165,176 +241,111 @@ class RunCommand extends RunCommandBase {
     final bool hotMode = shouldUseHotMode();
 
     if (argResults['machine']) {
-      Daemon daemon = new Daemon(stdinCommandStream, stdoutCommandResponse,
-          notifyingLogger: new NotifyingLogger());
-      AppInstance app = daemon.appDomain.startApp(
-        device, Directory.current.path, targetFile, route,
-        getBuildMode(), argResults['start-paused'], hotMode);
-      return app.runner.waitForAppToFinish();
-    }
-
-    int debugPort;
-    if (argResults['debug-port'] != null) {
+      if (devices.length > 1)
+        throwToolExit('--machine does not support -d all.');
+      final Daemon daemon = new Daemon(stdinCommandStream, stdoutCommandResponse,
+          notifyingLogger: new NotifyingLogger(), logToStdout: true);
+      AppInstance app;
       try {
-        debugPort = int.parse(argResults['debug-port']);
+        app = await daemon.appDomain.startApp(
+          devices.first, fs.currentDirectory.path, targetFile, route,
+          _createDebuggingOptions(), hotMode,
+          applicationBinary: argResults['use-application-binary'],
+          projectRootPath: argResults['project-root'],
+          packagesFilePath: argResults['packages'],
+          projectAssets: argResults['project-assets']
+        );
       } catch (error) {
-        printError('Invalid port for `--debug-port`: $error');
-        return 1;
+        throwToolExit(error.toString());
       }
-    }
-
-    if (device.isLocalEmulator && !isEmulatorBuildMode(getBuildMode())) {
-      printError('${toTitleCase(getModeName(getBuildMode()))} mode is not supported for emulators.');
-      return 1;
-    }
-
-    DebuggingOptions options;
-
-    if (getBuildMode() == BuildMode.release) {
-      options = new DebuggingOptions.disabled(getBuildMode());
-    } else {
-      options = new DebuggingOptions.enabled(
-        getBuildMode(),
-        startPaused: argResults['start-paused'],
-        observatoryPort: debugPort
+      final DateTime appStartedTime = clock.now();
+      final int result = await app.runner.waitForAppToFinish();
+      if (result != 0)
+        throwToolExit(null, exitCode: result);
+      return new FlutterCommandResult(
+        ExitStatus.success,
+        timingLabelParts: <String>['daemon'],
+        endTimeOverride: appStartedTime,
       );
     }
 
+    for (Device device in devices) {
+      if (await device.isLocalEmulator && !isEmulatorBuildMode(getBuildMode()))
+        throwToolExit('${toTitleCase(getModeName(getBuildMode()))} mode is not supported for emulators.');
+    }
+
     if (hotMode) {
-      if (!device.supportsHotMode) {
-        printError('Hot mode is not supported by this device. '
-                   'Run with --no-hot.');
-        return 1;
+      for (Device device in devices) {
+        if (!device.supportsHotMode)
+          throwToolExit('Hot mode is not supported by ${device.name}. Run with --no-hot.');
       }
     }
 
-    String pidFile = argResults['pid-file'];
+    final String pidFile = argResults['pid-file'];
     if (pidFile != null) {
       // Write our pid to the file.
-      new File(pidFile).writeAsStringSync(pid.toString());
+      fs.file(pidFile).writeAsStringSync(pid.toString());
     }
-    ResidentRunner runner;
 
+    final List<FlutterDevice> flutterDevices = devices.map((Device device) {
+      return new FlutterDevice(device, previewDart2: argResults['preview-dart-2']);
+    }).toList();
+
+    ResidentRunner runner;
     if (hotMode) {
       runner = new HotRunner(
-        device,
+        flutterDevices,
         target: targetFile,
-        debuggingOptions: options,
-        benchmarkMode: argResults['benchmark']
+        debuggingOptions: _createDebuggingOptions(),
+        benchmarkMode: argResults['benchmark'],
+        applicationBinary: argResults['use-application-binary'],
+        previewDart2: argResults['preview-dart-2'],
+        projectRootPath: argResults['project-root'],
+        packagesFilePath: argResults['packages'],
+        projectAssets: argResults['project-assets'],
+        stayResident: stayResident,
       );
     } else {
-      runner = new RunAndStayResident(
-        device,
+      runner = new ColdRunner(
+        flutterDevices,
         target: targetFile,
-        debuggingOptions: options,
+        debuggingOptions: _createDebuggingOptions(),
         traceStartup: traceStartup,
-        benchmark: argResults['benchmark'],
-        applicationBinary: argResults['use-application-binary']
+        applicationBinary: argResults['use-application-binary'],
+        previewDart2: argResults['preview-dart-2'],
+        stayResident: stayResident,
       );
     }
 
-    return runner.run(route: route, shouldBuild: !runningWithPrebuiltApplication && argResults['build']);
-  }
-}
-
-Future<int> startApp(
-  Device device, {
-  String target,
-  bool stop: true,
-  bool install: true,
-  DebuggingOptions debuggingOptions,
-  bool traceStartup: false,
-  bool benchmark: false,
-  String route,
-  BuildMode buildMode: BuildMode.debug
-}) async {
-  String mainPath = findMainDartFile(target);
-  if (!FileSystemEntity.isFileSync(mainPath)) {
-    String message = 'Tried to run $mainPath, but that file does not exist.';
-    if (target == null)
-      message += '\nConsider using the -t option to specify the Dart file to start.';
-    printError(message);
-    return 1;
-  }
-
-  ApplicationPackage package = getApplicationPackageForPlatform(device.platform);
-
-  if (package == null) {
-    String message = 'No application found for ${device.platform}.';
-    String hint = getMissingPackageHintForPlatform(device.platform);
-    if (hint != null)
-      message += '\n$hint';
-    printError(message);
-    return 1;
-  }
-
-  Stopwatch stopwatch = new Stopwatch()..start();
-
-  // TODO(devoncarew): We shouldn't have to do type checks here.
-  if (install && device is AndroidDevice) {
-    printTrace('Running build command.');
-
-    int result = await buildApk(
-      device.platform,
-      target: target,
-      buildMode: buildMode
+    DateTime appStartedTime;
+    // Sync completer so the completing agent attaching to the resident doesn't
+    // need to know about analytics.
+    //
+    // Do not add more operations to the future.
+    final Completer<Null> appStartedTimeRecorder = new Completer<Null>.sync();
+    // This callback can't throw.
+    appStartedTimeRecorder.future.then( // ignore: unawaited_futures
+      (_) { appStartedTime = clock.now(); }
     );
 
+    final int result = await runner.run(
+      appStartedCompleter: appStartedTimeRecorder,
+      route: route,
+      shouldBuild: !runningWithPrebuiltApplication && argResults['build'],
+    );
     if (result != 0)
-      return result;
+      throwToolExit(null, exitCode: result);
+    return new FlutterCommandResult(
+      ExitStatus.success,
+      timingLabelParts: <String>[
+        hotMode ? 'hot' : 'cold',
+        getModeName(getBuildMode()),
+        devices.length == 1
+            ? getNameForTargetPlatform(await devices[0].targetPlatform)
+            : 'multiple',
+        devices.length == 1 && await devices[0].isLocalEmulator ? 'emulator' : null
+      ],
+      endTimeOverride: appStartedTime,
+    );
   }
-
-  // TODO(devoncarew): Move this into the device.startApp() impls. They should
-  // wait on the stop command to complete before (re-)starting the app. We could
-  // plumb a Future through the start command from here, but that seems a little
-  // messy.
-  if (stop) {
-    if (package != null) {
-      printTrace('Stopping app "${package.name}" on ${device.name}.');
-      await device.stopApp(package);
-    }
-  }
-
-  // TODO(devoncarew): This fails for ios devices - we haven't built yet.
-  if (install && device is AndroidDevice) {
-    printStatus('Installing $package to $device...');
-
-    if (!(installApp(device, package, uninstall: false)))
-      return 1;
-  }
-
-  Map<String, dynamic> platformArgs = <String, dynamic>{};
-
-  if (traceStartup != null)
-    platformArgs['trace-startup'] = traceStartup;
-
-  printStatus('Running ${getDisplayPath(mainPath)} on ${device.name}...');
-
-  LaunchResult result = await device.startApp(
-    package,
-    buildMode,
-    mainPath: mainPath,
-    route: route,
-    debuggingOptions: debuggingOptions,
-    platformArgs: platformArgs
-  );
-
-  stopwatch.stop();
-
-  if (!result.started) {
-    printError('Error running application on ${device.name}.');
-  } else if (traceStartup) {
-    try {
-      VMService observatory = await VMService.connect(result.observatoryPort);
-      await downloadStartupTrace(observatory);
-    } catch (error) {
-      printError('Error downloading trace from observatory: $error');
-      return 1;
-    }
-  }
-
-  if (benchmark)
-    writeRunBenchmarkFile(stopwatch);
-
-  return result.started ? 0 : 2;
 }

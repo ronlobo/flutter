@@ -3,18 +3,32 @@
 // found in the LICENSE file.
 
 import 'dart:async';
-import 'dart:io';
 
+import 'package:flutter_tools/src/artifacts.dart';
+import 'package:flutter_tools/src/base/config.dart';
 import 'package:flutter_tools/src/base/context.dart';
+import 'package:flutter_tools/src/base/file_system.dart';
+import 'package:flutter_tools/src/base/io.dart';
 import 'package:flutter_tools/src/base/logger.dart';
 import 'package:flutter_tools/src/base/os.dart';
+import 'package:flutter_tools/src/base/platform.dart';
+import 'package:flutter_tools/src/base/port_scanner.dart';
+import 'package:flutter_tools/src/base/terminal.dart';
+import 'package:flutter_tools/src/cache.dart';
+import 'package:flutter_tools/src/devfs.dart';
 import 'package:flutter_tools/src/device.dart';
 import 'package:flutter_tools/src/doctor.dart';
 import 'package:flutter_tools/src/ios/mac.dart';
 import 'package:flutter_tools/src/ios/simulators.dart';
+import 'package:flutter_tools/src/run_hot.dart';
 import 'package:flutter_tools/src/usage.dart';
+import 'package:flutter_tools/src/version.dart';
 import 'package:mockito/mockito.dart';
+import 'package:process/process.dart';
+import 'package:quiver/time.dart';
 import 'package:test/test.dart';
+
+import 'common.dart';
 
 /// Return the test logger. This assumes that the current Logger is a BufferLogger.
 BufferLogger get testLogger => context[Logger];
@@ -22,87 +36,140 @@ BufferLogger get testLogger => context[Logger];
 MockDeviceManager get testDeviceManager => context[DeviceManager];
 MockDoctor get testDoctor => context[Doctor];
 
+typedef dynamic Generator();
+
+typedef void ContextInitializer(AppContext testContext);
+
+void _defaultInitializeContext(AppContext testContext) {
+  testContext
+    ..putIfAbsent(AnsiTerminal, () => new AnsiTerminal())
+    ..putIfAbsent(DeviceManager, () => new MockDeviceManager())
+    ..putIfAbsent(DevFSConfig, () => new DevFSConfig())
+    ..putIfAbsent(Doctor, () => new MockDoctor())
+    ..putIfAbsent(HotRunnerConfig, () => new HotRunnerConfig())
+    ..putIfAbsent(Cache, () => new Cache())
+    ..putIfAbsent(Artifacts, () => new CachedArtifacts())
+    ..putIfAbsent(OperatingSystemUtils, () => new MockOperatingSystemUtils())
+    ..putIfAbsent(PortScanner, () => new MockPortScanner())
+    ..putIfAbsent(Xcode, () => new Xcode())
+    ..putIfAbsent(IOSSimulatorUtils, () {
+      final MockIOSSimulatorUtils mock = new MockIOSSimulatorUtils();
+      when(mock.getAttachedDevices()).thenReturn(<IOSSimulator>[]);
+      return mock;
+    })
+    ..putIfAbsent(SimControl, () => new MockSimControl())
+    ..putIfAbsent(Usage, () => new MockUsage())
+    ..putIfAbsent(FlutterVersion, () => new MockFlutterVersion())
+    ..putIfAbsent(Clock, () => const Clock())
+    ..putIfAbsent(HttpClient, () => new MockHttpClient());
+}
+
 void testUsingContext(String description, dynamic testMethod(), {
   Timeout timeout,
-  Map<Type, dynamic> overrides: const <Type, dynamic>{}
+  Map<Type, Generator> overrides: const <Type, Generator>{},
+  ContextInitializer initializeContext: _defaultInitializeContext,
+  bool skip, // should default to `false`, but https://github.com/dart-lang/test/issues/545 doesn't allow this
 }) {
   test(description, () async {
-    AppContext testContext = new AppContext();
+    final AppContext testContext = new AppContext();
 
-    overrides.forEach((Type type, dynamic value) {
-      testContext[type] = value;
-    });
+    // The context always starts with these value since others depend on them.
+    testContext
+      ..putIfAbsent(Stdio, () => const Stdio())
+      ..putIfAbsent(Platform, () => const LocalPlatform())
+      ..putIfAbsent(FileSystem, () => const LocalFileSystem())
+      ..putIfAbsent(ProcessManager, () => const LocalProcessManager())
+      ..putIfAbsent(Logger, () => new BufferLogger())
+      ..putIfAbsent(Config, () => new Config());
 
-    if (!overrides.containsKey(Logger))
-      testContext[Logger] = new BufferLogger();
+    // Apply the initializer after seeding the base value above.
+    initializeContext(testContext);
 
-    if (!overrides.containsKey(DeviceManager))
-      testContext[DeviceManager] = new MockDeviceManager();
-
-    if (!overrides.containsKey(Doctor))
-      testContext[Doctor] = new MockDoctor();
-
-    if (!overrides.containsKey(SimControl))
-      testContext[SimControl] = new MockSimControl();
-
-    if (!overrides.containsKey(Usage))
-      testContext[Usage] = new MockUsage();
-
-    if (!overrides.containsKey(OperatingSystemUtils)) {
-      MockOperatingSystemUtils os = new MockOperatingSystemUtils();
-      when(os.isWindows).thenReturn(false);
-      testContext[OperatingSystemUtils] = os;
-    }
-
-    if (!overrides.containsKey(IOSSimulatorUtils)) {
-      MockIOSSimulatorUtils mock = new MockIOSSimulatorUtils();
-      when(mock.getAttachedDevices()).thenReturn(<IOSSimulator>[]);
-      testContext[IOSSimulatorUtils] = mock;
-    }
-
-    if (Platform.isMacOS) {
-      if (!overrides.containsKey(XCode))
-        testContext[XCode] = new XCode();
-    }
+    final String flutterRoot = getFlutterRoot();
 
     try {
-      return await testContext.runInZone(testMethod);
+      return await testContext.runInZone(() async {
+        // Apply the overrides to the test context in the zone since their
+        // instantiation may reference items already stored on the context.
+        overrides.forEach((Type type, dynamic value()) {
+          context.setVariable(type, value());
+        });
+
+        // Provide a sane default for the flutterRoot directory. Individual
+        // tests can override this either in the test or during setup.
+        Cache.flutterRoot ??= flutterRoot;
+
+        return await testMethod();
+      }, onError: (dynamic error, StackTrace stackTrace) {
+        _printBufferedErrors(testContext);
+        throw error;
+      });
     } catch (error) {
-      if (testContext[Logger] is BufferLogger) {
-        BufferLogger bufferLogger = testContext[Logger];
-        if (bufferLogger.errorText.isNotEmpty)
-          print(bufferLogger.errorText);
-      }
-      throw error;
+      _printBufferedErrors(testContext);
+      rethrow;
     }
 
-  }, timeout: timeout);
+  }, timeout: timeout, skip: skip);
+}
+
+void _printBufferedErrors(AppContext testContext) {
+  if (testContext[Logger] is BufferLogger) {
+    final BufferLogger bufferLogger = testContext[Logger];
+    if (bufferLogger.errorText.isNotEmpty)
+      print(bufferLogger.errorText);
+    bufferLogger.clear();
+  }
+}
+
+class MockPortScanner extends PortScanner {
+  static int _nextAvailablePort = 12345;
+
+  @override
+  Future<bool> isPortAvailable(int port) async => true;
+
+  @override
+  Future<int> findAvailablePort() async => _nextAvailablePort++;
 }
 
 class MockDeviceManager implements DeviceManager {
   List<Device> devices = <Device>[];
 
+  String _specifiedDeviceId;
+
   @override
-  String specifiedDeviceId;
+  String get specifiedDeviceId {
+    if (_specifiedDeviceId == null || _specifiedDeviceId == 'all')
+      return null;
+    return _specifiedDeviceId;
+  }
+
+  @override
+  set specifiedDeviceId(String id) {
+    _specifiedDeviceId = id;
+  }
 
   @override
   bool get hasSpecifiedDeviceId => specifiedDeviceId != null;
 
   @override
-  Future<List<Device>> getAllConnectedDevices() => new Future<List<Device>>.value(devices);
-
-  @override
-  Future<List<Device>> getDevicesById(String deviceId) async {
-    return devices.where((Device device) => device.id == deviceId).toList();
+  bool get hasSpecifiedAllDevices {
+    return _specifiedDeviceId != null && _specifiedDeviceId == 'all';
   }
 
   @override
-  Future<List<Device>> getDevices() async {
-    if (specifiedDeviceId == null) {
-      return getAllConnectedDevices();
-    } else {
-      return getDevicesById(specifiedDeviceId);
-    }
+  Stream<Device> getAllConnectedDevices() => new Stream<Device>.fromIterable(devices);
+
+  @override
+  Stream<Device> getDevicesById(String deviceId) {
+    return new Stream<Device>.fromIterable(
+        devices.where((Device device) => device.id == deviceId));
+  }
+
+  @override
+  Stream<Device> getDevices() {
+    return hasSpecifiedDeviceId
+        ? getDevicesById(specifiedDeviceId)
+        : getAllConnectedDevices();
   }
 
   void addDevice(Device device) => devices.add(device);
@@ -120,11 +187,17 @@ class MockDoctor extends Doctor {
 
 class MockSimControl extends Mock implements SimControl {
   MockSimControl() {
-    when(this.getConnectedDevices()).thenReturn(<SimDevice>[]);
+    when(getConnectedDevices()).thenReturn(<SimDevice>[]);
   }
 }
 
-class MockOperatingSystemUtils extends Mock implements OperatingSystemUtils {}
+class MockOperatingSystemUtils extends Mock implements OperatingSystemUtils {
+  @override
+  List<File> whichAll(String execName) => <File>[];
+
+  @override
+  String get name => 'fake OS name and version';
+}
 
 class MockIOSSimulatorUtils extends Mock implements IOSSimulatorUtils {}
 
@@ -145,16 +218,16 @@ class MockUsage implements Usage {
   set enabled(bool value) { }
 
   @override
-  void sendCommand(String command) { }
+  String get clientId => '00000000-0000-4000-0000-000000000000';
 
   @override
-  void sendEvent(String category, String parameter) { }
+  void sendCommand(String command, { Map<String, String> parameters }) { }
 
   @override
-  void sendTiming(String category, String variableName, Duration duration) { }
+  void sendEvent(String category, String parameter, { Map<String, String> parameters }) { }
 
   @override
-  UsageTimer startTimer(String event) => new _MockUsageTimer(event);
+  void sendTiming(String category, String variableName, Duration duration, { String label }) { }
 
   @override
   void sendException(dynamic exception, StackTrace trace) { }
@@ -166,15 +239,11 @@ class MockUsage implements Usage {
   Future<Null> ensureAnalyticsSent() => new Future<Null>.value();
 
   @override
-  void printUsage() { }
+  void printWelcome() { }
 }
 
-class _MockUsageTimer implements UsageTimer {
-  _MockUsageTimer(this.event);
+class MockFlutterVersion extends Mock implements FlutterVersion {}
 
-  @override
-  final String event;
+class MockClock extends Mock implements Clock {}
 
-  @override
-  void finish() { }
-}
+class MockHttpClient extends Mock implements HttpClient {}

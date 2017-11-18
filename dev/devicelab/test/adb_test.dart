@@ -5,7 +5,7 @@
 import 'dart:async';
 
 import 'package:test/test.dart';
-import 'package:collection/collection.dart';
+import 'package:collection/collection.dart' show ListEquality, MapEquality;
 
 import 'package:flutter_devicelab/framework/adb.dart';
 
@@ -100,49 +100,55 @@ void expectLog(List<CommandArgs> log) {
   expect(FakeDevice.commandLog, log);
 }
 
-CommandArgs cmd({String command, List<String> arguments, Map<String, String> env}) => new CommandArgs(
-  command: command,
-  arguments: arguments,
-  env: env
-);
+CommandArgs cmd({
+  String command,
+  List<String> arguments,
+  Map<String, String> environment,
+}) {
+  return new CommandArgs(
+    command: command,
+    arguments: arguments,
+    environment: environment,
+  );
+}
 
 typedef dynamic ExitErrorFactory();
 
 class CommandArgs {
-  CommandArgs({this.command, this.arguments, this.env});
+  CommandArgs({ this.command, this.arguments, this.environment });
 
   final String command;
   final List<String> arguments;
-  final Map<String, String> env;
+  final Map<String, String> environment;
 
   @override
-  String toString() => 'CommandArgs(command: $command, arguments: $arguments, env: $env)';
+  String toString() => 'CommandArgs(command: $command, arguments: $arguments, environment: $environment)';
 
   @override
   bool operator==(Object other) {
     if (other.runtimeType != CommandArgs)
       return false;
 
-    CommandArgs otherCmd = other;
-    return otherCmd.command == this.command &&
-      const ListEquality<String>().equals(otherCmd.arguments, this.arguments) &&
-      const MapEquality<String, String>().equals(otherCmd.env, this.env);
+    final CommandArgs otherCmd = other;
+    return otherCmd.command == command &&
+      const ListEquality<String>().equals(otherCmd.arguments, arguments) &&
+      const MapEquality<String, String>().equals(otherCmd.environment, environment);
   }
 
   @override
-  int get hashCode => 17 * (17 * command.hashCode + _hashArguments) + _hashEnv;
+  int get hashCode => 17 * (17 * command.hashCode + _hashArguments) + _hashEnvironment;
 
   int get _hashArguments => arguments != null
     ? const ListEquality<String>().hash(arguments)
     : null.hashCode;
 
-  int get _hashEnv => env != null
-    ? const MapEquality<String, String>().hash(env)
+  int get _hashEnvironment => environment != null
+    ? const MapEquality<String, String>().hash(environment)
     : null.hashCode;
 }
 
 class FakeDevice extends AndroidDevice {
-  FakeDevice({String deviceId: null}) : super(deviceId: deviceId);
+  FakeDevice({String deviceId}) : super(deviceId: deviceId);
 
   static String output = '';
   static ExitErrorFactory exitErrorFactory = () => null;
@@ -166,23 +172,23 @@ class FakeDevice extends AndroidDevice {
   }
 
   @override
-  Future<String> shellEval(String command, List<String> arguments, {Map<String, String> env}) async {
+  Future<String> shellEval(String command, List<String> arguments, { Map<String, String> environment }) async {
     commandLog.add(new CommandArgs(
       command: command,
       arguments: arguments,
-      env: env
+      environment: environment,
     ));
     return output;
   }
 
   @override
-  Future<Null> shellExec(String command, List<String> arguments, {Map<String, String> env}) async {
+  Future<Null> shellExec(String command, List<String> arguments, { Map<String, String> environment }) async {
     commandLog.add(new CommandArgs(
       command: command,
       arguments: arguments,
-      env: env
+      environment: environment,
     ));
-    dynamic exitError = exitErrorFactory();
+    final dynamic exitError = exitErrorFactory();
     if (exitError != null)
       throw exitError;
   }

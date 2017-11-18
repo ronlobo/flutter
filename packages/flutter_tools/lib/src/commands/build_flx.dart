@@ -6,7 +6,6 @@ import 'dart:async';
 
 import '../build_info.dart';
 import '../flx.dart';
-import '../globals.dart';
 import 'build.dart';
 
 class BuildFlxCommand extends BuildSubCommand {
@@ -21,8 +20,8 @@ class BuildFlxCommand extends BuildSubCommand {
     argParser.addOption('output-file', abbr: 'o', defaultsTo: defaultFlxOutputPath);
     argParser.addOption('snapshot', defaultsTo: defaultSnapshotPath);
     argParser.addOption('depfile', defaultsTo: defaultDepfilePath);
+    argParser.addFlag('preview-dart-2', negatable: false);
     argParser.addOption('working-dir', defaultsTo: getAssetBuildDirectory());
-    argParser.addFlag('include-roboto-fonts', defaultsTo: true);
     argParser.addFlag('report-licensed-packages', help: 'Whether to report the names of all the packages that are included in the application\'s LICENSE file.', defaultsTo: false);
     usesPubOption();
   }
@@ -38,11 +37,11 @@ class BuildFlxCommand extends BuildSubCommand {
     'they are used by some Flutter Android and iOS runtimes.';
 
   @override
-  Future<int> runCommand() async {
+  Future<Null> runCommand() async {
     await super.runCommand();
-    String outputPath = argResults['output-file'];
+    final String outputPath = argResults['output-file'];
 
-    return await build(
+    await build(
       mainPath: targetFile,
       manifestPath: argResults['manifest'],
       outputPath: outputPath,
@@ -50,15 +49,9 @@ class BuildFlxCommand extends BuildSubCommand {
       depfilePath: argResults['depfile'],
       privateKeyPath: argResults['private-key'],
       workingDirPath: argResults['working-dir'],
+      previewDart2: argResults['preview-dart-2'],
       precompiledSnapshot: argResults['precompiled'],
-      includeRobotoFonts: argResults['include-roboto-fonts'],
       reportLicensedPackages: argResults['report-licensed-packages']
-    ).then((int result) {
-      if (result == 0)
-        printStatus('Built $outputPath.');
-      else
-        printError('Error building $outputPath: $result.');
-      return result;
-    });
+    );
   }
 }

@@ -21,7 +21,7 @@ void main() {
   });
 
   test('The Caching Iterable: length caches', () {
-    Iterable<int> i = new CachingIterable<int>(range(1, 5).iterator);
+    final Iterable<int> i = new CachingIterable<int>(range(1, 5).iterator);
     expect(yieldCount, equals(0));
     expect(i.length, equals(5));
     expect(yieldCount, equals(5));
@@ -37,7 +37,7 @@ void main() {
   });
 
   test('The Caching Iterable: laziness', () {
-    Iterable<int> i = new CachingIterable<int>(range(1, 5).iterator);
+    final Iterable<int> i = new CachingIterable<int>(range(1, 5).iterator);
     expect(yieldCount, equals(0));
 
     expect(i.first, equals(1));
@@ -51,10 +51,10 @@ void main() {
   });
 
   test('The Caching Iterable: where and map', () {
-    Iterable<int> integers = new CachingIterable<int>(range(1, 5).iterator);
+    final Iterable<int> integers = new CachingIterable<int>(range(1, 5).iterator);
     expect(yieldCount, equals(0));
 
-    Iterable<int> evens = integers.where((int i) => i % 2 == 0);
+    final Iterable<int> evens = integers.where((int i) => i % 2 == 0);
     expect(yieldCount, equals(0));
 
     expect(evens.first, equals(2));
@@ -70,6 +70,41 @@ void main() {
     expect(yieldCount, equals(5));
 
     expect(integers, equals(<int>[1, 2, 3, 4, 5]));
+    expect(yieldCount, equals(5));
+  });
+
+  test('The Caching Iterable: take and skip', () {
+    final Iterable<int> integers = new CachingIterable<int>(range(1, 5).iterator);
+    expect(yieldCount, equals(0));
+
+    final Iterable<int> secondTwo = integers.skip(1).take(2);
+
+    expect(yieldCount, equals(0));
+    expect(secondTwo, equals(<int>[2, 3]));
+    expect(yieldCount, equals(3));
+
+    final Iterable<int> result = integers.takeWhile((int i) => i < 4).skipWhile((int i) => i < 3);
+
+    expect(result, equals(<int>[3]));
+    expect(yieldCount, equals(4));
+    expect(integers, equals(<int>[1, 2, 3, 4, 5]));
+    expect(yieldCount, equals(5));
+  });
+
+  test('The Caching Iterable: expand', () {
+    final Iterable<int> integers = new CachingIterable<int>(range(1, 5).iterator);
+    expect(yieldCount, equals(0));
+
+    final Iterable<int> expanded1 = integers.expand((int i) => <int>[i, i]);
+
+    expect(yieldCount, equals(0));
+    expect(expanded1, equals(<int>[1, 1, 2, 2, 3, 3, 4, 4, 5, 5]));
+    expect(yieldCount, equals(5));
+
+    final Iterable<int> expanded2 = integers.expand((int i) => <int>[i, i]);
+
+    expect(yieldCount, equals(5));
+    expect(expanded2, equals(<int>[1, 1, 2, 2, 3, 3, 4, 4, 5, 5]));
     expect(yieldCount, equals(5));
   });
 }

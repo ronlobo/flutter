@@ -2,12 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'dart:io';
+import 'dart:async';
 
-import 'package:path/path.dart' as path;
+import 'package:meta/meta.dart' show required;
 import 'package:xml/xml.dart' as xml;
 
+import 'android/android_sdk.dart';
 import 'android/gradle.dart';
+import 'base/file_system.dart';
 import 'base/os.dart' show os;
 import 'base/process.dart';
 import 'build_info.dart';
@@ -19,13 +21,14 @@ abstract class ApplicationPackage {
   /// Package ID from the Android Manifest or equivalent.
   final String id;
 
-  ApplicationPackage({ this.id }) {
-    assert(id != null);
-  }
+  ApplicationPackage({ @required this.id })
+    : assert(id != null);
 
   String get name;
 
   String get displayName => name;
+
+  String get packagePath => null;
 
   @override
   String toString() => displayName;
@@ -40,23 +43,22 @@ class AndroidApk extends ApplicationPackage {
 
   AndroidApk({
     String id,
-    this.apkPath,
-    this.launchActivity
-  }) : super(id: id) {
-    assert(apkPath != null);
-    assert(launchActivity != null);
-  }
+    @required this.apkPath,
+    @required this.launchActivity
+  }) : assert(apkPath != null),
+       assert(launchActivity != null),
+       super(id: id);
 
   /// Creates a new AndroidApk from an existing APK.
   factory AndroidApk.fromApk(String applicationBinary) {
-    String aaptPath = androidSdk?.latestVersion?.aaptPath;
+    final String aaptPath = androidSdk?.latestVersion?.aaptPath;
     if (aaptPath == null) {
       printError('Unable to locate the Android SDK; please run \'flutter doctor\'.');
       return null;
     }
 
-    List<String> aaptArgs = <String>[aaptPath, 'dump', 'badging', applicationBinary];
-    ApkManifestData data = ApkManifestData.parseFromAaptBadging(runCheckedSync(aaptArgs));
+    final List<String> aaptArgs = <String>[aaptPath, 'dump', 'badging', applicationBinary];
+    final ApkManifestData data = ApkManifestData.parseFromAaptBadging(runCheckedSync(aaptArgs));
 
     if (data == null) {
       printError('Unable to read manifest info from $applicationBinary.');
@@ -76,35 +78,43 @@ class AndroidApk extends ApplicationPackage {
   }
 
   /// Creates a new AndroidApk based on the information in the Android manifest.
-  factory AndroidApk.fromCurrentDirectory() {
+  static Future<AndroidApk> fromCurrentDirectory() async {
     String manifestPath;
     String apkPath;
 
     if (isProjectUsingGradle()) {
+      apkPath = await getGradleAppOut();
+      if (fs.file(apkPath).existsSync()) {
+        // Grab information from the .apk. The gradle build script might alter
+        // the application Id, so we need to look at what was actually built.
+        return new AndroidApk.fromApk(apkPath);
+      }
+      // The .apk hasn't been built yet, so we work with what we have. The run
+      // command will grab a new AndroidApk after building, to get the updated
+      // IDs.
       manifestPath = gradleManifestPath;
-      apkPath = gradleAppOut;
     } else {
-      manifestPath = path.join('android', 'AndroidManifest.xml');
-      apkPath = path.join(getAndroidBuildDirectory(), 'app.apk');
+      manifestPath = fs.path.join('android', 'AndroidManifest.xml');
+      apkPath = fs.path.join(getAndroidBuildDirectory(), 'app.apk');
     }
 
-    if (!FileSystemEntity.isFileSync(manifestPath))
+    if (!fs.isFileSync(manifestPath))
       return null;
 
-    String manifestString = new File(manifestPath).readAsStringSync();
-    xml.XmlDocument document = xml.parse(manifestString);
+    final String manifestString = fs.file(manifestPath).readAsStringSync();
+    final xml.XmlDocument document = xml.parse(manifestString);
 
-    Iterable<xml.XmlElement> manifests = document.findElements('manifest');
+    final Iterable<xml.XmlElement> manifests = document.findElements('manifest');
     if (manifests.isEmpty)
       return null;
-    String packageId = manifests.first.getAttribute('package');
+    final String packageId = manifests.first.getAttribute('package');
 
     String launchActivity;
     for (xml.XmlElement category in document.findAllElements('category')) {
       if (category.getAttribute('android:name') == 'android.intent.category.LAUNCHER') {
-        xml.XmlElement activity = category.parent.parent;
-        String activityName = activity.getAttribute('android:name');
-        launchActivity = "$packageId/$activityName";
+        final xml.XmlElement activity = category.parent.parent;
+        final String activityName = activity.getAttribute('android:name');
+        launchActivity = '$packageId/$activityName';
         break;
       }
     }
@@ -120,7 +130,10 @@ class AndroidApk extends ApplicationPackage {
   }
 
   @override
-  String get name => path.basename(apkPath);
+  String get packagePath => apkPath;
+
+  @override
+  String get name => fs.path.basename(apkPath);
 }
 
 /// Tests whether a [FileSystemEntity] is an iOS bundle directory
@@ -134,25 +147,27 @@ abstract class IOSApp extends ApplicationPackage {
   factory IOSApp.fromIpa(String applicationBinary) {
     Directory bundleDir;
     try {
-      Directory tempDir = Directory.systemTemp.createTempSync('flutter_app_');
-      addShutdownHook(() async => await tempDir.delete(recursive: true));
-      os.unzip(new File(applicationBinary), tempDir);
-      Directory payloadDir = new Directory(path.join(tempDir.path, 'Payload'));
+      final Directory tempDir = fs.systemTempDirectory.createTempSync('flutter_app_');
+      addShutdownHook(() async {
+        await tempDir.delete(recursive: true);
+      }, ShutdownStage.STILL_RECORDING);
+      os.unzip(fs.file(applicationBinary), tempDir);
+      final Directory payloadDir = fs.directory(fs.path.join(tempDir.path, 'Payload'));
       bundleDir = payloadDir.listSync().singleWhere(_isBundleDirectory);
     } on StateError catch (e, stackTrace) {
-      printError('Invalid prebuilt iOS binary: ${e.toString()}', stackTrace);
+      printError('Invalid prebuilt iOS binary: ${e.toString()}', stackTrace: stackTrace);
       return null;
     }
 
-    String plistPath = path.join(bundleDir.path, 'Info.plist');
-    String id = plist.getValueFromFile(plistPath, plist.kCFBundleIdentifierKey);
+    final String plistPath = fs.path.join(bundleDir.path, 'Info.plist');
+    final String id = plist.getValueFromFile(plistPath, plist.kCFBundleIdentifierKey);
     if (id == null)
       return null;
 
     return new PrebuiltIOSApp(
       ipaPath: applicationBinary,
       bundleDir: bundleDir,
-      bundleName: path.basename(bundleDir.path),
+      bundleName: fs.path.basename(bundleDir.path),
       projectBundleId: id,
     );
   }
@@ -161,16 +176,18 @@ abstract class IOSApp extends ApplicationPackage {
     if (getCurrentHostPlatform() != HostPlatform.darwin_x64)
       return null;
 
-    String plistPath = path.join('ios', 'Runner', 'Info.plist');
+    final String plistPath = fs.path.join('ios', 'Runner', 'Info.plist');
     String id = plist.getValueFromFile(plistPath, plist.kCFBundleIdentifierKey);
     if (id == null)
       return null;
-    String projectPath = path.join('ios', 'Runner.xcodeproj');
-    id = substituteXcodeVariables(id, projectPath, 'Runner');
+    final String projectPath = fs.path.join('ios', 'Runner.xcodeproj');
+    final Map<String, String> buildSettings = getXcodeBuildSettings(projectPath, 'Runner');
+    id = substituteXcodeVariables(id, buildSettings);
 
     return new BuildableIOSApp(
-      appDirectory: path.join('ios'),
-      projectBundleId: id
+      appDirectory: fs.path.join('ios'),
+      projectBundleId: id,
+      buildSettings: buildSettings,
     );
   }
 
@@ -188,9 +205,13 @@ class BuildableIOSApp extends IOSApp {
   BuildableIOSApp({
     this.appDirectory,
     String projectBundleId,
+    this.buildSettings,
   }) : super(projectBundleId: projectBundleId);
 
   final String appDirectory;
+
+  /// Build settings of the app's XCode project.
+  final Map<String, String> buildSettings;
 
   @override
   String get name => kBundleName;
@@ -201,8 +222,11 @@ class BuildableIOSApp extends IOSApp {
   @override
   String get deviceBundlePath => _buildAppPath('iphoneos');
 
+  /// True if the app is built from a Swift project. Null if unknown.
+  bool get isSwift => buildSettings?.containsKey('SWIFT_VERSION');
+
   String _buildAppPath(String type) {
-    return path.join(getIosBuildDirectory(), 'Release-$type', kBundleName);
+    return fs.path.join(getIosBuildDirectory(), type, kBundleName);
   }
 }
 
@@ -230,15 +254,15 @@ class PrebuiltIOSApp extends IOSApp {
   String get _bundlePath => bundleDir.path;
 }
 
-ApplicationPackage getApplicationPackageForPlatform(TargetPlatform platform, {
+Future<ApplicationPackage> getApplicationPackageForPlatform(TargetPlatform platform, {
   String applicationBinary
-}) {
+}) async {
   switch (platform) {
     case TargetPlatform.android_arm:
     case TargetPlatform.android_x64:
     case TargetPlatform.android_x86:
       return applicationBinary == null
-          ? new AndroidApk.fromCurrentDirectory()
+          ? await AndroidApk.fromCurrentDirectory()
           : new AndroidApk.fromApk(applicationBinary);
     case TargetPlatform.ios:
       return applicationBinary == null
@@ -246,6 +270,8 @@ ApplicationPackage getApplicationPackageForPlatform(TargetPlatform platform, {
           : new IOSApp.fromIpa(applicationBinary);
     case TargetPlatform.darwin_x64:
     case TargetPlatform.linux_x64:
+    case TargetPlatform.windows_x64:
+    case TargetPlatform.fuchsia:
       return null;
   }
   assert(platform != null);
@@ -258,18 +284,20 @@ class ApplicationPackageStore {
 
   ApplicationPackageStore({ this.android, this.iOS });
 
-  ApplicationPackage getPackageForPlatform(TargetPlatform platform) {
+  Future<ApplicationPackage> getPackageForPlatform(TargetPlatform platform) async {
     switch (platform) {
       case TargetPlatform.android_arm:
       case TargetPlatform.android_x64:
       case TargetPlatform.android_x86:
-        android ??= new AndroidApk.fromCurrentDirectory();
+        android ??= await AndroidApk.fromCurrentDirectory();
         return android;
       case TargetPlatform.ios:
         iOS ??= new IOSApp.fromCurrentDirectory();
         return iOS;
       case TargetPlatform.darwin_x64:
       case TargetPlatform.linux_x64:
+      case TargetPlatform.windows_x64:
+      case TargetPlatform.fuchsia:
         return null;
     }
     return null;
@@ -284,23 +312,23 @@ class ApkManifestData {
       return null;
 
     // package: name='io.flutter.gallery' versionCode='1' versionName='0.0.1' platformBuildVersionName='NMR1'
-    // launchable-activity: name='org.domokit.sky.shell.SkyActivity'  label='' icon=''
-    Map<String, Map<String, String>> map = <String, Map<String, String>>{};
+    // launchable-activity: name='io.flutter.app.FlutterActivity'  label='' icon=''
+    final Map<String, Map<String, String>> map = <String, Map<String, String>>{};
 
     for (String line in data.split('\n')) {
-      int index = line.indexOf(':');
+      final int index = line.indexOf(':');
       if (index != -1) {
-        String name = line.substring(0, index);
+        final String name = line.substring(0, index);
         line = line.substring(index + 1).trim();
 
-        Map<String, String> entries = <String, String>{};
+        final Map<String, String> entries = <String, String>{};
         map[name] = entries;
 
         for (String entry in line.split(' ')) {
           entry = entry.trim();
           if (entry.isNotEmpty && entry.contains('=')) {
-            int split = entry.indexOf('=');
-            String key = entry.substring(0, split);
+            final int split = entry.indexOf('=');
+            final String key = entry.substring(0, split);
             String value = entry.substring(split + 1);
             if (value.startsWith("'") && value.endsWith("'"))
               value = value.substring(1, value.length - 1);

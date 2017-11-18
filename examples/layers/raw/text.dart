@@ -5,15 +5,15 @@
 // This example shows how to draw some bi-directional text using the raw
 // interface to the engine.
 
-import 'dart:ui' as ui;
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 // A paragraph represents a rectangular region that contains some text.
 ui.Paragraph paragraph;
 
 ui.Picture paint(ui.Rect paintBounds) {
-  ui.PictureRecorder recorder = new ui.PictureRecorder();
-  ui.Canvas canvas = new ui.Canvas(recorder, paintBounds);
+  final ui.PictureRecorder recorder = new ui.PictureRecorder();
+  final ui.Canvas canvas = new ui.Canvas(recorder, paintBounds);
 
   final double devicePixelRatio = ui.window.devicePixelRatio;
   final ui.Size logicalSize = ui.window.physicalSize / devicePixelRatio;
@@ -22,21 +22,21 @@ ui.Picture paint(ui.Rect paintBounds) {
   canvas.drawRect(new ui.Rect.fromLTRB(-100.0, -100.0, 100.0, 100.0),
                   new ui.Paint()..color = const ui.Color.fromARGB(255, 0, 255, 0));
 
-  // The paint method of Pargraph draws the contents of the paragraph unto the
+  // The paint method of Paragraph draws the contents of the paragraph onto the
   // given canvas.
-  canvas.drawParagraph(paragraph, new ui.Offset(paragraph.width / -2.0, (paragraph.width / 2.0) - 125));
+  canvas.drawParagraph(paragraph, new ui.Offset(-paragraph.width / 2.0, (paragraph.width / 2.0) - 125.0));
 
   return recorder.endRecording();
 }
 
 ui.Scene composite(ui.Picture picture, ui.Rect paintBounds) {
   final double devicePixelRatio = ui.window.devicePixelRatio;
-  Float64List deviceTransform = new Float64List(16)
+  final Float64List deviceTransform = new Float64List(16)
     ..[0] = devicePixelRatio
     ..[5] = devicePixelRatio
     ..[10] = 1.0
     ..[15] = 1.0;
-  ui.SceneBuilder sceneBuilder = new ui.SceneBuilder()
+  final ui.SceneBuilder sceneBuilder = new ui.SceneBuilder()
     ..pushTransform(deviceTransform)
     ..addPicture(ui.Offset.zero, picture)
     ..pop();
@@ -44,15 +44,21 @@ ui.Scene composite(ui.Picture picture, ui.Rect paintBounds) {
 }
 
 void beginFrame(Duration timeStamp) {
-  ui.Rect paintBounds = ui.Point.origin & (ui.window.physicalSize / ui.window.devicePixelRatio);
-  ui.Picture picture = paint(paintBounds);
-  ui.Scene scene = composite(picture, paintBounds);
+  final ui.Rect paintBounds = ui.Offset.zero & (ui.window.physicalSize / ui.window.devicePixelRatio);
+  final ui.Picture picture = paint(paintBounds);
+  final ui.Scene scene = composite(picture, paintBounds);
   ui.window.render(scene);
 }
 
 void main() {
   // To create a paragraph of text, we use ParagraphBuilder.
-  ui.ParagraphBuilder builder = new ui.ParagraphBuilder(new ui.ParagraphStyle())
+  final ui.ParagraphBuilder builder = new ui.ParagraphBuilder(
+    // The text below has a primary direction of left-to-right.
+    // The embedded text has other directions.
+    // If this was TextDirection.rtl, the "Hello, world" text would end up on
+    // the other side of the right-to-left text.
+    new ui.ParagraphStyle(textDirection: ui.TextDirection.ltr),
+  )
     // We first push a style that turns the text blue.
     ..pushStyle(new ui.TextStyle(color: const ui.Color(0xFF0000FF)))
     ..addText('Hello, ')

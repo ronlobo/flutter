@@ -3,20 +3,19 @@
 // found in the LICENSE file.
 
 import 'dart:convert';
-import 'dart:io';
-
-import 'package:path/path.dart' as path;
 
 import 'context.dart';
+import 'file_system.dart';
+import 'platform.dart';
 
 class Config {
   Config([File configFile]) {
-    _configFile = configFile ?? new File(path.join(_userHomeDir(), '.flutter_settings'));
+    _configFile = configFile ?? fs.file(fs.path.join(_userHomeDir(), '.flutter_settings'));
     if (_configFile.existsSync())
       _values = JSON.decode(_configFile.readAsStringSync());
   }
 
-  static Config get instance => context[Config] ?? (context[Config] = new Config());
+  static Config get instance => context[Config];
 
   File _configFile;
   String get configPath => _configFile.path;
@@ -24,6 +23,8 @@ class Config {
   Map<String, dynamic> _values = <String, dynamic>{};
 
   Iterable<String> get keys => _values.keys;
+
+  bool containsKey(String key) => _values.containsKey(key);
 
   dynamic getValue(String key) => _values[key];
 
@@ -38,14 +39,14 @@ class Config {
   }
 
   void _flushValues() {
-    String json = new JsonEncoder.withIndent('  ').convert(_values);
+    String json = const JsonEncoder.withIndent('  ').convert(_values);
     json = '$json\n';
     _configFile.writeAsStringSync(json);
   }
 }
 
 String _userHomeDir() {
-  String envKey = Platform.operatingSystem == 'windows' ? 'APPDATA' : 'HOME';
-  String value = Platform.environment[envKey];
+  final String envKey = platform.operatingSystem == 'windows' ? 'APPDATA' : 'HOME';
+  final String value = platform.environment[envKey];
   return value == null ? '.' : value;
 }

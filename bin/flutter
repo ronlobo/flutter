@@ -3,6 +3,15 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+
+# ---------------------------------- NOTE ---------------------------------- #
+#
+# Please keep the logic in this file consistent with the logic in the
+# `flutter.bat` script in the same directory to ensure that Flutter continues
+# to work across all platforms!
+#
+# -------------------------------------------------------------------------- #
+
 set -e
 
 function follow_links() {
@@ -18,7 +27,13 @@ function follow_links() {
   echo "$PWD/${file##*/}"
 }
 
-PROG_NAME="$(follow_links "$BASH_SOURCE")"
+# Convert a filesystem path to a format usable by Dart's URI parser.
+function path_uri() {
+  # Reduce multiple leading slashes to a single slash.
+  echo "$1" | sed -E -e "s,^/+,/,"
+}
+
+PROG_NAME="$(path_uri "$(follow_links "$BASH_SOURCE")")"
 BIN_DIR="$(cd "${PROG_NAME%/*}" ; pwd -P)"
 export FLUTTER_ROOT="$(cd "${BIN_DIR}/.." ; pwd -P)"
 
@@ -29,6 +44,31 @@ SCRIPT_PATH="$FLUTTER_TOOLS_DIR/bin/flutter_tools.dart"
 DART_SDK_PATH="$FLUTTER_ROOT/bin/cache/dart-sdk"
 
 DART="$DART_SDK_PATH/bin/dart"
+PUB="$DART_SDK_PATH/bin/pub"
+
+# Test if running as superuser – but don't warn if running within Docker
+if [[ "$EUID" == "0" ]] && ! [[ -f /.dockerenv ]]; then
+  echo "   Woah! You appear to be trying to run flutter as root."
+  echo "   We strongly recommend running the flutter tool without superuser privileges."
+  echo "  /"
+  echo "📎"
+fi
+
+# Test if Git is available on the Host
+if ! hash git 2>/dev/null; then
+  echo "Error: Unable to find git in your PATH."
+  exit 1
+fi
+# Test if the flutter directory is a git clone (otherwise git rev-parse HEAD would fail)
+if [ ! -d "$FLUTTER_ROOT/.git" ]; then
+  echo "Error: The Flutter directory is not a clone of the GitHub project."
+  exit 1
+fi
+
+FLUTTER_TOOL_ARGS="--assert-initializer $FLUTTER_TOOL_ARGS"
+# To debug the tool, you can uncomment the following lines to enable checked mode and set an observatory port:
+# FLUTTER_TOOL_ARGS="--checked $FLUTTER_TOOL_ARGS"
+# FLUTTER_TOOL_ARGS="$FLUTTER_TOOL_ARGS --observe=65432"
 
 (
   if hash flock 2>/dev/null; then
@@ -36,21 +76,30 @@ DART="$DART_SDK_PATH/bin/dart"
     # some platforms (e.g. Mac) don't have flock or any reliable alternative
   fi
   REVISION=`(cd "$FLUTTER_ROOT"; git rev-parse HEAD)`
-  if [ ! -f "$SNAPSHOT_PATH" ] || [ ! -f "$STAMP_PATH" ] || [ `cat "$STAMP_PATH"` != "$REVISION" ] || [ "$FLUTTER_TOOLS_DIR/pubspec.yaml" -nt "$FLUTTER_TOOLS_DIR/pubspec.lock" ]; then
+  if [ ! -f "$SNAPSHOT_PATH" ] || [ ! -s "$STAMP_PATH" ] || [ `cat "$STAMP_PATH"` != "$REVISION" ] || [ "$FLUTTER_TOOLS_DIR/pubspec.yaml" -nt "$FLUTTER_TOOLS_DIR/pubspec.lock" ]; then
     mkdir -p "$FLUTTER_ROOT/bin/cache"
     touch "$FLUTTER_ROOT/bin/cache/.dartignore"
     "$FLUTTER_ROOT/bin/internal/update_dart_sdk.sh"
 
     echo Building flutter tool...
-    FLUTTER_DIR="$FLUTTER_ROOT/packages/flutter"
-    (cd "$FLUTTER_TOOLS_DIR"; rm -f pubspec.lock; "../../bin/cache/dart-sdk/bin/pub" get --verbosity=error --no-packages-dir)
+    LOCAL_PUB_ENV="$PUB_ENVIRONMENT"
+    if [ "$TRAVIS" == "true" ] || [ "$BOT" == "true" ] || [ "$CONTINUOUS_INTEGRATION" == "true" ] || [ "$CHROME_HEADLESS" == "1" ] || [ "$APPVEYOR" == "true" ] || [ "$CI" == "true" ]; then
+      LOCAL_PUB_ENV="$LOCAL_PUB_ENV:flutter_bot"
+    fi
+    LOCAL_PUB_ENV="$LOCAL_PUB_ENV:flutter_install"
+    while : ; do
+      cd "$FLUTTER_TOOLS_DIR"
+      PUB_ENVIRONMENT="$LOCAL_PUB_ENV" "$PUB" upgrade --verbosity=error --no-packages-dir && break
+      echo Error: Unable to 'pub upgrade' flutter tool. Retrying in five seconds...
+      sleep 5
+    done
     "$DART" --snapshot="$SNAPSHOT_PATH" --packages="$FLUTTER_TOOLS_DIR/.packages" "$SCRIPT_PATH"
     echo $REVISION > "$STAMP_PATH"
   fi
 ) 3< "$PROG_NAME"
 
 set +e
-"$DART" "$SNAPSHOT_PATH" "$@"
+"$DART" $FLUTTER_TOOL_ARGS "$SNAPSHOT_PATH" "$@"
 
 # The VM exits with code 253 if the snapshot version is out-of-date.
 # If it is, we need to snapshot it again.
@@ -61,4 +110,4 @@ fi
 
 set -e
 "$DART" --snapshot="$SNAPSHOT_PATH" --packages="$FLUTTER_TOOLS_DIR/.packages" "$SCRIPT_PATH"
-"$DART" "$SNAPSHOT_PATH" "$@"
+"$DART" $FLUTTER_TOOL_ARGS "$SNAPSHOT_PATH" "$@"

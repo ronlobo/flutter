@@ -2,17 +2,60 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'dart:io';
-
-import 'package:path/path.dart' as path;
-
+import 'base/context.dart';
+import 'base/file_system.dart';
+import 'base/platform.dart';
 import 'base/utils.dart';
 import 'globals.dart';
 
-enum BuildType {
-  prebuilt,
-  release,
-  debug,
+/// Information about a build to be performed or used.
+class BuildInfo {
+  const BuildInfo(this.mode, this.flavor,
+      {this.previewDart2,
+      this.extraFrontEndOptions,
+      this.extraGenSnapshotOptions});
+
+  final BuildMode mode;
+  /// Represents a custom Android product flavor or an Xcode scheme, null for
+  /// using the default.
+  ///
+  /// If not null, the Gradle build task will be `assembleFlavorMode` (e.g.
+  /// `assemblePaidRelease`), and the Xcode build configuration will be
+  /// Mode-Flavor (e.g. Release-Paid).
+  final String flavor;
+
+  // Whether build should be done using Dart2 Frontend parser.
+  final bool previewDart2;
+
+  /// Extra command-line options for front-end.
+  final String extraFrontEndOptions;
+
+  /// Extra command-line options for gen_snapshot.
+  final String extraGenSnapshotOptions;
+
+  static const BuildInfo debug = const BuildInfo(BuildMode.debug, null);
+  static const BuildInfo profile = const BuildInfo(BuildMode.profile, null);
+  static const BuildInfo release = const BuildInfo(BuildMode.release, null);
+
+  /// Returns whether a debug build is requested.
+  ///
+  /// Exactly one of [isDebug], [isProfile], or [isRelease] is true.
+  bool get isDebug => mode == BuildMode.debug;
+
+  /// Returns whether a profile build is requested.
+  ///
+  /// Exactly one of [isDebug], [isProfile], or [isRelease] is true.
+  bool get isProfile => mode == BuildMode.profile;
+
+  /// Returns whether a release build is requested.
+  ///
+  /// Exactly one of [isDebug], [isProfile], or [isRelease] is true.
+  bool get isRelease => mode == BuildMode.release;
+
+  bool get usesAot => isAotBuildMode(mode);
+  bool get supportsEmulator => isEmulatorBuildMode(mode);
+  bool get supportsSimulator => isEmulatorBuildMode(mode);
+  String get modeName => getModeName(mode);
 }
 
 /// The type of build - `debug`, `profile`, or `release`.
@@ -45,6 +88,7 @@ bool isEmulatorBuildMode(BuildMode mode) => mode == BuildMode.debug;
 enum HostPlatform {
   darwin_x64,
   linux_x64,
+  windows_x64,
 }
 
 String getNameForHostPlatform(HostPlatform platform) {
@@ -53,6 +97,8 @@ String getNameForHostPlatform(HostPlatform platform) {
       return 'darwin-x64';
     case HostPlatform.linux_x64:
       return 'linux-x64';
+    case HostPlatform.windows_x64:
+      return 'windows-x64';
   }
   assert(false);
   return null;
@@ -64,7 +110,9 @@ enum TargetPlatform {
   android_x86,
   ios,
   darwin_x64,
-  linux_x64
+  linux_x64,
+  windows_x64,
+  fuchsia,
 }
 
 String getNameForTargetPlatform(TargetPlatform platform) {
@@ -81,6 +129,10 @@ String getNameForTargetPlatform(TargetPlatform platform) {
       return 'darwin-x64';
     case TargetPlatform.linux_x64:
       return 'linux-x64';
+    case TargetPlatform.windows_x64:
+      return 'windows-x64';
+    case TargetPlatform.fuchsia:
+      return 'fuchsia';
   }
   assert(false);
   return null;
@@ -106,10 +158,12 @@ TargetPlatform getTargetPlatformForName(String platform) {
 }
 
 HostPlatform getCurrentHostPlatform() {
-  if (Platform.isMacOS)
+  if (platform.isMacOS)
     return HostPlatform.darwin_x64;
-  if (Platform.isLinux)
+  if (platform.isLinux)
     return HostPlatform.linux_x64;
+  if (platform.isWindows)
+    return HostPlatform.windows_x64;
 
   printError('Unsupported host platform, defaulting to Linux');
 
@@ -118,8 +172,13 @@ HostPlatform getCurrentHostPlatform() {
 
 /// Returns the top-level build output directory.
 String getBuildDirectory() {
-  String buildDir = config.getValue('build-dir') ?? 'build';
-  if (path.isAbsolute(buildDir)) {
+  // TODO(johnmccutchan): Stop calling this function as part of setting
+  // up command line argument processing.
+  if (context == null || config == null)
+    return 'build';
+
+  final String buildDir = config.getValue('build-dir') ?? 'build';
+  if (fs.path.isAbsolute(buildDir)) {
     throw new Exception(
         'build-dir config setting in ${config.configPath} must be relative');
   }
@@ -134,15 +193,21 @@ String getAndroidBuildDirectory() {
 
 /// Returns the AOT build output directory.
 String getAotBuildDirectory() {
-  return path.join(getBuildDirectory(), 'aot');
+  return fs.path.join(getBuildDirectory(), 'aot');
 }
 
 /// Returns the asset build output directory.
 String getAssetBuildDirectory() {
-  return path.join(getBuildDirectory(), 'flx');
+  return fs.path.join(getBuildDirectory(), 'flx');
 }
 
 /// Returns the iOS build output directory.
 String getIosBuildDirectory() {
-  return path.join(getBuildDirectory(), 'ios');
+  return fs.path.join(getBuildDirectory(), 'ios');
+}
+
+/// Returns directory used by incremental compiler (IKG - incremental kernel
+/// generator) to store cached intermediate state.
+String getIncrementalCompilerByteStoreDirectory() {
+  return fs.path.join(getBuildDirectory(), 'ikg_byte_store');
 }

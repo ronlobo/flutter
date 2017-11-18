@@ -3,67 +3,58 @@
 // found in the LICENSE file.
 
 import 'dart:async';
-import 'dart:io';
+import 'dart:convert' show UTF8;
 
-import 'package:path/path.dart' as path;
+import 'package:archive/archive.dart';
 
+import 'android/android_studio_validator.dart';
 import 'android/android_workflow.dart';
+import 'artifacts.dart';
 import 'base/common.dart';
 import 'base/context.dart';
+import 'base/file_system.dart';
+import 'base/os.dart';
+import 'base/platform.dart';
+import 'base/process_manager.dart';
+import 'base/version.dart';
+import 'cache.dart';
 import 'device.dart';
 import 'globals.dart';
 import 'ios/ios_workflow.dart';
+import 'ios/plist_utils.dart';
 import 'version.dart';
 
-const Map<String, String> _osNames = const <String, String>{
-  'macos': 'Mac OS',
-  'linux': 'Linux',
-  'windows': 'Windows'
-};
-
-String osName() {
-  String os = Platform.operatingSystem;
-  return _osNames.containsKey(os) ? _osNames[os] : os;
-}
+Doctor get doctor => context[Doctor];
 
 class Doctor {
-  Doctor() {
-    _validators.add(new _FlutterValidator());
+  List<DoctorValidator> _validators;
 
-    _androidWorkflow = new AndroidWorkflow();
-    if (_androidWorkflow.appliesToHostPlatform)
-      _validators.add(_androidWorkflow);
+  List<DoctorValidator> get validators {
+    if (_validators == null) {
+      _validators = <DoctorValidator>[];
+      _validators.add(new _FlutterValidator());
 
-    _iosWorkflow = new IOSWorkflow();
-    if (_iosWorkflow.appliesToHostPlatform)
-      _validators.add(_iosWorkflow);
+      if (androidWorkflow.appliesToHostPlatform)
+        _validators.add(androidWorkflow);
 
-    List<DoctorValidator> ideValidators = <DoctorValidator>[];
-    ideValidators.addAll(IntelliJValidator.installedValidators);
-    if (ideValidators.isNotEmpty)
-      _validators.addAll(ideValidators);
-    else
-      _validators.add(new NoIdeValidator());
+      if (iosWorkflow.appliesToHostPlatform)
+        _validators.add(iosWorkflow);
 
-    _validators.add(new DeviceValidator());
+      final List<DoctorValidator> ideValidators = <DoctorValidator>[];
+      ideValidators.addAll(AndroidStudioValidator.allValidators);
+      ideValidators.addAll(IntelliJValidator.installedValidators);
+      if (ideValidators.isNotEmpty)
+        _validators.addAll(ideValidators);
+      else
+        _validators.add(new NoIdeValidator());
+
+      _validators.add(new DeviceValidator());
+    }
+    return _validators;
   }
-
-  static void initGlobal() {
-    context[Doctor] = new Doctor();
-  }
-
-  IOSWorkflow _iosWorkflow;
-  AndroidWorkflow _androidWorkflow;
-
-  /// This can return null for platforms that don't support developing for iOS.
-  IOSWorkflow get iosWorkflow => _iosWorkflow;
-
-  AndroidWorkflow get androidWorkflow => _androidWorkflow;
-
-  List<DoctorValidator> _validators = <DoctorValidator>[];
 
   List<Workflow> get workflows {
-    return new List<Workflow>.from(_validators.where((DoctorValidator validator) => validator is Workflow));
+    return new List<Workflow>.from(validators.where((DoctorValidator validator) => validator is Workflow));
   }
 
   /// Print a summary of the state of the tooling, as well as how to get more info.
@@ -72,12 +63,12 @@ class Doctor {
   }
 
   Future<String> get summaryText async {
-    StringBuffer buffer = new StringBuffer();
+    final StringBuffer buffer = new StringBuffer();
 
     bool allGood = true;
 
-    for (DoctorValidator validator in _validators) {
-      ValidationResult result = await validator.validate();
+    for (DoctorValidator validator in validators) {
+      final ValidationResult result = await validator.validate();
       buffer.write('${result.leadingBox} ${validator.title} is ');
       if (result.type == ValidationType.missing)
         buffer.write('not installed.');
@@ -104,16 +95,14 @@ class Doctor {
   }
 
   /// Print verbose information about the state of installed tooling.
-  Future<bool> diagnose() async {
-    bool firstLine = true;
+  Future<bool> diagnose({ bool androidLicenses: false }) async {
+    if (androidLicenses)
+      return AndroidWorkflow.runLicenseManager();
+
     bool doctorResult = true;
 
-    for (DoctorValidator validator in _validators) {
-      if (!firstLine)
-        printStatus('');
-      firstLine = false;
-
-      ValidationResult result = await validator.validate();
+    for (DoctorValidator validator in validators) {
+      final ValidationResult result = await validator.validate();
 
       if (result.type == ValidationType.missing)
         doctorResult = false;
@@ -123,16 +112,16 @@ class Doctor {
       else
         printStatus('${result.leadingBox} ${validator.title}');
 
-      final String separator = Platform.isWindows ? ' ' : '•';
-
       for (ValidationMessage message in result.messages) {
-        String text = message.message.replaceAll('\n', '\n      ');
+        final String text = message.message.replaceAll('\n', '\n      ');
         if (message.isError) {
-          printStatus('    x $text', emphasis: true);
+          printStatus('    ✗ $text', emphasis: true);
         } else {
-          printStatus('    $separator $text');
+          printStatus('    • $text');
         }
       }
+
+      printStatus('');
     }
 
     return doctorResult;
@@ -179,9 +168,9 @@ class ValidationResult {
 
   String get leadingBox {
     if (type == ValidationType.missing)
-      return '[x]';
+      return '[✗]';
     else if (type == ValidationType.installed)
-      return Platform.isWindows ? '[+]' : '[✓]';
+      return '[✓]';
     else
       return '[-]';
   }
@@ -203,30 +192,43 @@ class _FlutterValidator extends DoctorValidator {
 
   @override
   Future<ValidationResult> validate() async {
-    List<ValidationMessage> messages = <ValidationMessage>[];
+    final List<ValidationMessage> messages = <ValidationMessage>[];
     ValidationType valid = ValidationType.installed;
 
-    FlutterVersion version = FlutterVersion.getVersion();
+    final FlutterVersion version = FlutterVersion.instance;
 
-    messages.add(new ValidationMessage('Flutter at ${version.flutterRoot}'));
+    messages.add(new ValidationMessage('Flutter at ${Cache.flutterRoot}'));
+    if (Cache.flutterRoot.contains(' '))
+      messages.add(new ValidationMessage.error(
+        'Flutter SDK install paths with spaces are not yet supported. (https://github.com/flutter/flutter/issues/6577)\n'
+        'Please move the SDK to a path that does not include spaces.'));
     messages.add(new ValidationMessage(
       'Framework revision ${version.frameworkRevisionShort} '
       '(${version.frameworkAge}), ${version.frameworkDate}'
     ));
     messages.add(new ValidationMessage('Engine revision ${version.engineRevisionShort}'));
     messages.add(new ValidationMessage('Tools Dart version ${version.dartSdkVersion}'));
+    final String genSnapshotPath =
+      artifacts.getArtifactPath(Artifact.genSnapshot);
 
-    if (Platform.isWindows) {
-      valid = ValidationType.missing;
-
-      messages.add(new ValidationMessage.error(
-        'Flutter tools are not (yet) supported on Windows: '
-        'https://github.com/flutter/flutter/issues/138.'
-      ));
+    // Check that the binaries we downloaded for this platform actually run on it.
+    if (!_genSnapshotRuns(genSnapshotPath)) {
+      messages.add(new ValidationMessage.error('Downloaded executables cannot execute '
+          'on host (see https://github.com/flutter/flutter/issues/6207 for more information)'));
+      valid = ValidationType.partial;
     }
 
     return new ValidationResult(valid, messages,
-      statusInfo: 'on ${osName()}, channel ${version.channel}');
+      statusInfo: 'on ${os.name}, locale ${platform.localeName}, channel ${version.channel}');
+  }
+}
+
+bool _genSnapshotRuns(String genSnapshotPath) {
+  final int kExpectedExitCode = 255;
+  try {
+    return processManager.runSync(<String>[genSnapshotPath]).exitCode == kExpectedExitCode;
+  } catch (error) {
+    return false;
   }
 }
 
@@ -252,87 +254,161 @@ abstract class IntelliJValidator extends DoctorValidator {
     'IdeaIC' : 'IntelliJ IDEA Community Edition',
   };
 
+  static final Version kMinIdeaVersion = new Version(2017, 1, 0);
+  static final Version kMinFlutterPluginVersion = new Version(16, 0, 0);
+
   static Iterable<DoctorValidator> get installedValidators {
-    if (Platform.isLinux)
-      return IntelliJValidatorOnLinux.installed;
-    if (Platform.isMacOS)
+    if (platform.isLinux || platform.isWindows)
+      return IntelliJValidatorOnLinuxAndWindows.installed;
+    if (platform.isMacOS)
       return IntelliJValidatorOnMac.installed;
-    // TODO(danrubel): add support for Windows
     return <DoctorValidator>[];
   }
 
   @override
   Future<ValidationResult> validate() async {
-    List<ValidationMessage> messages = <ValidationMessage>[];
+    final List<ValidationMessage> messages = <ValidationMessage>[];
 
-    int installCount = 0;
+    _validatePackage(messages, <String>['flutter-intellij', 'flutter-intellij.jar'],
+        'Flutter', minVersion: kMinFlutterPluginVersion);
+    _validatePackage(messages, <String>['Dart'], 'Dart');
 
-    if (_validateHasPackage(messages, 'Dart', 'Dart'))
-      installCount++;
-
-    if (_validateHasPackage(messages, 'flutter-intellij.jar', 'Flutter'))
-      installCount++;
-
-    if (installCount < 2) {
+    if (_hasIssues(messages)) {
       messages.add(new ValidationMessage(
-          'For information about managing plugins, see\n'
-          'https://www.jetbrains.com/help/idea/2016.2/managing-plugins.html'
+        'For information about installing plugins, see\n'
+        'https://flutter.io/intellij-setup/#installing-the-plugins'
       ));
     }
 
+    _validateIntelliJVersion(messages, kMinIdeaVersion);
+
     return new ValidationResult(
-        installCount == 2 ? ValidationType.installed : ValidationType.partial,
-        messages,
-        statusInfo: 'version $version'
+      _hasIssues(messages) ? ValidationType.partial : ValidationType.installed,
+      messages,
+      statusInfo: 'version $version'
     );
   }
 
-  bool _validateHasPackage(List<ValidationMessage> messages, String packageName, String title) {
-    if (!hasPackage(packageName)) {
-      messages.add(new ValidationMessage(
-        '$title plugin not installed; this adds $title specific functionality.'
+  bool _hasIssues(List<ValidationMessage> messages) {
+    return messages.any((ValidationMessage message) => message.isError);
+  }
+
+  void _validateIntelliJVersion(List<ValidationMessage> messages, Version minVersion) {
+    // Ignore unknown versions.
+    if (minVersion == Version.unknown)
+      return;
+
+    final Version installedVersion = new Version.parse(version);
+    if (installedVersion == null)
+      return;
+
+    if (installedVersion < minVersion) {
+      messages.add(new ValidationMessage.error(
+        'This install is older than the minimum recommended version of $minVersion.'
       ));
-      return false;
     }
-    messages.add(new ValidationMessage('$title plugin installed'));
-    return true;
+  }
+
+  void _validatePackage(List<ValidationMessage> messages, List<String> packageNames, String title, {
+    Version minVersion
+  }) {
+    for (String packageName in packageNames) {
+      if (!hasPackage(packageName)) {
+        continue;
+      }
+
+      final String versionText = _readPackageVersion(packageName);
+      final Version version = new Version.parse(versionText);
+      if (version != null && minVersion != null && version < minVersion) {
+        messages.add(new ValidationMessage.error(
+          '$title plugin version $versionText - the recommended minimum version is $minVersion'
+        ));
+      } else {
+        messages.add(new ValidationMessage(
+          '$title plugin ${version != null ? "version $version" : "installed"}'
+        ));
+      }
+
+      return;
+    }
+
+    messages.add(new ValidationMessage.error(
+      '$title plugin not installed; this adds $title specific functionality.'
+    ));
+  }
+
+  String _readPackageVersion(String packageName) {
+    final String jarPath = packageName.endsWith('.jar')
+        ? fs.path.join(pluginsPath, packageName)
+        : fs.path.join(pluginsPath, packageName, 'lib', '$packageName.jar');
+    // TODO(danrubel) look for a better way to extract a single 2K file from the zip
+    // rather than reading the entire file into memory.
+    try {
+      final Archive archive = new ZipDecoder().decodeBytes(fs.file(jarPath).readAsBytesSync());
+      final ArchiveFile file = archive.findFile('META-INF/plugin.xml');
+      final String content = UTF8.decode(file.content);
+      final String versionStartTag = '<version>';
+      final int start = content.indexOf(versionStartTag);
+      final int end = content.indexOf('</version>', start);
+      return content.substring(start + versionStartTag.length, end);
+    } catch (_) {
+      return null;
+    }
   }
 
   bool hasPackage(String packageName) {
-    String packagePath = path.join(pluginsPath, packageName);
+    final String packagePath = fs.path.join(pluginsPath, packageName);
     if (packageName.endsWith('.jar'))
-      return FileSystemEntity.isFileSync(packagePath);
-    return FileSystemEntity.isDirectorySync(packagePath);
+      return fs.isFileSync(packagePath);
+    return fs.isDirectorySync(packagePath);
   }
 }
 
-class IntelliJValidatorOnLinux extends IntelliJValidator {
-  IntelliJValidatorOnLinux(String title, this.version, this.pluginsPath) : super(title);
+class IntelliJValidatorOnLinuxAndWindows extends IntelliJValidator {
+  IntelliJValidatorOnLinuxAndWindows(String title, this.version, this.installPath, this.pluginsPath) : super(title);
 
   @override
   String version;
+
+  final String installPath;
 
   @override
   String pluginsPath;
 
   static Iterable<DoctorValidator> get installed {
-    List<DoctorValidator> validators = <DoctorValidator>[];
-    if (homeDirPath == null) return validators;
-    for (FileSystemEntity dir in new Directory(homeDirPath).listSync()) {
+    final List<DoctorValidator> validators = <DoctorValidator>[];
+    if (homeDirPath == null)
+      return validators;
+
+    void addValidator(String title, String version, String installPath, String pluginsPath) {
+      final IntelliJValidatorOnLinuxAndWindows validator =
+        new IntelliJValidatorOnLinuxAndWindows(title, version, installPath, pluginsPath);
+      for (int index = 0; index < validators.length; ++index) {
+        final DoctorValidator other = validators[index];
+        if (other is IntelliJValidatorOnLinuxAndWindows && validator.installPath == other.installPath) {
+          if (validator.version.compareTo(other.version) > 0)
+            validators[index] = validator;
+          return;
+        }
+      }
+      validators.add(validator);
+    }
+
+    for (FileSystemEntity dir in fs.directory(homeDirPath).listSync()) {
       if (dir is Directory) {
-        String name = path.basename(dir.path);
+        final String name = fs.path.basename(dir.path);
         IntelliJValidator._idToTitle.forEach((String id, String title) {
           if (name.startsWith('.$id')) {
-            String version = name.substring(id.length + 1);
+            final String version = name.substring(id.length + 1);
             String installPath;
             try {
-              installPath = new File(path.join(dir.path, 'system', '.home')).readAsStringSync();
+              installPath = fs.file(fs.path.join(dir.path, 'system', '.home')).readAsStringSync();
             } catch (e) {
               // ignored
             }
-            if (installPath != null && FileSystemEntity.isDirectorySync(installPath)) {
-              String pluginsPath = path.join(dir.path, 'config', 'plugins');
-              validators.add(new IntelliJValidatorOnLinux(title, version, pluginsPath));
+            if (installPath != null && fs.isDirectorySync(installPath)) {
+              final String pluginsPath = fs.path.join(dir.path, 'config', 'plugins');
+              addValidator(title, version, installPath, pluginsPath);
             }
           }
         });
@@ -350,32 +426,49 @@ class IntelliJValidatorOnMac extends IntelliJValidator {
 
   static final Map<String, String> _dirNameToId = <String, String>{
     'IntelliJ IDEA.app' : 'IntelliJIdea',
+    'IntelliJ IDEA Ultimate.app' : 'IntelliJIdea',
     'IntelliJ IDEA CE.app' : 'IdeaIC',
   };
 
   static Iterable<DoctorValidator> get installed {
-    List<DoctorValidator> validators = <DoctorValidator>[];
+    final List<DoctorValidator> validators = <DoctorValidator>[];
+    final List<String> installPaths = <String>['/Applications', fs.path.join(homeDirPath, 'Applications')];
 
     void checkForIntelliJ(Directory dir) {
-      String name = path.basename(dir.path);
+      final String name = fs.path.basename(dir.path);
       _dirNameToId.forEach((String dirName, String id) {
         if (name == dirName) {
-          String title = IntelliJValidator._idToTitle[id];
+          final String title = IntelliJValidator._idToTitle[id];
           validators.add(new IntelliJValidatorOnMac(title, id, dir.path));
         }
       });
     }
 
-    for (FileSystemEntity dir in new Directory('/Applications').listSync()) {
-      if (dir is Directory) {
-        checkForIntelliJ(dir);
-        if (!dir.path.endsWith('.app')) {
-          for (FileSystemEntity subdir in dir.listSync()) {
-            if (subdir is Directory)
-              checkForIntelliJ(subdir);
+    try {
+      final Iterable<FileSystemEntity> installDirs = installPaths
+              .map((String installPath) => fs.directory(installPath))
+              .map((Directory dir) => dir.existsSync() ? dir.listSync() : <FileSystemEntity>[])
+              .expand((List<FileSystemEntity> mappedDirs) => mappedDirs)
+              .where((FileSystemEntity mappedDir) => mappedDir is Directory);
+      for (FileSystemEntity dir in installDirs) {
+        if (dir is Directory) {
+          checkForIntelliJ(dir);
+          if (!dir.path.endsWith('.app')) {
+            for (FileSystemEntity subdir in dir.listSync()) {
+              if (subdir is Directory) {
+                checkForIntelliJ(subdir);
+              }
+            }
           }
         }
       }
+    } on FileSystemException catch (e) {
+      validators.add(new ValidatorWithResult(
+          'Cannot determine if IntelliJ is installed',
+          new ValidationResult(ValidationType.missing, <ValidationMessage>[
+             new ValidationMessage.error(e.message),
+          ]),
+      ));
     }
     return validators;
   }
@@ -383,23 +476,8 @@ class IntelliJValidatorOnMac extends IntelliJValidator {
   @override
   String get version {
     if (_version == null) {
-      String plist;
-      try {
-        plist = new File(path.join(installPath, 'Contents', 'Info.plist')).readAsStringSync();
-        int index = plist.indexOf('CFBundleShortVersionString');
-        if (index > 0) {
-          int start = plist.indexOf('<string>', index);
-          if (start > 0) {
-            int end = plist.indexOf('</string>', start);
-            if (end > 0) {
-              _version = plist.substring(start + 8, end);
-            }
-          }
-        }
-      } on FileSystemException catch (_) {
-        // ignored
-      }
-      _version ??= 'unknown';
+      final String plistFile = fs.path.join(installPath, 'Contents', 'Info.plist');
+      _version = getValueFromFile(plistFile, kCFBundleShortVersionStringKey) ?? 'unknown';
     }
     return _version;
   }
@@ -407,10 +485,10 @@ class IntelliJValidatorOnMac extends IntelliJValidator {
 
   @override
   String get pluginsPath {
-    List<String> split = version.split('.');
-    String major = split[0];
-    String minor = split[1];
-    return path.join(homeDirPath, 'Library', 'Application Support', '$id$major.$minor');
+    final List<String> split = version.split('.');
+    final String major = split[0];
+    final String minor = split[1];
+    return fs.path.join(homeDirPath, 'Library', 'Application Support', '$id$major.$minor');
   }
 }
 
@@ -419,14 +497,23 @@ class DeviceValidator extends DoctorValidator {
 
   @override
   Future<ValidationResult> validate() async {
-    List<Device> devices = await deviceManager.getAllConnectedDevices();
+    final List<Device> devices = await deviceManager.getAllConnectedDevices().toList();
     List<ValidationMessage> messages;
     if (devices.isEmpty) {
       messages = <ValidationMessage>[new ValidationMessage('None')];
     } else {
-      messages = Device.descriptions(devices)
+      messages = await Device.descriptions(devices)
           .map((String msg) => new ValidationMessage(msg)).toList();
     }
     return new ValidationResult(ValidationType.installed, messages);
   }
+}
+
+class ValidatorWithResult extends DoctorValidator {
+  final ValidationResult result;
+
+  ValidatorWithResult(String title, this.result) : super(title);
+
+  @override
+  Future<ValidationResult> validate() async => result;
 }

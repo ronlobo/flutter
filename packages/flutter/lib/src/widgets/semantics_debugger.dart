@@ -4,6 +4,7 @@
 
 import 'dart:math' as math;
 import 'dart:ui' show SemanticsFlags;
+import 'dart:ui' as ui show window;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
@@ -31,7 +32,7 @@ class SemanticsDebugger extends StatefulWidget {
   _SemanticsDebuggerState createState() => new _SemanticsDebuggerState();
 }
 
-class _SemanticsDebuggerState extends State<SemanticsDebugger> {
+class _SemanticsDebuggerState extends State<SemanticsDebugger> with WidgetsBindingObserver {
   _SemanticsClient _client;
 
   @override
@@ -43,6 +44,7 @@ class _SemanticsDebuggerState extends State<SemanticsDebugger> {
     // the BuildContext.
     _client = new _SemanticsClient(WidgetsBinding.instance.pipelineOwner)
       ..addListener(_update);
+    WidgetsBinding.instance.addObserver(this);
   }
 
   @override
@@ -50,13 +52,26 @@ class _SemanticsDebuggerState extends State<SemanticsDebugger> {
     _client
       ..removeListener(_update)
       ..dispose();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  @override
+  void didChangeMetrics() {
+    setState(() {
+      // The root transform may have changed, we have to repaint.
+    });
   }
 
   void _update() {
     SchedulerBinding.instance.addPostFrameCallback((Duration timeStamp) {
-      // We want the update to take effect next frame, so to make that
-      // explicit we call setState() in a post-frame callback.
+      // Semantic information are only available at the end of a frame and our
+      // only chance to paint them on the screen is the next frame. To achieve
+      // this, we call setState() in a post-frame callback. THIS PATTERN SHOULD
+      // NOT BE COPIED. Calling setState() in a post-frame callback is a bad
+      // idea as it will not schedule a frame and your app may be lagging behind
+      // by one frame. We manually call scheduleFrame() to force a frame and
+      // ensure that the semantic information are always painted on the screen.
       if (mounted) {
         // If we got disposed this frame, we will still get an update,
         // because the inactive list is flushed after the semantics updates
@@ -64,15 +79,18 @@ class _SemanticsDebuggerState extends State<SemanticsDebugger> {
         setState(() {
           // The generation of the _SemanticsDebuggerListener has changed.
         });
+        SchedulerBinding.instance.scheduleFrame();
       }
     });
   }
 
-  Point _lastPointerDownLocation;
+  Offset _lastPointerDownLocation;
   void _handlePointerDown(PointerDownEvent event) {
     setState(() {
-      _lastPointerDownLocation = event.position;
+      _lastPointerDownLocation = event.position * ui.window.devicePixelRatio;
     });
+    // TODO(ianh): Use a gesture recognizer so that we can reset the
+    // _lastPointerDownLocation when none of the other gesture recognizers win.
   }
 
   void _handleTap() {
@@ -92,8 +110,8 @@ class _SemanticsDebuggerState extends State<SemanticsDebugger> {
   }
 
   void _handlePanEnd(DragEndDetails details) {
-    double vx = details.velocity.pixelsPerSecond.dx;
-    double vy = details.velocity.pixelsPerSecond.dy;
+    final double vx = details.velocity.pixelsPerSecond.dx;
+    final double vy = details.velocity.pixelsPerSecond.dy;
     if (vx.abs() == vy.abs())
       return;
     if (vx.abs() > vy.abs()) {
@@ -115,7 +133,7 @@ class _SemanticsDebuggerState extends State<SemanticsDebugger> {
     });
   }
 
-  void _performAction(Point position, SemanticsAction action) {
+  void _performAction(Offset position, SemanticsAction action) {
     _pipelineOwner.semanticsOwner?.performActionAt(position, action);
   }
 
@@ -129,7 +147,8 @@ class _SemanticsDebuggerState extends State<SemanticsDebugger> {
       foregroundPainter: new _SemanticsDebuggerPainter(
         _pipelineOwner,
         _client.generation,
-        _lastPointerDownLocation
+        _lastPointerDownLocation, // in physical pixels
+        ui.window.devicePixelRatio,
       ),
       child: new GestureDetector(
         behavior: HitTestBehavior.opaque,
@@ -142,10 +161,10 @@ class _SemanticsDebuggerState extends State<SemanticsDebugger> {
           behavior: HitTestBehavior.opaque,
           child: new IgnorePointer(
             ignoringSemantics: false,
-            child: config.child
-          )
-        )
-      )
+            child: widget.child,
+          ),
+        ),
+      ),
     );
   }
 }
@@ -175,8 +194,8 @@ class _SemanticsClient extends ChangeNotifier {
 }
 
 String _getMessage(SemanticsNode node) {
-  SemanticsData data = node.getSemanticsData();
-  List<String> annotations = <String>[];
+  final SemanticsData data = node.getSemanticsData();
+  final List<String> annotations = <String>[];
 
   bool wantsTap = false;
   if (data.hasFlag(SemanticsFlags.hasCheckedState)) {
@@ -209,15 +228,29 @@ String _getMessage(SemanticsNode node) {
   if (isAdjustable)
     annotations.add('adjustable');
 
+  assert(data.label != null);
   String message;
-  if (annotations.isEmpty) {
-    assert(data.label != null);
-    message = data.label;
+  if (data.label.isEmpty) {
+    message = annotations.join('; ');
   } else {
-    if (data.label.isEmpty) {
-      message = annotations.join('; ');
+    String label;
+    if (data.textDirection == null) {
+      label = '${Unicode.FSI}${data.label}${Unicode.PDI}';
+      annotations.insert(0, 'MISSING TEXT DIRECTION');
     } else {
-      message = '${data.label} (${annotations.join('; ')})';
+      switch (data.textDirection) {
+        case TextDirection.rtl:
+          label = '${Unicode.RLI}${data.label}${Unicode.PDF}';
+          break;
+        case TextDirection.ltr:
+          label = data.label;
+          break;
+      }
+    }
+    if (annotations.isEmpty) {
+      message = label;
+    } else {
+      message = '$label (${annotations.join('; ')})';
     }
   }
 
@@ -231,17 +264,22 @@ const TextStyle _messageStyle = const TextStyle(
 );
 
 void _paintMessage(Canvas canvas, SemanticsNode node) {
-  String message = _getMessage(node);
+  final String message = _getMessage(node);
   if (message.isEmpty)
     return;
   final Rect rect = node.rect;
   canvas.save();
   canvas.clipRect(rect);
-  TextPainter textPainter = new TextPainter()
-    ..text = new TextSpan(style: _messageStyle, text: message)
+  final TextPainter textPainter = new TextPainter()
+    ..text = new TextSpan(
+      style: _messageStyle,
+      text: message,
+    )
+    ..textDirection = TextDirection.ltr // _getMessage always returns LTR text, even if node.label is RTL
+    ..textAlign = TextAlign.center
     ..layout(maxWidth: rect.width);
 
-  textPainter.paint(canvas, FractionalOffset.center.inscribe(textPainter.size, rect).topLeft.toOffset());
+  textPainter.paint(canvas, Alignment.center.inscribe(textPainter.size, rect).topLeft);
   canvas.restore();
 }
 
@@ -260,21 +298,21 @@ void _paint(Canvas canvas, SemanticsNode node, int rank) {
   canvas.save();
   if (node.transform != null)
     canvas.transform(node.transform.storage);
-  Rect rect = node.rect;
+  final Rect rect = node.rect;
   if (!rect.isEmpty) {
-    Color lineColor = new Color(0xFF000000 + new math.Random(node.id).nextInt(0xFFFFFF));
-    Rect innerRect = rect.deflate(rank * 1.0);
+    final Color lineColor = new Color(0xFF000000 + new math.Random(node.id).nextInt(0xFFFFFF));
+    final Rect innerRect = rect.deflate(rank * 1.0);
     if (innerRect.isEmpty) {
-      Paint fill = new Paint()
+      final Paint fill = new Paint()
        ..color = lineColor
        ..style = PaintingStyle.fill;
       canvas.drawRect(rect, fill);
     } else {
-      Paint fill = new Paint()
+      final Paint fill = new Paint()
        ..color = const Color(0xFFFFFFFF)
        ..style = PaintingStyle.fill;
       canvas.drawRect(rect, fill);
-      Paint line = new Paint()
+      final Paint line = new Paint()
        ..strokeWidth = rank * 2.0
        ..color = lineColor
        ..style = PaintingStyle.stroke;
@@ -293,11 +331,12 @@ void _paint(Canvas canvas, SemanticsNode node, int rank) {
 }
 
 class _SemanticsDebuggerPainter extends CustomPainter {
-  const _SemanticsDebuggerPainter(this.owner, this.generation, this.pointerPosition);
+  const _SemanticsDebuggerPainter(this.owner, this.generation, this.pointerPosition, this.devicePixelRatio);
 
   final PipelineOwner owner;
   final int generation;
-  final Point pointerPosition;
+  final Offset pointerPosition; // in physical pixels
+  final double devicePixelRatio;
 
   SemanticsNode get _rootSemanticsNode {
     return owner.semanticsOwner?.rootSemanticsNode;
@@ -306,13 +345,16 @@ class _SemanticsDebuggerPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final SemanticsNode rootNode = _rootSemanticsNode;
+    canvas.save();
+    canvas.scale(1.0 / devicePixelRatio, 1.0 / devicePixelRatio);
     if (rootNode != null)
       _paint(canvas, rootNode, _findDepth(rootNode));
     if (pointerPosition != null) {
-      Paint paint = new Paint();
+      final Paint paint = new Paint();
       paint.color = const Color(0x7F0090FF);
-      canvas.drawCircle(pointerPosition, 10.0, paint);
+      canvas.drawCircle(pointerPosition, 10.0 * devicePixelRatio, paint);
     }
+    canvas.restore();
   }
 
   @override

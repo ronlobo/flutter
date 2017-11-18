@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'package:flutter/foundation.dart';
+
 import 'arena.dart';
 import 'constants.dart';
 import 'events.dart';
@@ -12,12 +14,11 @@ class TapDownDetails {
   /// Creates details for a [GestureTapDownCallback].
   ///
   /// The [globalPosition] argument must not be null.
-  TapDownDetails({ this.globalPosition: Point.origin }) {
-    assert(globalPosition != null);
-  }
+  TapDownDetails({ this.globalPosition: Offset.zero })
+    : assert(globalPosition != null);
 
   /// The global position at which the pointer contacted the screen.
-  final Point globalPosition;
+  final Offset globalPosition;
 }
 
 /// Signature for when a pointer that might cause a tap has contacted the
@@ -32,12 +33,11 @@ class TapUpDetails {
   /// Creates details for a [GestureTapUpCallback].
   ///
   /// The [globalPosition] argument must not be null.
-  TapUpDetails({ this.globalPosition: Point.origin }) {
-    assert(globalPosition != null);
-  }
+  TapUpDetails({ this.globalPosition: Offset.zero })
+    : assert(globalPosition != null);
 
   /// The global position at which the pointer contacted the screen.
-  final Point globalPosition;
+  final Offset globalPosition;
 }
 
 /// Signature for when a pointer that will trigger a tap has stopped contacting
@@ -66,7 +66,7 @@ typedef void GestureTapCancelCallback();
 ///  * [MultiTapGestureRecognizer]
 class TapGestureRecognizer extends PrimaryPointerGestureRecognizer {
   /// Creates a tap gesture recognizer.
-  TapGestureRecognizer() : super(deadline: kPressTimeout);
+  TapGestureRecognizer({ Object debugOwner }) : super(deadline: kPressTimeout, debugOwner: debugOwner);
 
   /// A pointer that might cause a tap has contacted the screen at a particular
   /// location.
@@ -85,21 +85,25 @@ class TapGestureRecognizer extends PrimaryPointerGestureRecognizer {
 
   bool _sentTapDown = false;
   bool _wonArenaForPrimaryPointer = false;
-  Point _finalPosition;
+  Offset _finalPosition;
 
   @override
   void handlePrimaryPointer(PointerEvent event) {
     if (event is PointerUpEvent) {
       _finalPosition = event.position;
       _checkUp();
+    } else if (event is PointerCancelEvent) {
+      _reset();
     }
   }
 
   @override
   void resolve(GestureDisposition disposition) {
     if (_wonArenaForPrimaryPointer && disposition == GestureDisposition.rejected) {
+      // This can happen if the superclass decides the primary pointer
+      // exceeded the touch slop, or if the recognizer is disposed.
       if (onTapCancel != null)
-        invokeCallback/*<Null>*/('onTapCancel', onTapCancel);
+        invokeCallback<Null>('spontaneous onTapCancel', onTapCancel);
       _reset();
     }
     super.resolve(disposition);
@@ -124,9 +128,10 @@ class TapGestureRecognizer extends PrimaryPointerGestureRecognizer {
   void rejectGesture(int pointer) {
     super.rejectGesture(pointer);
     if (pointer == primaryPointer) {
-      assert(state == GestureRecognizerState.defunct);
+      // Another gesture won the arena.
+      assert(state != GestureRecognizerState.possible);
       if (onTapCancel != null)
-        invokeCallback/*<Null>*/('onTapCancel', onTapCancel);
+        invokeCallback<Null>('forced onTapCancel', onTapCancel);
       _reset();
     }
   }
@@ -134,7 +139,7 @@ class TapGestureRecognizer extends PrimaryPointerGestureRecognizer {
   void _checkDown() {
     if (!_sentTapDown) {
       if (onTapDown != null)
-        invokeCallback/*<Null>*/('onTapDown', () => onTapDown(new TapDownDetails(globalPosition: initialPosition)));
+        invokeCallback<Null>('onTapDown', () { onTapDown(new TapDownDetails(globalPosition: initialPosition)); });
       _sentTapDown = true;
     }
   }
@@ -142,10 +147,18 @@ class TapGestureRecognizer extends PrimaryPointerGestureRecognizer {
   void _checkUp() {
     if (_wonArenaForPrimaryPointer && _finalPosition != null) {
       resolve(GestureDisposition.accepted);
+      if (!_wonArenaForPrimaryPointer || _finalPosition == null) {
+        // It is possible that resolve has just recursively called _checkUp
+        // (see https://github.com/flutter/flutter/issues/12470).
+        // In that case _wonArenaForPrimaryPointer will be false (as _checkUp
+        // calls _reset) and we return here to avoid double invocation of the
+        // tap callbacks.
+        return;
+      }
       if (onTapUp != null)
-        invokeCallback/*<Null>*/('onTapUp', () => onTapUp(new TapUpDetails(globalPosition: _finalPosition)));
+        invokeCallback<Null>('onTapUp', () { onTapUp(new TapUpDetails(globalPosition: _finalPosition)); });
       if (onTap != null)
-        invokeCallback/*<Null>*/('onTap', onTap);
+        invokeCallback<Null>('onTap', onTap);
       _reset();
     }
   }
@@ -157,5 +170,13 @@ class TapGestureRecognizer extends PrimaryPointerGestureRecognizer {
   }
 
   @override
-  String toStringShort() => 'tap';
+  String get debugDescription => 'tap';
+
+  @override
+  void debugFillProperties(DiagnosticPropertiesBuilder description) {
+    super.debugFillProperties(description);
+    description.add(new FlagProperty('wonArenaForPrimaryPointer', value: _wonArenaForPrimaryPointer, ifTrue: 'won arena'));
+    description.add(new DiagnosticsProperty<Offset>('finalPosition', _finalPosition, defaultValue: null));
+    description.add(new FlagProperty('sentTapDown', value: _sentTapDown, ifTrue: 'sent tap down'));
+  }
 }

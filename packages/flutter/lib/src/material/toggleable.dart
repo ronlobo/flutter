@@ -3,10 +3,10 @@
 // found in the LICENSE file.
 
 import 'package:flutter/animation.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:meta/meta.dart';
 
 import 'constants.dart';
 
@@ -18,28 +18,28 @@ final Tween<double> _kRadialReactionRadiusTween = new Tween<double>(begin: 0.0, 
 /// This class handles storing the current value, dispatching ValueChanged on a
 /// tap gesture and driving a changed animation. Subclasses are responsible for
 /// painting.
-abstract class RenderToggleable extends RenderConstrainedBox implements SemanticsActionHandler {
+abstract class RenderToggleable extends RenderConstrainedBox {
   /// Creates a toggleable render object.
   ///
   /// The [value], [activeColor], and [inactiveColor] arguments must not be
   /// null.
   RenderToggleable({
-    bool value,
+    @required bool value,
     Size size,
-    Color activeColor,
-    Color inactiveColor,
+    @required Color activeColor,
+    @required Color inactiveColor,
     ValueChanged<bool> onChanged,
     @required TickerProvider vsync,
-  }) : _value = value,
+  }) : assert(value != null),
+       assert(activeColor != null),
+       assert(inactiveColor != null),
+       assert(vsync != null),
+       _value = value,
        _activeColor = activeColor,
        _inactiveColor = inactiveColor,
        _onChanged = onChanged,
        _vsync = vsync,
        super(additionalConstraints: new BoxConstraints.tight(size)) {
-    assert(value != null);
-    assert(activeColor != null);
-    assert(inactiveColor != null);
-    assert(vsync != null);
     _tap = new TapGestureRecognizer()
       ..onTapDown = _handleTapDown
       ..onTap = _handleTap
@@ -79,7 +79,7 @@ abstract class RenderToggleable extends RenderConstrainedBox implements Semantic
   /// The visual value of the control.
   ///
   /// When the control is inactive, the [value] is false and this animation has
-  /// the value 0.0. When the control is active, the value is [true] and this
+  /// the value 0.0. When the control is active, the value is true and this
   /// animation has the value 1.0. When the control is changing from inactive
   /// to active (or vice versa), [value] is the target value and this animation
   /// gradually updates from 0.0 to 1.0 (or vice versa).
@@ -122,7 +122,7 @@ abstract class RenderToggleable extends RenderConstrainedBox implements Semantic
     if (value == _value)
       return;
     _value = value;
-    markNeedsSemanticsUpdate(onlyChanges: true, noGeometry: true);
+    markNeedsSemanticsUpdate(onlyLocalUpdates: true);
     _position
       ..curve = Curves.easeIn
       ..reverseCurve = Curves.easeOut;
@@ -178,7 +178,7 @@ abstract class RenderToggleable extends RenderConstrainedBox implements Semantic
     _onChanged = value;
     if (wasInteractive != isInteractive) {
       markNeedsPaint();
-      markNeedsSemanticsUpdate(noGeometry: true);
+      markNeedsSemanticsUpdate();
     }
   }
 
@@ -191,7 +191,7 @@ abstract class RenderToggleable extends RenderConstrainedBox implements Semantic
   bool get isInteractive => onChanged != null;
 
   TapGestureRecognizer _tap;
-  Point _downPosition;
+  Offset _downPosition;
 
   @override
   void attach(PipelineOwner owner) {
@@ -257,7 +257,7 @@ abstract class RenderToggleable extends RenderConstrainedBox implements Semantic
   }
 
   @override
-  bool hitTestSelf(Point position) => true;
+  bool hitTestSelf(Offset position) => true;
 
   @override
   void handleEvent(PointerEvent event, BoxHitTestEntry entry) {
@@ -272,41 +272,30 @@ abstract class RenderToggleable extends RenderConstrainedBox implements Semantic
   /// origin is the center point of the reaction (usually distinct from the
   /// point at which the user interacted with the control, which is handled
   /// automatically).
-  void paintRadialReaction(Canvas canvas, Offset offset, Point origin) {
+  void paintRadialReaction(Canvas canvas, Offset offset, Offset origin) {
     if (!_reaction.isDismissed) {
       // TODO(abarth): We should have a different reaction color when position is zero.
-      Paint reactionPaint = new Paint()..color = activeColor.withAlpha(kRadialReactionAlpha);
-      Point center = Point.lerp(_downPosition ?? origin, origin, _reaction.value);
-      double radius = _kRadialReactionRadiusTween.evaluate(_reaction);
+      final Paint reactionPaint = new Paint()..color = activeColor.withAlpha(kRadialReactionAlpha);
+      final Offset center = Offset.lerp(_downPosition ?? origin, origin, _reaction.value);
+      final double radius = _kRadialReactionRadiusTween.evaluate(_reaction);
       canvas.drawCircle(center + offset, radius, reactionPaint);
     }
   }
 
   @override
-  bool get isSemanticBoundary => isInteractive;
+  void describeSemanticsConfiguration(SemanticsConfiguration config) {
+    super.describeSemanticsConfiguration(config);
 
-  @override
-  SemanticsAnnotator get semanticsAnnotator => _annotate;
-
-  void _annotate(SemanticsNode semantics) {
-    semantics
-      ..hasCheckedState = true
-      ..isChecked = _value;
+    config.isSemanticBoundary = isInteractive;
     if (isInteractive)
-      semantics.addAction(SemanticsAction.tap);
+      config.addAction(SemanticsAction.tap, _handleTap);
+    config.isChecked = _value;
   }
 
   @override
-  void performAction(SemanticsAction action) {
-    if (action == SemanticsAction.tap)
-      _handleTap();
-  }
-
-  @override
-  void debugFillDescription(List<String> description) {
-    super.debugFillDescription(description);
-    description.add('value: ${value ? "checked" : "unchecked"}');
-    if (!isInteractive)
-      description.add('disabled');
+  void debugFillProperties(DiagnosticPropertiesBuilder description) {
+    super.debugFillProperties(description);
+    description.add(new FlagProperty('value', value: value, ifTrue: 'checked', ifFalse: 'unchecked', showName: true));
+    description.add(new FlagProperty('isInteractive', value: isInteractive,  ifTrue: 'enabled', ifFalse: 'disabled', defaultValue: true));
   }
 }

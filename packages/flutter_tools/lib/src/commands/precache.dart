@@ -20,7 +20,10 @@ class PrecacheCommand extends FlutterCommand {
   final String description = 'Populates the Flutter tool\'s cache of binary artifacts.';
 
   @override
-  Future<int> runCommand() async {
+  bool get shouldUpdateCache => false;
+
+  @override
+  Future<Null> runCommand() async {
     if (argResults['all-platforms'])
       cache.includeAllPlatforms = true;
 
@@ -28,7 +31,5 @@ class PrecacheCommand extends FlutterCommand {
       printStatus('Already up-to-date.');
     else
       await cache.updateAll();
-
-    return 0;
   }
 }

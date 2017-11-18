@@ -4,7 +4,7 @@
 
 import 'package:flutter/material.dart';
 
-typedef Widget TextTransformer(String name, String text);
+typedef Widget _TextTransformer(String name, String text);
 
 // From https://en.wikiquote.org/wiki/2001:_A_Space_Odyssey_(film)
 const String _kDialogText = '''
@@ -23,8 +23,8 @@ final List<List<String>> _kNameLines = _kDialogText
   .map((String line) => line.split(':'))
   .toList();
 
-final TextStyle _kDaveStyle = new TextStyle(color: Colors.indigo[400], height: 1.8);
-final TextStyle _kHalStyle = new TextStyle(color: Colors.red[400], fontFamily: "monospace");
+final TextStyle _kDaveStyle = new TextStyle(color: Colors.indigo.shade400, height: 1.8);
+final TextStyle _kHalStyle = new TextStyle(color: Colors.red.shade400, fontFamily: 'monospace');
 final TextStyle _kBold = const TextStyle(fontWeight: FontWeight.bold);
 final TextStyle _kUnderline = const TextStyle(
   decoration: TextDecoration.underline,
@@ -33,7 +33,7 @@ final TextStyle _kUnderline = const TextStyle(
 );
 
 Widget toStyledText(String name, String text) {
-  TextStyle lineStyle = (name == "Dave") ? _kDaveStyle : _kHalStyle;
+  final TextStyle lineStyle = (name == 'Dave') ? _kDaveStyle : _kHalStyle;
   return new RichText(
     key: new Key(text),
     text: new TextSpan(
@@ -46,7 +46,7 @@ Widget toStyledText(String name, String text) {
               style: _kUnderline,
               text: name
             ),
-            new TextSpan(text: ':')
+            const TextSpan(text: ':')
           ]
         ),
         new TextSpan(text: text)
@@ -55,7 +55,7 @@ Widget toStyledText(String name, String text) {
   );
 }
 
-Widget toPlainText(String name, String text) => new Text(name + ":" + text);
+Widget toPlainText(String name, String text) => new Text(name + ':' + text);
 
 class SpeakerSeparator extends StatelessWidget {
   @override
@@ -84,7 +84,7 @@ class _StyledTextDemoState extends State<StyledTextDemo> {
     _toText = toStyledText;
   }
 
-  TextTransformer _toText;
+  _TextTransformer _toText;
 
   void _handleTap() {
     setState(() {
@@ -94,11 +94,11 @@ class _StyledTextDemoState extends State<StyledTextDemo> {
 
   @override
   Widget build(BuildContext context) {
-    List<Widget> lines = _kNameLines
-      .map((List<String> nameAndText) => Function.apply(_toText, nameAndText))
+    final List<Widget> lines = _kNameLines
+      .map<Widget>((List<String> nameAndText) => _toText(nameAndText[0], nameAndText[1]))
       .toList();
 
-    List<Widget> children = <Widget>[];
+    final List<Widget> children = <Widget>[];
     for (Widget line in lines) {
       children.add(line);
       if (line != lines.last)
@@ -108,7 +108,7 @@ class _StyledTextDemoState extends State<StyledTextDemo> {
     return new GestureDetector(
       onTap: _handleTap,
       child: new Container(
-        padding: new EdgeInsets.symmetric(horizontal: 8.0),
+        padding: const EdgeInsets.symmetric(horizontal: 8.0),
         child: new Column(
           children: children,
           mainAxisAlignment: MainAxisAlignment.center,
@@ -124,10 +124,10 @@ void main() {
     theme: new ThemeData.light(),
     home: new Scaffold(
       appBar: new AppBar(
-        title: new Text('Hal and Dave')
+        title: const Text('Hal and Dave')
       ),
       body: new Material(
-        color: Colors.grey[50],
+        color: Colors.grey.shade50,
         child: new StyledTextDemo()
       )
     )

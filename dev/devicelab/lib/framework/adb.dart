@@ -23,7 +23,7 @@ DeviceOperatingSystem deviceOperatingSystem = DeviceOperatingSystem.android;
 /// Discovers available devices and chooses one to work with.
 abstract class DeviceDiscovery {
   factory DeviceDiscovery() {
-    switch(deviceOperatingSystem) {
+    switch (deviceOperatingSystem) {
       case DeviceOperatingSystem.android:
         return new AndroidDeviceDiscovery();
       case DeviceOperatingSystem.ios:
@@ -44,7 +44,7 @@ abstract class DeviceDiscovery {
   ///
   /// Returns the same device when called repeatedly (unlike
   /// [chooseWorkingDevice]). This is useful when you need to perform multiple
-  /// perations on one.
+  /// operations on one.
   Future<Device> get workingDevice;
 
   /// Lists all available devices' IDs.
@@ -81,6 +81,12 @@ abstract class Device {
   ///
   /// Assumes the device doesn't have a secure unlock pattern.
   Future<Null> unlock();
+
+  /// Read memory statistics for a process.
+  Future<Map<String, dynamic>> getMemoryStats(String packageName);
+
+  /// Stop a process.
+  Future<Null> stop(String packageName);
 }
 
 class AndroidDeviceDiscovery implements DeviceDiscovery {
@@ -112,7 +118,7 @@ class AndroidDeviceDiscovery implements DeviceDiscovery {
   /// [workingDevice].
   @override
   Future<Null> chooseWorkingDevice() async {
-    List<Device> allDevices = (await discoverDevices())
+    final List<Device> allDevices = (await discoverDevices())
       .map((String id) => new AndroidDevice(deviceId: id))
       .toList();
 
@@ -125,9 +131,9 @@ class AndroidDeviceDiscovery implements DeviceDiscovery {
 
   @override
   Future<List<String>> discoverDevices() async {
-    List<String> output = (await eval(adbPath, <String>['devices', '-l'], canFail: false))
+    final List<String> output = (await eval(adbPath, <String>['devices', '-l'], canFail: false))
         .trim().split('\n');
-    List<String> results = <String>[];
+    final List<String> results = <String>[];
     for (String line in output) {
       // Skip lines like: * daemon started successfully *
       if (line.startsWith('* daemon '))
@@ -137,16 +143,16 @@ class AndroidDeviceDiscovery implements DeviceDiscovery {
         continue;
 
       if (_kDeviceRegex.hasMatch(line)) {
-        Match match = _kDeviceRegex.firstMatch(line);
+        final Match match = _kDeviceRegex.firstMatch(line);
 
-        String deviceID = match[1];
-        String deviceState = match[2];
+        final String deviceID = match[1];
+        final String deviceState = match[2];
 
         if (!const <String>['unauthorized', 'offline'].contains(deviceState)) {
           results.add(deviceID);
         }
       } else {
-        throw 'Failed to parse device from adb output: $line';
+        throw 'Failed to parse device from adb output: "$line"';
       }
     }
 
@@ -155,10 +161,10 @@ class AndroidDeviceDiscovery implements DeviceDiscovery {
 
   @override
   Future<Map<String, HealthCheckResult>> checkDevices() async {
-    Map<String, HealthCheckResult> results = <String, HealthCheckResult>{};
+    final Map<String, HealthCheckResult> results = <String, HealthCheckResult>{};
     for (String deviceId in await discoverDevices()) {
       try {
-        AndroidDevice device = new AndroidDevice(deviceId: deviceId);
+        final AndroidDevice device = new AndroidDevice(deviceId: deviceId);
         // Just a smoke test that we can read wakefulness state
         // TODO(yjbanov): check battery level
         await device._getWakefulness();
@@ -234,19 +240,34 @@ class AndroidDevice implements Device {
   ///
   /// See: https://android.googlesource.com/platform/frameworks/base/+/master/core/java/android/os/PowerManagerInternal.java
   Future<String> _getWakefulness() async {
-    String powerInfo = await shellEval('dumpsys', <String>['power']);
-    String wakefulness = grep('mWakefulness=', from: powerInfo).single.split('=')[1].trim();
+    final String powerInfo = await shellEval('dumpsys', <String>['power']);
+    final String wakefulness = grep('mWakefulness=', from: powerInfo).single.split('=')[1].trim();
     return wakefulness;
   }
 
   /// Executes [command] on `adb shell` and returns its exit code.
-  Future<Null> shellExec(String command, List<String> arguments, {Map<String, String> env}) async {
-    await exec(adbPath, <String>['shell', command]..addAll(arguments), env: env, canFail: false);
+  Future<Null> shellExec(String command, List<String> arguments, { Map<String, String> environment }) async {
+    await exec(adbPath, <String>['shell', command]..addAll(arguments), environment: environment, canFail: false);
   }
 
   /// Executes [command] on `adb shell` and returns its standard output as a [String].
-  Future<String> shellEval(String command, List<String> arguments, {Map<String, String> env}) {
-    return eval(adbPath, <String>['shell', command]..addAll(arguments), env: env, canFail: false);
+  Future<String> shellEval(String command, List<String> arguments, { Map<String, String> environment }) {
+    return eval(adbPath, <String>['shell', command]..addAll(arguments), environment: environment, canFail: false);
+  }
+
+  @override
+  Future<Map<String, dynamic>> getMemoryStats(String packageName) async {
+    final String meminfo = await shellEval('dumpsys', <String>['meminfo', packageName]);
+    final Match match = new RegExp(r'TOTAL\s+(\d+)').firstMatch(meminfo);
+    assert(match != null, 'could not parse dumpsys meminfo output');
+    return <String, dynamic>{
+      'total_kb': int.parse(match.group(1)),
+    };
+  }
+
+  @override
+  Future<Null> stop(String packageName) async {
+    return shellExec('am', <String>['force-stop', packageName]);
   }
 }
 
@@ -275,32 +296,47 @@ class IosDeviceDiscovery implements DeviceDiscovery {
   /// [workingDevice].
   @override
   Future<Null> chooseWorkingDevice() async {
-    List<IosDevice> allDevices = (await discoverDevices())
+    final List<IosDevice> allDevices = (await discoverDevices())
       .map((String id) => new IosDevice(deviceId: id))
       .toList();
 
-    if (allDevices.length == 0)
+    if (allDevices.isEmpty)
       throw 'No iOS devices detected';
 
     // TODO(yjbanov): filter out and warn about those with low battery level
     _workingDevice = allDevices[new math.Random().nextInt(allDevices.length)];
   }
 
+  // Physical device line format to be matched:
+  // My iPhone (10.3.2) [75b90e947c5f429fa67f3e9169fda0d89f0492f1]
+  //
+  // Other formats in output (desktop, simulator) to be ignored:
+  // my-mac-pro [2C10513E-4dA5-405C-8EF5-C44353DB3ADD]
+  // iPhone 6s (9.3) [F6CEE7CF-81EB-4448-81B4-1755288C7C11] (Simulator)
+  static final RegExp _deviceRegex = new RegExp(r'^.* +\(.*\) +\[(.*)\]$');
+
   @override
   Future<List<String>> discoverDevices() async {
-    // TODO: use the -k UniqueDeviceID option, which requires much less parsing.
-    List<String> iosDeviceIds = grep('UniqueDeviceID', from: await eval('ideviceinfo', <String>[]))
-      .map((String line) => line.split(' ').last).toList();
-
-    if (iosDeviceIds.isEmpty)
+    final List<String> iosDeviceIDs = <String>[];
+    final Iterable<String> deviceLines = (await eval('instruments', <String>['-s', 'devices']))
+        .split('\n')
+        .map((String line) => line.trim());
+    for (String line in deviceLines) {
+      final Match match = _deviceRegex.firstMatch(line);
+      if (match != null) {
+        final String deviceID = match.group(1);
+        iosDeviceIDs.add(deviceID);
+      }
+    }
+    if (iosDeviceIDs.isEmpty)
       throw 'No connected iOS devices found.';
 
-    return iosDeviceIds;
+    return iosDeviceIDs;
   }
 
   @override
   Future<Map<String, HealthCheckResult>> checkDevices() async {
-    Map<String, HealthCheckResult> results = <String, HealthCheckResult>{};
+    final Map<String, HealthCheckResult> results = <String, HealthCheckResult>{};
     for (String deviceId in await discoverDevices()) {
       // TODO: do a more meaningful connectivity check than just recording the ID
       results['ios-device-$deviceId'] = new HealthCheckResult.success();
@@ -344,19 +380,28 @@ class IosDevice implements Device {
 
   @override
   Future<Null> unlock() async {}
+
+  @override
+  Future<Map<String, dynamic>> getMemoryStats(String packageName) async {
+    throw 'Not implemented';
+  }
+
+  @override
+  Future<Null> stop(String packageName) async {}
 }
 
 /// Path to the `adb` executable.
 String get adbPath {
-  String androidHome = Platform.environment['ANDROID_HOME'];
+  final String androidHome = Platform.environment['ANDROID_HOME'];
 
   if (androidHome == null)
     throw 'ANDROID_HOME environment variable missing. This variable must '
         'point to the Android SDK directory containing platform-tools.';
 
-  File adbPath = file(path.join(androidHome, 'platform-tools/adb'));
+  final String adbPath = path.join(androidHome, 'platform-tools/adb');
 
-  if (!adbPath.existsSync()) throw 'adb not found at: $adbPath';
+  if (!canRun(adbPath))
+    throw 'adb not found at: $adbPath';
 
-  return adbPath.absolute.path;
+  return path.absolute(adbPath);
 }

@@ -5,7 +5,7 @@
 import 'package:flutter/material.dart';
 
 class AdaptedListItem extends StatelessWidget {
-  AdaptedListItem({ Key key, this.name }) : super(key: key);
+  const AdaptedListItem({ Key key, this.name }) : super(key: key);
 
   final String name;
 
@@ -17,9 +17,7 @@ class AdaptedListItem extends StatelessWidget {
           width: 32.0,
           height: 32.0,
           margin: const EdgeInsets.all(8.0),
-          decoration: new BoxDecoration(
-            backgroundColor: Colors.lightBlueAccent[100]
-          )
+          color: Colors.lightBlueAccent.shade100,
         ),
         new Text(name)
       ]
@@ -28,7 +26,7 @@ class AdaptedListItem extends StatelessWidget {
 }
 
 class AdaptedGridItem extends StatelessWidget {
-  AdaptedGridItem({ Key key, this.name }) : super(key: key);
+  const AdaptedGridItem({ Key key, this.name }) : super(key: key);
 
   final String name;
 
@@ -37,22 +35,20 @@ class AdaptedGridItem extends StatelessWidget {
     return new Card(
       child: new Column(
         children: <Widget>[
-          new Flexible(
+          new Expanded(
             child: new Container(
-              decoration: new BoxDecoration(
-                backgroundColor: Colors.lightBlueAccent[100]
-              )
+              color: Colors.lightBlueAccent.shade100,
             )
           ),
           new Container(
             margin: const EdgeInsets.only(left: 8.0),
             child: new Row(
               children: <Widget>[
-                new Flexible(
+                new Expanded(
                   child: new Text(name)
                 ),
-                new IconButton(
-                  icon: new Icon(Icons.more_vert),
+                const IconButton(
+                  icon: const Icon(Icons.more_vert),
                   onPressed: null
                 )
               ]
@@ -69,28 +65,28 @@ const double _kMaxTileWidth = 150.0;
 const double _kGridViewBreakpoint = 450.0;
 
 class AdaptiveContainer extends StatelessWidget {
-  AdaptiveContainer({ Key key, this.names }) : super(key: key);
+  const AdaptiveContainer({ Key key, this.names }) : super(key: key);
 
   final List<String> names;
 
   @override
   Widget build(BuildContext context) {
     if (MediaQuery.of(context).size.width < _kGridViewBreakpoint) {
-      return new ScrollableList(
+      return new ListView(
         itemExtent: _kListItemExtent,
-        children: names.map((String name) => new AdaptedListItem(name: name))
+        children: names.map((String name) => new AdaptedListItem(name: name)).toList(),
       );
     } else {
-      return new ScrollableGrid(
-        delegate: new MaxTileWidthGridDelegate(maxTileWidth: _kMaxTileWidth),
-        children: names.map((String name) => new AdaptedGridItem(name: name))
+      return new GridView.extent(
+        maxCrossAxisExtent: _kMaxTileWidth,
+        children: names.map((String name) => new AdaptedGridItem(name: name)).toList(),
       );
     }
   }
 }
 
 List<String> _initNames() {
-  List<String> names = <String>[];
+  final List<String> names = <String>[];
   for (int i = 0; i < 30; i++)
     names.add('Item $i');
   return names;
@@ -103,7 +99,7 @@ void main() {
     title: 'Media Query Example',
     home: new Scaffold(
       appBar: new AppBar(
-        title: new Text('Media Query Example')
+        title: const Text('Media Query Example')
       ),
       body: new Material(child: new AdaptiveContainer(names: _kNames))
     )

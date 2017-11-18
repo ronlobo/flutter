@@ -10,6 +10,9 @@ import 'object.dart';
 const double _kMaxWidth = 100000.0;
 const double _kMaxHeight = 100000.0;
 
+// Line length to fit small phones without dynamically checking size.
+const String _kLine = '\n\n────────────────────\n\n';
+
 /// A render object used as a placeholder when an error occurs.
 ///
 /// The box will be painted in the color given by the
@@ -40,12 +43,15 @@ class RenderErrorBox extends RenderBox {
         // Generally, the much better way to draw text in a RenderObject is to
         // use the TextPainter class. If you're looking for code to crib from,
         // see the paragraph.dart file and the RenderParagraph class.
-        ui.ParagraphBuilder builder = new ui.ParagraphBuilder(paragraphStyle);
+        final ui.ParagraphBuilder builder = new ui.ParagraphBuilder(paragraphStyle);
         builder.pushStyle(textStyle);
-        builder.addText(message);
+        builder.addText(
+          '$message$_kLine$message$_kLine$message$_kLine$message$_kLine$message$_kLine$message$_kLine'
+          '$message$_kLine$message$_kLine$message$_kLine$message$_kLine$message$_kLine$message'
+        );
         _paragraph = builder.build();
       }
-    } catch (e) { }
+    } catch (e) { } // ignore: empty_catches
   }
 
   /// The message to attempt to display at paint time.
@@ -67,7 +73,7 @@ class RenderErrorBox extends RenderBox {
   bool get sizedByParent => true;
 
   @override
-  bool hitTestSelf(Point position) => true;
+  bool hitTestSelf(Offset position) => true;
 
   @override
   void performResize() {
@@ -79,14 +85,15 @@ class RenderErrorBox extends RenderBox {
 
   /// The text style to use when painting [RenderErrorBox] objects.
   static ui.TextStyle textStyle = new ui.TextStyle(
-    color: const Color(0xFFFFFF00),
+    color: const Color(0xFFFFFF66),
     fontFamily: 'monospace',
-    fontSize: 7.0
+    fontSize: 14.0,
+    fontWeight: FontWeight.bold
   );
 
   /// The paragraph style to use when painting [RenderErrorBox] objects.
   static ui.ParagraphStyle paragraphStyle = new ui.ParagraphStyle(
-    lineHeight: 0.25 // TODO(ianh): https://github.com/flutter/flutter/issues/2460 will affect this
+    lineHeight: 1.0,
   );
 
   @override
@@ -98,14 +105,15 @@ class RenderErrorBox extends RenderBox {
         // See the comment in the RenderErrorBox constructor. This is not the
         // code you want to be copying and pasting. :-)
         if (parent is RenderBox) {
-          RenderBox parentBox = parent;
+          final RenderBox parentBox = parent;
           width = parentBox.size.width;
         } else {
           width = size.width;
         }
         _paragraph.layout(new ui.ParagraphConstraints(width: width));
+
         context.canvas.drawParagraph(_paragraph, offset);
       }
-    } catch (e) { }
+    } catch (e) { } // ignore: empty_catches
   }
 }

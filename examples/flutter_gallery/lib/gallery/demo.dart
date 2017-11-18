@@ -9,29 +9,22 @@ import 'syntax_highlighter.dart';
 
 class ComponentDemoTabData {
   ComponentDemoTabData({
-    this.widget,
+    this.demoWidget,
     this.exampleCodeTag,
     this.description,
     this.tabName
   });
 
-  final Widget widget;
+  final Widget demoWidget;
   final String exampleCodeTag;
   final String description;
   final String tabName;
-
-  static Map<ComponentDemoTabData, TabLabel> buildTabLabels(List<ComponentDemoTabData> demos) {
-    return new Map<ComponentDemoTabData, TabLabel>.fromIterable(
-      demos,
-      value: (ComponentDemoTabData demo) => new TabLabel(text: demo.tabName)
-    );
-  }
 
   @override
   bool operator==(Object other) {
     if (other.runtimeType != runtimeType)
       return false;
-    ComponentDemoTabData typedOther = other;
+    final ComponentDemoTabData typedOther = other;
     return typedOther.tabName == tabName && typedOther.description == description;
   }
 
@@ -40,7 +33,7 @@ class ComponentDemoTabData {
 }
 
 class TabbedComponentDemoScaffold extends StatelessWidget {
-  TabbedComponentDemoScaffold({
+  const TabbedComponentDemoScaffold({
     this.title,
     this.demos
   });
@@ -49,8 +42,7 @@ class TabbedComponentDemoScaffold extends StatelessWidget {
   final String title;
 
   void _showExampleCode(BuildContext context) {
-    TabBarSelectionState<ComponentDemoTabData> selection = TabBarSelection.of(context);
-    String tag = selection.value?.exampleCodeTag;
+    final String tag = demos[DefaultTabController.of(context).index].exampleCodeTag;
     if (tag != null) {
       Navigator.push(context, new MaterialPageRoute<FullScreenCodeDialog>(
         builder: (BuildContext context) => new FullScreenCodeDialog(exampleCodeTag: tag)
@@ -60,8 +52,8 @@ class TabbedComponentDemoScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return new TabBarSelection<ComponentDemoTabData>(
-      values: demos,
+    return new DefaultTabController(
+      length: demos.length,
       child: new Scaffold(
         appBar: new AppBar(
           title: new Text(title),
@@ -69,19 +61,21 @@ class TabbedComponentDemoScaffold extends StatelessWidget {
             new Builder(
               builder: (BuildContext context) {
                 return new IconButton(
-                  icon: new Icon(Icons.description),
+                  icon: const Icon(Icons.description),
                   tooltip: 'Show example code',
-                  onPressed: () { _showExampleCode(context); }
+                  onPressed: () {
+                    _showExampleCode(context);
+                  },
                 );
-              }
-            )
+              },
+            ),
           ],
-          bottom: new TabBar<ComponentDemoTabData>(
+          bottom: new TabBar(
             isScrollable: true,
-            labels: ComponentDemoTabData.buildTabLabels(demos)
-          )
+            tabs: demos.map((ComponentDemoTabData data) => new Tab(text: data.tabName)).toList(),
+          ),
         ),
-        body: new TabBarView<ComponentDemoTabData>(
+        body: new TabBarView(
           children: demos.map((ComponentDemoTabData demo) {
             return new Column(
               children: <Widget>[
@@ -91,18 +85,18 @@ class TabbedComponentDemoScaffold extends StatelessWidget {
                     style: Theme.of(context).textTheme.subhead
                   )
                 ),
-                new Flexible(child: demo.widget)
-              ]
+                new Expanded(child: demo.demoWidget)
+              ],
             );
-          }).toList()
-        )
-      )
+          }).toList(),
+        ),
+      ),
     );
   }
 }
 
 class FullScreenCodeDialog extends StatefulWidget {
-  FullScreenCodeDialog({ this.exampleCodeTag });
+  const FullScreenCodeDialog({ this.exampleCodeTag });
 
   final String exampleCodeTag;
 
@@ -115,13 +109,15 @@ class FullScreenCodeDialogState extends State<FullScreenCodeDialog> {
   String _exampleCode;
 
   @override
-  void dependenciesChanged() {
-    getExampleCode(config.exampleCodeTag, DefaultAssetBundle.of(context)).then((String code) {
-      setState(() {
-        _exampleCode = code;
-      });
+  void didChangeDependencies() {
+    getExampleCode(widget.exampleCodeTag, DefaultAssetBundle.of(context)).then<Null>((String code) {
+      if (mounted) {
+        setState(() {
+          _exampleCode = code;
+        });
+      }
     });
-    super.dependenciesChanged();
+    super.didChangeDependencies();
   }
 
   @override
@@ -132,16 +128,16 @@ class FullScreenCodeDialogState extends State<FullScreenCodeDialog> {
 
     Widget body;
     if (_exampleCode == null) {
-      body = new Center(
-        child: new CircularProgressIndicator()
+      body = const Center(
+        child: const CircularProgressIndicator()
       );
     } else {
-      body = new ScrollableViewport(
+      body = new SingleChildScrollView(
         child: new Padding(
-          padding: new EdgeInsets.all(16.0),
+          padding: const EdgeInsets.all(16.0),
           child: new RichText(
             text: new TextSpan(
-              style: new TextStyle(fontFamily: 'monospace', fontSize: 10.0),
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 10.0),
               children: <TextSpan>[
                 new DartSyntaxHighlighter(style).format(_exampleCode)
               ]
@@ -154,10 +150,10 @@ class FullScreenCodeDialogState extends State<FullScreenCodeDialog> {
     return new Scaffold(
       appBar: new AppBar(
         leading: new IconButton(
-          icon: new Icon(Icons.clear),
+          icon: const Icon(Icons.clear),
           onPressed: () { Navigator.pop(context); }
         ),
-        title: new Text('Example code')
+        title: const Text('Example code')
       ),
       body: body
     );

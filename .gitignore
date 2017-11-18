@@ -1,1 +1,4 @@
 .idea
+.history
+.DS_Store
+*.iml

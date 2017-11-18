@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
-import 'package:meta/meta.dart';
 
 import 'constants.dart';
 import 'debug.dart';
@@ -17,9 +17,10 @@ const double _kInnerRadius = 5.0;
 
 /// A material design radio button.
 ///
-/// Used to select between a number of mutually exclusive values. When one
-/// radio button in a group is selected, the other radio buttons in the group
-/// cease to be selected.
+/// Used to select between a number of mutually exclusive values. When one radio
+/// button in a group is selected, the other radio buttons in the group cease to
+/// be selected. The values are of type `T`, the type parameter of the [Radio]
+/// class. Enums are commonly used for this purpose.
 ///
 /// The radio button itself does not maintain any state. Instead, when the state
 /// of the radio button changes, the widget calls the [onChanged] callback.
@@ -31,22 +32,26 @@ const double _kInnerRadius = 5.0;
 ///
 /// See also:
 ///
-///  * [CheckBox]
-///  * [Slider]
-///  * [Switch]
+///  * [RadioListTile], which combines this widget with a [ListTile] so that
+///    you can give the radio button a label.
+///  * [Slider], for selecting a value in a range.
+///  * [Checkbox] and [Switch], for toggling a particular value on or off.
 ///  * <https://material.google.com/components/selection-controls.html#selection-controls-radio-button>
 class Radio<T> extends StatefulWidget {
   /// Creates a material design radio button.
   ///
-  /// The radio button itself does not maintain any state. Instead, when the state
-  /// of the radio button changes, the widget calls the [onChanged] callback.
-  /// Most widget that use a radio button will listen for the [onChanged]
-  /// callback and rebuild the radio button with a new [groupValue] to update the
-  /// visual appearance of the radio button.
+  /// The radio button itself does not maintain any state. Instead, when the
+  /// radio button is selected, the widget calls the [onChanged] callback. Most
+  /// widgets that use a radio button will listen for the [onChanged] callback
+  /// and rebuild the radio button with a new [groupValue] to update the visual
+  /// appearance of the radio button.
   ///
-  /// * [value] and [groupValue] together determines whether the radio button is selected.
-  /// * [onChanged] is when the user selects this radio button.
-  Radio({
+  /// The following arguments are required:
+  ///
+  /// * [value] and [groupValue] together determine whether the radio button is
+  ///   selected.
+  /// * [onChanged] is called when the user selects this radio button.
+  const Radio({
     Key key,
     @required this.value,
     @required this.groupValue,
@@ -71,7 +76,7 @@ class Radio<T> extends StatefulWidget {
   ///
   /// If null, the radio button will be displayed as disabled.
   ///
-  /// The callback provided to onChanged should update the state of the parent
+  /// The callback provided to [onChanged] should update the state of the parent
   /// [StatefulWidget] using the [State.setState] method, so that the parent
   /// gets rebuilt; for example:
   ///
@@ -84,7 +89,7 @@ class Radio<T> extends StatefulWidget {
   ///       _character = newValue;
   ///     });
   ///   },
-  /// ),
+  /// )
   /// ```
   final ValueChanged<T> onChanged;
 
@@ -98,7 +103,7 @@ class Radio<T> extends StatefulWidget {
 }
 
 class _RadioState<T> extends State<Radio<T>> with TickerProviderStateMixin {
-  bool get _enabled => config.onChanged != null;
+  bool get _enabled => widget.onChanged != null;
 
   Color _getInactiveColor(ThemeData themeData) {
     return _enabled ? themeData.unselectedWidgetColor : themeData.disabledColor;
@@ -106,18 +111,18 @@ class _RadioState<T> extends State<Radio<T>> with TickerProviderStateMixin {
 
   void _handleChanged(bool selected) {
     if (selected)
-      config.onChanged(config.value);
+      widget.onChanged(widget.value);
   }
 
   @override
   Widget build(BuildContext context) {
     assert(debugCheckHasMaterial(context));
-    ThemeData themeData = Theme.of(context);
+    final ThemeData themeData = Theme.of(context);
     return new Semantics(
-      checked: config.value == config.groupValue,
+      checked: widget.value == widget.groupValue,
       child: new _RadioRenderObjectWidget(
-        selected: config.value == config.groupValue,
-        activeColor: config.activeColor ?? themeData.accentColor,
+        selected: widget.value == widget.groupValue,
+        activeColor: widget.activeColor ?? themeData.accentColor,
         inactiveColor: _getInactiveColor(themeData),
         onChanged: _enabled ? _handleChanged : null,
         vsync: this,
@@ -127,19 +132,18 @@ class _RadioState<T> extends State<Radio<T>> with TickerProviderStateMixin {
 }
 
 class _RadioRenderObjectWidget extends LeafRenderObjectWidget {
-  _RadioRenderObjectWidget({
+  const _RadioRenderObjectWidget({
     Key key,
     @required this.selected,
     @required this.activeColor,
     @required this.inactiveColor,
     this.onChanged,
     @required this.vsync,
-  }) : super(key: key) {
-    assert(selected != null);
-    assert(activeColor != null);
-    assert(inactiveColor != null);
-    assert(vsync != null);
-  }
+  }) : assert(selected != null),
+       assert(activeColor != null),
+       assert(inactiveColor != null),
+       assert(vsync != null),
+       super(key: key);
 
   final bool selected;
   final Color inactiveColor;
@@ -190,13 +194,13 @@ class _RenderRadio extends RenderToggleable {
   void paint(PaintingContext context, Offset offset) {
     final Canvas canvas = context.canvas;
 
-    paintRadialReaction(canvas, offset, const Point(kRadialReactionRadius, kRadialReactionRadius));
+    paintRadialReaction(canvas, offset, const Offset(kRadialReactionRadius, kRadialReactionRadius));
 
-    Point center = (offset & size).center;
-    Color radioColor = onChanged != null ? activeColor : inactiveColor;
+    final Offset center = (offset & size).center;
+    final Color radioColor = onChanged != null ? activeColor : inactiveColor;
 
     // Outer circle
-    Paint paint = new Paint()
+    final Paint paint = new Paint()
       ..color = Color.lerp(inactiveColor, radioColor, position.value)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2.0;

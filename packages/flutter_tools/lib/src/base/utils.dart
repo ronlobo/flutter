@@ -4,23 +4,36 @@
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:math' show Random;
 
 import 'package:crypto/crypto.dart';
-import 'package:path/path.dart' as path;
+import 'package:intl/intl.dart';
+import 'package:quiver/time.dart';
+
+import '../globals.dart';
+import 'context.dart';
+import 'file_system.dart';
+import 'platform.dart';
 
 bool get isRunningOnBot {
-  // https://docs.travis-ci.com/user/environment-variables/#Default-Environment-Variables
-  // CHROME_HEADLESS is one property set on Flutter's Chrome Infra bots.
   return
-    Platform.environment['TRAVIS'] == 'true' ||
-    Platform.environment['CONTINUOUS_INTEGRATION'] == 'true' ||
-    Platform.environment['CHROME_HEADLESS'] == '1';
+    platform.environment['BOT'] == 'true' ||
+
+    // https://docs.travis-ci.com/user/environment-variables/#Default-Environment-Variables
+    platform.environment['TRAVIS'] == 'true' ||
+    platform.environment['CONTINUOUS_INTEGRATION'] == 'true' ||
+    platform.environment.containsKey('CI') || // Travis and AppVeyor
+
+    // https://www.appveyor.com/docs/environment-variables/
+    platform.environment.containsKey('APPVEYOR') ||
+
+    // Properties on Flutter's Chrome Infra bots.
+    platform.environment['CHROME_HEADLESS'] == '1' ||
+    platform.environment.containsKey('BUILDBOT_BUILDERNAME');
 }
 
 String hex(List<int> bytes) {
-  StringBuffer result = new StringBuffer();
+  final StringBuffer result = new StringBuffer();
   for (int part in bytes)
     result.write('${part < 16 ? '0' : ''}${part.toRadixString(16)}');
   return result.toString();
@@ -53,17 +66,18 @@ String pluralize(String word, int count) => count == 1 ? word : word + 's';
 
 /// Return the name of an enum item.
 String getEnumName(dynamic enumItem) {
-  String name = '$enumItem';
-  int index = name.indexOf('.');
+  final String name = '$enumItem';
+  final int index = name.indexOf('.');
   return index == -1 ? name : name.substring(index + 1);
 }
 
 File getUniqueFile(Directory dir, String baseName, String ext) {
+  final FileSystem fs = dir.fileSystem;
   int i = 1;
 
   while (true) {
-    String name = '${baseName}_${i.toString().padLeft(2, '0')}.$ext';
-    File file = new File(path.join(dir.path, name));
+    final String name = '${baseName}_${i.toString().padLeft(2, '0')}.$ext';
+    final File file = fs.file(fs.path.join(dir.path, name));
     if (!file.existsSync())
       return file;
     i++;
@@ -71,7 +85,7 @@ File getUniqueFile(Directory dir, String baseName, String ext) {
 }
 
 String toPrettyJson(Object jsonable) {
-  return new JsonEncoder.withIndent('  ').convert(jsonable) + '\n';
+  return const JsonEncoder.withIndent('  ').convert(jsonable) + '\n';
 }
 
 /// Return a String - with units - for the size in MB of the given number of bytes.
@@ -79,19 +93,22 @@ String getSizeAsMB(int bytesLength) {
   return '${(bytesLength / (1024 * 1024)).toStringAsFixed(1)}MB';
 }
 
+final NumberFormat kSecondsFormat = new NumberFormat('0.0');
+final NumberFormat kMillisecondsFormat = new NumberFormat.decimalPattern();
+
 String getElapsedAsSeconds(Duration duration) {
-  double seconds = duration.inMilliseconds / Duration.MILLISECONDS_PER_SECOND;
-  return '${seconds.toStringAsFixed(2)} seconds';
+  final double seconds = duration.inMilliseconds / Duration.MILLISECONDS_PER_SECOND;
+  return '${kSecondsFormat.format(seconds)}s';
 }
 
 String getElapsedAsMilliseconds(Duration duration) {
-  return '${duration.inMilliseconds} ms';
+  return '${kMillisecondsFormat.format(duration.inMilliseconds)}ms';
 }
 
 /// Return a relative path if [fullPath] is contained by the cwd, else return an
 /// absolute path.
 String getDisplayPath(String fullPath) {
-  String cwd = Directory.current.path + Platform.pathSeparator;
+  final String cwd = fs.currentDirectory.path + fs.path.separator;
   return fullPath.startsWith(cwd) ?  fullPath.substring(cwd.length) : fullPath;
 }
 
@@ -109,8 +126,8 @@ class ItemListNotifier<T> {
 
   Set<T> _items;
 
-  StreamController<T> _addedController = new StreamController<T>.broadcast();
-  StreamController<T> _removedController = new StreamController<T>.broadcast();
+  final StreamController<T> _addedController = new StreamController<T>.broadcast();
+  final StreamController<T> _removedController = new StreamController<T>.broadcast();
 
   Stream<T> get onAdded => _addedController.stream;
   Stream<T> get onRemoved => _removedController.stream;
@@ -118,17 +135,15 @@ class ItemListNotifier<T> {
   List<T> get items => _items.toList();
 
   void updateWithNewList(List<T> updatedList) {
-    Set<T> updatedSet = new Set<T>.from(updatedList);
+    final Set<T> updatedSet = new Set<T>.from(updatedList);
 
-    Set<T> addedItems = updatedSet.difference(_items);
-    Set<T> removedItems = _items.difference(updatedSet);
+    final Set<T> addedItems = updatedSet.difference(_items);
+    final Set<T> removedItems = _items.difference(updatedSet);
 
     _items = updatedSet;
 
-    for (T item in addedItems)
-      _addedController.add(item);
-    for (T item in removedItems)
-      _removedController.add(item);
+    addedItems.forEach(_addedController.add);
+    removedItems.forEach(_removedController.add);
   }
 
   /// Close the streams.
@@ -139,12 +154,14 @@ class ItemListNotifier<T> {
 }
 
 class SettingsFile {
+  SettingsFile();
+
   SettingsFile.parse(String contents) {
     for (String line in contents.split('\n')) {
       line = line.trim();
       if (line.startsWith('#') || line.isEmpty)
         continue;
-      int index = line.indexOf('=');
+      final int index = line.indexOf('=');
       if (index != -1)
         values[line.substring(0, index)] = line.substring(index + 1);
     }
@@ -167,18 +184,18 @@ class SettingsFile {
 ///
 ///     f47ac10b-58cc-4372-a567-0e02b2c3d479
 ///
-/// The generated uuids are 128 bit numbers encoded in a specific string format.
+/// The generated UUIDs are 128 bit numbers encoded in a specific string format.
 ///
 /// For more information, see
 /// http://en.wikipedia.org/wiki/Universally_unique_identifier.
 class Uuid {
-  Random _random = new Random();
+  final Random _random = new Random();
 
-  /// Generate a version 4 (random) uuid. This is a uuid scheme that only uses
-  /// random numbers as the source of the generated uuid.
+  /// Generate a version 4 (random) UUID. This is a UUID scheme that only uses
+  /// random numbers as the source of the generated UUID.
   String generateV4() {
     // Generate xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx / 8-4-4-4-12.
-    int special = 8 + _random.nextInt(4);
+    final int special = 8 + _random.nextInt(4);
 
     return
       '${_bitsDigits(16, 4)}${_bitsDigits(16, 4)}-'
@@ -195,4 +212,56 @@ class Uuid {
 
   String _printDigits(int value, int count) =>
       value.toRadixString(16).padLeft(count, '0');
+}
+
+Clock get clock => context.putIfAbsent(Clock, () => const Clock());
+
+typedef Future<Null> AsyncCallback();
+
+/// A [Timer] inspired class that:
+///   - has a different initial value for the first callback delay
+///   - waits for a callback to be complete before it starts the next timer
+class Poller {
+  Poller(this.callback, this.pollingInterval, { this.initialDelay: Duration.ZERO }) {
+    new Future<Null>.delayed(initialDelay, _handleCallback);
+  }
+
+  final AsyncCallback callback;
+  final Duration initialDelay;
+  final Duration pollingInterval;
+
+  bool _cancelled = false;
+  Timer _timer;
+
+  Future<Null> _handleCallback() async {
+    if (_cancelled)
+      return;
+
+    try {
+      await callback();
+    } catch (error) {
+      printTrace('Error from poller: $error');
+    }
+
+    if (!_cancelled)
+      _timer = new Timer(pollingInterval, _handleCallback);
+  }
+
+  /// Cancels the poller.
+  void cancel() {
+    _cancelled = true;
+    _timer?.cancel();
+    _timer = null;
+  }
+}
+
+/// Returns a [Future] that completes when all given [Future]s complete.
+///
+/// Uses [Future.wait] but removes null elements from the provided
+/// `futures` iterable first.
+///
+/// The returned [Future<List>] will be shorter than the given `futures` if
+/// it contains nulls.
+Future<List<T>> waitGroup<T>(Iterable<Future<T>> futures) {
+  return Future.wait<T>(futures.where((Future<T> future) => future != null));
 }

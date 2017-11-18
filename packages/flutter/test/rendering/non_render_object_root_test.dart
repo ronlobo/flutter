@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 import 'package:test/test.dart';
 
@@ -43,12 +44,12 @@ class RealRoot extends AbstractNode {
 }
 
 void main() {
-  test("non-RenderObject roots", () {
+  test('non-RenderObject roots', () {
     RenderPositionedBox child;
-    RealRoot root = new RealRoot(
+    final RealRoot root = new RealRoot(
       child = new RenderPositionedBox(
-        alignment: FractionalOffset.center,
-        child: new RenderSizedBox(new Size(100.0, 100.0))
+        alignment: Alignment.center,
+        child: new RenderSizedBox(const Size(100.0, 100.0))
       )
     );
     root.attach(new PipelineOwner());

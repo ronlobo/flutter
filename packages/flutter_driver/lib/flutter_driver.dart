@@ -11,34 +11,32 @@
 /// Protractor (Angular), Espresso (Android) or Earl Gray (iOS).
 library flutter_driver;
 
+export 'src/common.dart' show
+  testOutputsDirectory;
 export 'src/driver.dart' show
   find,
   CommonFinders,
   EvaluatorFunction,
   FlutterDriver,
   TimelineStream;
-
 export 'src/error.dart' show
   DriverError,
   LogLevel,
   LogRecord,
   flutterDriverLog;
-
 export 'src/find.dart' show
-  SerializableFinder,
-  GetTextResult;
-
+  SerializableFinder;
 export 'src/health.dart' show
   Health,
   HealthStatus;
-
 export 'src/message.dart' show
   Command,
   Result;
-
-export 'src/timeline_summary.dart' show
-  TimelineSummary;
-
+export 'src/render_tree.dart' show
+  RenderTree;
 export 'src/timeline.dart' show
   Timeline,
   TimelineEvent;
+export 'src/timeline_summary.dart' show
+  TimelineSummary,
+  kBuildBudget;

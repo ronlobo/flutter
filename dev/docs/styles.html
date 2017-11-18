@@ -1,15 +1,12 @@
 <!-- style overrides for dartdoc -->
 <style>
-@import 'https://fonts.googleapis.com/css?family=Roboto:100i';
+@import 'https://fonts.googleapis.com/css?family=Roboto:500,400italic,300,400,100i';
 </style>
 
 <style>
-  header {
-    background-color: #01579b;
-  }
-
   body {
-    font-size: 16px;
+    font-size: 15px;
+    font-family: Roboto, sans-serif;
     line-height: 1.5;
     color: #111;
     background-color: #fdfdfd;
@@ -17,8 +14,26 @@
     -webkit-font-smoothing: auto;
   }
 
-  h1, h2, h3, h4, h5, h6 {
+  header {
+    background-color: white;
+    color: #424242;
+  }
+
+  nav.navbar {
+    min-height: 57px;
+    padding: 6px 0;
+  }
+
+  header.header-fixed nav.navbar-fixed-top {
+    box-shadow: 0 1px 4px 0 rgba(0, 0, 0, 0.37);
+  }
+
+  h1, h2 {
     font-weight: 300;
+  }
+
+  h3, h4, h5, h6 {
+    font-weight: 400;
   }
 
   h1 {
@@ -32,7 +47,7 @@
 
   h2 {
     color: #111;
-    font-size: 26px;
+    font-size: 24px;
   }
 
   .markdown h2 {
@@ -40,7 +55,7 @@
   }
 
   section.summary h2 {
-    font-size: 32px;
+    font-size: 24px;
     color: inherit;
     border-bottom: none;
   }
@@ -50,58 +65,61 @@
     font-size: inherit;
   }
 
+  @media screen and (max-width: 768px) {
+    .sidebar-offcanvas-left.active {
+      padding: 10px;
+    }
+  }
+
   .sidebar-offcanvas-left ol {
     padding: 0 16px 16px 0;
   }
 
-  .sidebar h5 {
-    display: none;
-  }
-
-  .sidebar-offcanvas-left {
-    background-color: inherit;
-  }
-
   .sidebar-offcanvas-left h5 {
-    border-bottom: none;
-    padding: 0 0 16px 0;
-  }
-
-  .sidebar-offcanvas-left h5:last-of-type {
-    padding: 0 0 16px 0;
+    display: none;
   }
 
   pre,
   pre.prettyprint,
   pre > code {
-    font-size: 15px;
+    font-size: 14px;
   }
 
   pre,
   pre.prettyprint {
-    background: inherit;
-    border: none;
+    background: #f5f2f0;
     margin: 0 0 15px 0;
     padding: 8px 12px;
+    border: 1px solid #cccccc;
+    border-radius: 4px;
   }
 
   code {
     background-color: inherit;
+    font-size: 1em; /* browsers default to smaller font for code */
+    font-weight: 300;
+    padding-left: 0; /* otherwise we get ragged left margins */
+    padding-right: 0;
+  }
+
+  #search-box {
+    color: #555;
+    background-color: #fff;
+    background-image: none;
+    border: 1px solid #ccc;
+    border-radius: 2px;
+    font-family: inherit;
+    padding: 4px 6px;
+    font-size: 15px;
+  }
+
+  input.form-control.typeahead {
+    padding: 4px 7px;
+    font-size: 15px;
   }
 
   dl.dl-horizontal dt {
     color: inherit;
-  }
-
-  footer {
-    border-top: 1px solid #e8e8e8;
-    height: inherit;
-    padding-bottom: 15px;
-    text-transform: lowercase;
-  }
-
-  footer p {
-    color: #828282;
   }
 
   /* Line the material icons up with their labels */
@@ -113,6 +131,19 @@
   /* thinify the inherited names in lists */
   li.inherited a {
     font-weight: 100;
+  }
+
+  /* Attempt to de-emphasise the source code section */
+  section.summary.source-code {
+    opacity: 0.3;
+  }
+  section.summary.source-code:hover {
+    opacity: 0.8;
+  }
+
+  footer {
+    font-size: 13px;
+    padding: 12px 20px;
   }
 </style>
 

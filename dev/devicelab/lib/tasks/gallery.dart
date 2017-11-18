@@ -5,43 +5,44 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-
-import 'package:meta/meta.dart';
+import 'dart:math' as math;
 
 import '../framework/adb.dart';
 import '../framework/framework.dart';
+import '../framework/ios.dart';
 import '../framework/utils.dart';
 
-TaskFunction createGalleryTransitionTest({ @required DeviceOperatingSystem os }) {
-  return new GalleryTransitionTest(os: os);
+TaskFunction createGalleryTransitionTest({ bool semanticsEnabled: false }) {
+  return new GalleryTransitionTest(semanticsEnabled: semanticsEnabled);
 }
 
 class GalleryTransitionTest {
-  GalleryTransitionTest({ this.os }) {
-    deviceOperatingSystem = os;
-  }
 
-  final DeviceOperatingSystem os;
+  GalleryTransitionTest({ this.semanticsEnabled: false });
+
+  final bool semanticsEnabled;
 
   Future<TaskResult> call() async {
-    Device device = await devices.workingDevice;
+    final Device device = await devices.workingDevice;
     await device.unlock();
-    String deviceId = device.deviceId;
-    Directory galleryDirectory =
+    final String deviceId = device.deviceId;
+    final Directory galleryDirectory =
         dir('${flutterDirectory.path}/examples/flutter_gallery');
     await inDirectory(galleryDirectory, () async {
       await flutter('packages', options: <String>['get']);
 
-      if (os == DeviceOperatingSystem.ios) {
-        // This causes an Xcode project to be created.
-        await flutter('build', options: <String>['ios', '--profile']);
-      }
+      if (deviceOperatingSystem == DeviceOperatingSystem.ios)
+        await prepareProvisioningCertificates(galleryDirectory.path);
+
+      final String testDriver = semanticsEnabled
+          ? 'transitions_perf_with_semantics.dart'
+          : 'transitions_perf.dart';
 
       await flutter('drive', options: <String>[
         '--profile',
         '--trace-startup',
         '-t',
-        'test_driver/transitions_perf.dart',
+        'test_driver/$testDriver',
         '-d',
         deviceId,
       ]);
@@ -49,25 +50,43 @@ class GalleryTransitionTest {
 
     // Route paths contains slashes, which Firebase doesn't accept in keys, so we
     // remove them.
-    Map<String, dynamic> original = JSON.decode(file(
+    final Map<String, List<int>> original = JSON.decode(file(
             '${galleryDirectory.path}/build/transition_durations.timeline.json')
         .readAsStringSync());
-    Map<String, dynamic> transitions = new Map<String, dynamic>.fromIterable(
+    final Map<String, List<int>> transitions = new Map<String, List<int>>.fromIterable(
         original.keys,
         key: (String key) => key.replaceAll('/', ''),
         value: (String key) => original[key]);
 
-    Map<String, dynamic> summary = JSON.decode(file('${galleryDirectory.path}/build/transitions.timeline_summary.json').readAsStringSync());
+    final Map<String, dynamic> summary = JSON.decode(file('${galleryDirectory.path}/build/transitions.timeline_summary.json').readAsStringSync());
 
-    Map<String, dynamic> data = <String, dynamic>{
+    final Map<String, dynamic> data = <String, dynamic>{
       'transitions': transitions,
+      'missed_transition_count': _countMissedTransitions(transitions),
     };
     data.addAll(summary);
 
     return new TaskResult.success(data, benchmarkScoreKeys: <String>[
+      'missed_transition_count',
       'average_frame_build_time_millis',
       'worst_frame_build_time_millis',
       'missed_frame_build_budget_count',
+      'average_frame_rasterizer_time_millis',
+      'worst_frame_rasterizer_time_millis',
+      'missed_frame_rasterizer_budget_count',
     ]);
   }
+}
+
+int _countMissedTransitions(Map<String, List<int>> transitions) {
+  const int _kTransitionBudget = 100000; // µs
+  int count = 0;
+  transitions.forEach((String demoName, List<int> durations) {
+    final int longestDuration = durations.reduce(math.max);
+    if (longestDuration > _kTransitionBudget) {
+      print('$demoName missed transition time budget ($longestDuration µs > $_kTransitionBudget µs)');
+      count++;
+    }
+  });
+  return count;
 }

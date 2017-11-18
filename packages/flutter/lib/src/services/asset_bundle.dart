@@ -7,8 +7,9 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/http.dart' as http;
+import 'package:http/http.dart' as http;
 
+import 'http_client.dart';
 import 'platform_messages.dart';
 
 /// A collection of resources used by the application.
@@ -21,8 +22,18 @@ import 'platform_messages.dart';
 ///
 /// Applications have a [rootBundle], which contains the resources that were
 /// packaged with the application when it was built. To add resources to the
-/// [rootBundle] for your application, add them to the `assets` section of your
-/// `flutter.yaml` manifest.
+/// [rootBundle] for your application, add them to the `assets` subsection of
+/// the `flutter` section of your application's `pubspec.yaml` manifest.
+///
+/// For example:
+///
+/// ```yaml
+/// name: my_awesome_application
+/// flutter:
+///   assets:
+///    - images/hamilton.jpeg
+///    - images/lafayette.jpeg
+/// ```
 ///
 /// Rather than accessing the [rootBundle] global static directly, consider
 /// obtaining the [AssetBundle] for the current [BuildContext] using
@@ -40,14 +51,18 @@ import 'platform_messages.dart';
 ///  * [rootBundle]
 abstract class AssetBundle {
   /// Retrieve a binary resource from the asset bundle as a data stream.
+  ///
+  /// Throws an exception if the asset is not found.
   Future<ByteData> load(String key);
 
   /// Retrieve a string from the asset bundle.
   ///
-  /// If the `cache` argument is set to `false`, then the data will not be
+  /// Throws an exception if the asset is not found.
+  ///
+  /// If the `cache` argument is set to false, then the data will not be
   /// cached, and reading the data may bypass the cache. This is useful if the
   /// caller is going to be doing its own caching. (It might not be cached if
-  /// it's set to `true` either, that depends on the asset bundle
+  /// it's set to true either, that depends on the asset bundle
   /// implementation.)
   Future<String> loadString(String key, { bool cache: true });
 
@@ -56,7 +71,7 @@ abstract class AssetBundle {
   ///
   /// Implementations may cache the result, so a particular key should only be
   /// used with one parser for the lifetime of the asset bundle.
-  Future<dynamic> loadStructuredData(String key, Future<dynamic> parser(String value));
+  Future<T> loadStructuredData<T>(String key, Future<T> parser(String value));
 
   /// If this is a caching asset bundle, and the given key describes a cached
   /// asset, then evict the asset from the cache so that the next time it is
@@ -64,7 +79,7 @@ abstract class AssetBundle {
   void evict(String key) { }
 
   @override
-  String toString() => '$runtimeType@$hashCode()';
+  String toString() => '${describeIdentity(this)}()';
 }
 
 /// An [AssetBundle] that loads resources over the network.
@@ -74,24 +89,32 @@ abstract class AssetBundle {
 class NetworkAssetBundle extends AssetBundle {
   /// Creates an network asset bundle that resolves asset keys as URLs relative
   /// to the given base URL.
-  NetworkAssetBundle(Uri baseUrl) : _baseUrl = baseUrl;
+  NetworkAssetBundle(Uri baseUrl)
+    : _baseUrl = baseUrl,
+      _httpClient = createHttpClient();
 
   final Uri _baseUrl;
+  final http.Client _httpClient;
 
   String _urlFromKey(String key) => _baseUrl.resolve(key).toString();
 
   @override
   Future<ByteData> load(String key) async {
-    http.Response response = await http.get(_urlFromKey(key));
-    if (response.statusCode == 200)
-      return null;
+    final http.Response response = await _httpClient.get(_urlFromKey(key));
+    if (response.statusCode != 200)
+      throw new FlutterError('Unable to load asset: $key');
     return response.bodyBytes.buffer.asByteData();
   }
 
   @override
   Future<String> loadString(String key, { bool cache: true }) async {
-    http.Response response = await http.get(_urlFromKey(key));
-    return response.statusCode == 200 ? response.body : null;
+    final http.Response response = await _httpClient.get(_urlFromKey(key));
+    if (response.statusCode != 200)
+      throw new FlutterError(
+          'Unable to load asset: $key\n'
+          'HTTP status code: ${response.statusCode}'
+      );
+    return response.body;
   }
 
   /// Retrieve a string from the asset bundle, parse it with the given function,
@@ -100,7 +123,7 @@ class NetworkAssetBundle extends AssetBundle {
   /// The result is not cached. The parser is run each time the resource is
   /// fetched.
   @override
-  Future<dynamic> loadStructuredData(String key, Future<dynamic> parser(String value)) async {
+  Future<T> loadStructuredData<T>(String key, Future<T> parser(String value)) async {
     assert(key != null);
     assert(parser != null);
     return parser(await loadString(key));
@@ -110,7 +133,7 @@ class NetworkAssetBundle extends AssetBundle {
   // should implement evict().
 
   @override
-  String toString() => '$runtimeType@$hashCode($_baseUrl)';
+  String toString() => '${describeIdentity(this)}($_baseUrl)';
 }
 
 /// An [AssetBundle] that permanently caches string and structured resources
@@ -135,6 +158,8 @@ abstract class CachingAssetBundle extends AssetBundle {
 
   Future<String> _fetchString(String key) async {
     final ByteData data = await load(key);
+    if (data == null)
+      throw new FlutterError('Unable to load asset: $key');
     return UTF8.decode(data.buffer.asUint8List());
   }
 
@@ -149,14 +174,14 @@ abstract class CachingAssetBundle extends AssetBundle {
   /// subsequent calls will be a [SynchronousFuture], which resolves its
   /// callback synchronously.
   @override
-  Future<dynamic> loadStructuredData(String key, Future<dynamic> parser(String value)) {
+  Future<T> loadStructuredData<T>(String key, Future<T> parser(String value)) {
     assert(key != null);
     assert(parser != null);
     if (_structuredDataCache.containsKey(key))
       return _structuredDataCache[key];
     Completer<dynamic> completer;
     Future<dynamic> result;
-    loadString(key, cache: false).then(parser).then((dynamic value) {
+    loadString(key, cache: false).then<T>(parser).then<Null>((T value) {
       result = new SynchronousFuture<dynamic>(value);
       _structuredDataCache[key] = result;
       if (completer != null) {
@@ -188,9 +213,13 @@ abstract class CachingAssetBundle extends AssetBundle {
 /// An [AssetBundle] that loads resources using platform messages.
 class PlatformAssetBundle extends CachingAssetBundle {
   @override
-  Future<ByteData> load(String key) {
-    Uint8List encoded = UTF8.encoder.convert(key);
-    return PlatformMessages.sendBinary('flutter/assets', encoded.buffer.asByteData());
+  Future<ByteData> load(String key) async {
+    final Uint8List encoded = UTF8.encoder.convert(key);
+    final ByteData asset =
+        await BinaryMessages.send('flutter/assets', encoded.buffer.asByteData());
+    if (asset == null)
+      throw new FlutterError('Unable to load asset: $key');
+    return asset;
   }
 }
 
@@ -202,8 +231,18 @@ AssetBundle _initRootBundle() {
 ///
 /// The [rootBundle] contains the resources that were packaged with the
 /// application when it was built. To add resources to the [rootBundle] for your
-/// application, add them to the `assets` section of your `flutter.yaml`
-/// manifest.
+/// application, add them to the `assets` subsection of the `flutter` section of
+/// your application's `pubspec.yaml` manifest.
+///
+/// For example:
+///
+/// ```yaml
+/// name: my_awesome_application
+/// flutter:
+///   assets:
+///    - images/hamilton.jpeg
+///    - images/lafayette.jpeg
+/// ```
 ///
 /// Rather than using [rootBundle] directly, consider obtaining the
 /// [AssetBundle] for the current [BuildContext] using [DefaultAssetBundle.of].

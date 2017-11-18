@@ -6,9 +6,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/painting.dart';
 
 void main() {
-  test("BorderSide control test", () {
-    BorderSide side1 = new BorderSide();
-    BorderSide side2 = side1.copyWith(
+  test('BorderSide control test', () {
+    final BorderSide side1 = const BorderSide();
+    final BorderSide side2 = side1.copyWith(
       color: const Color(0xFF00FFFF),
       width: 2.0,
       style: BorderStyle.solid,
@@ -29,7 +29,7 @@ void main() {
       style: BorderStyle.solid,
     )));
 
-    BorderSide side3 = side2.copyWith(style: BorderStyle.none);
+    final BorderSide side3 = side2.copyWith(style: BorderStyle.none);
     BorderSide interpolated = BorderSide.lerp(side2, side3, 0.2);
     expect(interpolated.style, equals(BorderStyle.solid));
     expect(interpolated.color, equals(side2.color.withOpacity(0.8)));
@@ -39,10 +39,22 @@ void main() {
     expect(interpolated.color, equals(side2.color.withOpacity(0.2)));
   });
 
-  test("Border control test", () {
-    Border border1 = new Border.all(width: 4.0);
-    Border border2 = Border.lerp(null, border1, 0.25);
-    Border border3 = Border.lerp(border1, null, 0.25);
+  test('BorderSide toString test', () {
+    final BorderSide side1 = const BorderSide();
+    final BorderSide side2 = side1.copyWith(
+      color: const Color(0xFF00FFFF),
+      width: 2.0,
+      style: BorderStyle.solid,
+    );
+
+    expect(side1.toString(), equals('BorderSide(Color(0xff000000), 1.0, BorderStyle.solid)'));
+    expect(side2.toString(), equals('BorderSide(Color(0xff00ffff), 2.0, BorderStyle.solid)'));
+  });
+
+  test('Border control test', () {
+    final Border border1 = new Border.all(width: 4.0);
+    final Border border2 = Border.lerp(null, border1, 0.25);
+    final Border border3 = Border.lerp(border1, null, 0.25);
 
     expect(border1, hasOneLineDescription);
     expect(border1.hashCode, isNot(equals(border2.hashCode)));
@@ -50,23 +62,43 @@ void main() {
     expect(border2.top.width, equals(1.0));
     expect(border3.bottom.width, equals(3.0));
 
-    Border border4 = Border.lerp(border2, border3, 0.5);
+    final Border border4 = Border.lerp(border2, border3, 0.5);
     expect(border4.left.width, equals(2.0));
   });
 
-  test("BoxShadow control test", () {
-    BoxShadow shadow1 = new BoxShadow(blurRadius: 4.0);
-    BoxShadow shadow2 = BoxShadow.lerp(null, shadow1, 0.25);
-    BoxShadow shadow3 = BoxShadow.lerp(shadow1, null, 0.25);
+  test('Border toString test', () {
+    expect(
+      new Border.all(width: 4.0).toString(),
+      equals(
+        'Border.all(BorderSide(Color(0xff000000), 4.0, BorderStyle.solid))',
+      ),
+    );
+    expect(
+      const Border(
+        top: const BorderSide(width: 3.0),
+        right: const BorderSide(width: 3.0),
+        bottom: const BorderSide(width: 3.0),
+        left: const BorderSide(width: 3.0),
+      ).toString(),
+      equals(
+        'Border.all(BorderSide(Color(0xff000000), 3.0, BorderStyle.solid))',
+      ),
+    );
+  });
+
+  test('BoxShadow control test', () {
+    final BoxShadow shadow1 = const BoxShadow(blurRadius: 4.0);
+    final BoxShadow shadow2 = BoxShadow.lerp(null, shadow1, 0.25);
+    final BoxShadow shadow3 = BoxShadow.lerp(shadow1, null, 0.25);
 
     expect(shadow1, hasOneLineDescription);
     expect(shadow1.hashCode, isNot(equals(shadow2.hashCode)));
-    expect(shadow1, equals(new BoxShadow(blurRadius: 4.0)));
+    expect(shadow1, equals(const BoxShadow(blurRadius: 4.0)));
 
     expect(shadow2.blurRadius, equals(1.0));
     expect(shadow3.blurRadius, equals(3.0));
 
-    BoxShadow shadow4 = BoxShadow.lerp(shadow2, shadow3, 0.5);
+    final BoxShadow shadow4 = BoxShadow.lerp(shadow2, shadow3, 0.5);
     expect(shadow4.blurRadius, equals(2.0));
 
     List<BoxShadow> shadowList = BoxShadow.lerpList(
@@ -75,5 +107,9 @@ void main() {
     shadowList = BoxShadow.lerpList(
         <BoxShadow>[shadow2], <BoxShadow>[shadow3, shadow1], 0.5);
     expect(shadowList, equals(<BoxShadow>[shadow4, shadow1.scale(0.5)]));
+  });
+
+  test('BoxShadow toString test', () {
+    expect(const BoxShadow(blurRadius: 4.0).toString(), equals('BoxShadow(Color(0xff000000), Offset(0.0, 0.0), 4.0, 0.0)'));
   });
 }

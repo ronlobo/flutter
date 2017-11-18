@@ -7,10 +7,10 @@ import 'dart:ui';
 import 'package:test/test.dart';
 
 void main() {
-  test("Should be able to build and layout a paragraph", () {
-    ParagraphBuilder builder = new ParagraphBuilder(new ParagraphStyle());
+  test('Should be able to build and layout a paragraph', () {
+    final ParagraphBuilder builder = new ParagraphBuilder(new ParagraphStyle());
     builder.addText('Hello');
-    Paragraph paragraph = builder.build();
+    final Paragraph paragraph = builder.build();
     expect(paragraph, isNotNull);
 
     paragraph.layout(new ParagraphConstraints(width: 800.0));

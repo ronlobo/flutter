@@ -132,7 +132,7 @@ class LicenseEntryWithLineBreaks extends LicenseEntry {
     int currentLineIndent = 0;
     int currentParagraphIndentation;
     _LicenseEntryWithLineBreaksParserState state = _LicenseEntryWithLineBreaksParserState.beforeParagraph;
-    List<String> lines = <String>[];
+    final List<String> lines = <String>[];
 
     void addLine() {
       assert(lineStart < currentPosition);
@@ -157,6 +157,11 @@ class LicenseEntryWithLineBreaks extends LicenseEntry {
             case ' ':
               lineStart = currentPosition + 1;
               currentLineIndent += 1;
+              state = _LicenseEntryWithLineBreaksParserState.beforeParagraph;
+              break;
+            case '\t':
+              lineStart = currentPosition + 1;
+              currentLineIndent += 8;
               state = _LicenseEntryWithLineBreaksParserState.beforeParagraph;
               break;
             case '\n':
@@ -251,6 +256,14 @@ class LicenseEntryWithLineBreaks extends LicenseEntry {
 /// The LICENSE files in each package can either consist of a single license, or
 /// can be in the format described above. In the latter case, each component
 /// license and list of package names is merged independently.
+///
+/// See also:
+///
+///  * [showAboutDialog], which shows a Material-style dialog with information
+///    about the application, including a button that shows a [LicensePage] that
+///    uses this API to select licenses to show.
+///  * [AboutListTile], which is a widget that can be added to a [Drawer]. When
+///    tapped it calls [showAboutDialog].
 class LicenseRegistry {
   LicenseRegistry._();
 

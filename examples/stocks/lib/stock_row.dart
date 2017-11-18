@@ -4,18 +4,18 @@
 
 import 'package:flutter/material.dart';
 
-import 'stock_data.dart';
 import 'stock_arrow.dart';
+import 'stock_data.dart';
 
 typedef void StockRowActionCallback(Stock stock);
 
 class StockRow extends StatelessWidget {
   StockRow({
-    Stock stock,
+    this.stock,
     this.onPressed,
     this.onDoubleTap,
     this.onLongPressed
-  }) : this.stock = stock, super(key: new ObjectKey(stock));
+  }) : super(key: new ObjectKey(stock));
 
   final Stock stock;
   final StockRowActionCallback onPressed;
@@ -30,10 +30,10 @@ class StockRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final String lastSale = "\$${stock.lastSale.toStringAsFixed(2)}";
-    String changeInPrice = "${stock.percentChange.toStringAsFixed(2)}%";
+    final String lastSale = '\$${stock.lastSale.toStringAsFixed(2)}';
+    String changeInPrice = '${stock.percentChange.toStringAsFixed(2)}%';
     if (stock.percentChange > 0)
-      changeInPrice = "+" + changeInPrice;
+      changeInPrice = '+' + changeInPrice;
     return new InkWell(
       onTap: _getHandler(onPressed),
       onDoubleTap: _getHandler(onDoubleTap),
@@ -54,22 +54,22 @@ class StockRow extends StatelessWidget {
                 child: new StockArrow(percentChange: stock.percentChange)
               )
             ),
-            new Flexible(
+            new Expanded(
               child: new Row(
                 children: <Widget>[
-                  new Flexible(
+                  new Expanded(
                     flex: 2,
                     child: new Text(
                       stock.symbol
                     )
                   ),
-                  new Flexible(
+                  new Expanded(
                     child: new Text(
                       lastSale,
                       textAlign: TextAlign.right
                     )
                   ),
-                  new Flexible(
+                  new Expanded(
                     child: new Text(
                       changeInPrice,
                       textAlign: TextAlign.right

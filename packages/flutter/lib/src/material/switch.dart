@@ -2,11 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
-import 'package:meta/meta.dart';
 
 import 'colors.dart';
 import 'constants.dart';
@@ -28,9 +28,11 @@ import 'toggleable.dart';
 ///
 /// See also:
 ///
-///  * [CheckBox]
-///  * [Radio]
-///  * [Slider]
+///  * [SwitchListTile], which combines this widget with a [ListTile] so that
+///    you can give the switch a label.
+///  * [Checkbox], another widget with similar semantics.
+///  * [Radio], for selecting among a set of explicit values.
+///  * [Slider], for selecting a value in a range.
 ///  * <https://material.google.com/components/selection-controls.html#selection-controls-switch>
 class Switch extends StatefulWidget {
   /// Creates a material design switch.
@@ -40,21 +42,28 @@ class Switch extends StatefulWidget {
   /// that use a switch will listen for the [onChanged] callback and rebuild the
   /// switch with a new [value] to update the visual appearance of the switch.
   ///
-  /// * [value] determines this switch is on or off.
-  /// * [onChanged] is called when the user toggles with switch on or off.
-  Switch({
+  /// The following arguments are required:
+  ///
+  /// * [value] determines whether this switch is on or off.
+  /// * [onChanged] is called when the user toggles the switch on or off.
+  const Switch({
     Key key,
     @required this.value,
     @required this.onChanged,
     this.activeColor,
+    this.activeTrackColor,
+    this.inactiveThumbColor,
+    this.inactiveTrackColor,
     this.activeThumbImage,
     this.inactiveThumbImage
   }) : super(key: key);
 
   /// Whether this switch is on or off.
+  ///
+  /// This property must not be null.
   final bool value;
 
-  /// Called when the user toggles with switch on or off.
+  /// Called when the user toggles the switch on or off.
   ///
   /// The switch passes the new value to the callback but does not actually
   /// change state until the parent widget rebuilds the switch with the new
@@ -62,7 +71,7 @@ class Switch extends StatefulWidget {
   ///
   /// If null, the switch will be displayed as disabled.
   ///
-  /// The callback provided to onChanged should update the state of the parent
+  /// The callback provided to [onChanged] should update the state of the parent
   /// [StatefulWidget] using the [State.setState] method, so that the parent
   /// gets rebuilt; for example:
   ///
@@ -74,7 +83,7 @@ class Switch extends StatefulWidget {
   ///       _giveVerse = newValue;
   ///     });
   ///   },
-  /// ),
+  /// )
   /// ```
   final ValueChanged<bool> onChanged;
 
@@ -82,6 +91,21 @@ class Switch extends StatefulWidget {
   ///
   /// Defaults to accent color of the current [Theme].
   final Color activeColor;
+
+  /// The color to use on the track when this switch is on.
+  ///
+  /// Defaults to accent color of the current [Theme] with the opacity set at 50%.
+  final Color activeTrackColor;
+
+  /// The color to use on the thumb when this switch is off.
+  ///
+  /// Defaults to the colors described in the Material design specification.
+  final Color inactiveThumbColor;
+
+  /// The color to use on the track when this switch is off.
+  ///
+  /// Defaults to the colors described in the Material design specification.
+  final Color inactiveTrackColor;
 
   /// An image to use on the thumb of this switch when the switch is on.
   final ImageProvider activeThumbImage;
@@ -93,11 +117,10 @@ class Switch extends StatefulWidget {
   _SwitchState createState() => new _SwitchState();
 
   @override
-  void debugFillDescription(List<String> description) {
-    super.debugFillDescription(description);
-    description.add('value: ${value ? "on" : "off"}');
-    if (onChanged == null)
-      description.add('disabled');
+  void debugFillProperties(DiagnosticPropertiesBuilder description) {
+    super.debugFillProperties(description);
+    description.add(new FlagProperty('value', value: value, ifTrue: 'on', ifFalse: 'off', showName: true));
+    description.add(new ObjectFlagProperty<ValueChanged<bool>>('onChanged', onChanged, ifNull: 'disabled'));
   }
 }
 
@@ -108,36 +131,36 @@ class _SwitchState extends State<Switch> with TickerProviderStateMixin {
     final ThemeData themeData = Theme.of(context);
     final bool isDark = themeData.brightness == Brightness.dark;
 
-    final Color activeThumbColor = config.activeColor ?? themeData.accentColor;
-    final Color activeTrackColor = activeThumbColor.withAlpha(0x80);
+    final Color activeThumbColor = widget.activeColor ?? themeData.accentColor;
+    final Color activeTrackColor = widget.activeTrackColor ?? activeThumbColor.withAlpha(0x80);
 
     Color inactiveThumbColor;
     Color inactiveTrackColor;
-    if (config.onChanged != null) {
-      inactiveThumbColor = isDark ? Colors.grey[400] : Colors.grey[50];
-      inactiveTrackColor = isDark ? Colors.white30 : Colors.black26;
+    if (widget.onChanged != null) {
+      inactiveThumbColor = widget.inactiveThumbColor ?? (isDark ? Colors.grey.shade400 : Colors.grey.shade50);
+      inactiveTrackColor = widget.inactiveTrackColor ?? (isDark ? Colors.white30 : Colors.black26);
     } else {
-      inactiveThumbColor = isDark ? Colors.grey[800] : Colors.grey[400];
-      inactiveTrackColor = isDark ? Colors.white10 : Colors.black12;
+      inactiveThumbColor = widget.inactiveThumbColor ?? (isDark ? Colors.grey.shade800 : Colors.grey.shade400);
+      inactiveTrackColor = widget.inactiveTrackColor ?? (isDark ? Colors.white10 : Colors.black12);
     }
 
     return new _SwitchRenderObjectWidget(
-      value: config.value,
+      value: widget.value,
       activeColor: activeThumbColor,
       inactiveColor: inactiveThumbColor,
-      activeThumbImage: config.activeThumbImage,
-      inactiveThumbImage: config.inactiveThumbImage,
+      activeThumbImage: widget.activeThumbImage,
+      inactiveThumbImage: widget.inactiveThumbImage,
       activeTrackColor: activeTrackColor,
       inactiveTrackColor: inactiveTrackColor,
       configuration: createLocalImageConfiguration(context),
-      onChanged: config.onChanged,
+      onChanged: widget.onChanged,
       vsync: this,
     );
   }
 }
 
 class _SwitchRenderObjectWidget extends LeafRenderObjectWidget {
-  _SwitchRenderObjectWidget({
+  const _SwitchRenderObjectWidget({
     Key key,
     this.value,
     this.activeColor,
@@ -163,18 +186,21 @@ class _SwitchRenderObjectWidget extends LeafRenderObjectWidget {
   final TickerProvider vsync;
 
   @override
-  _RenderSwitch createRenderObject(BuildContext context) => new _RenderSwitch(
-    value: value,
-    activeColor: activeColor,
-    inactiveColor: inactiveColor,
-    activeThumbImage: activeThumbImage,
-    inactiveThumbImage: inactiveThumbImage,
-    activeTrackColor: activeTrackColor,
-    inactiveTrackColor: inactiveTrackColor,
-    configuration: configuration,
-    onChanged: onChanged,
-    vsync: vsync,
-  );
+  _RenderSwitch createRenderObject(BuildContext context) {
+    return new _RenderSwitch(
+      value: value,
+      activeColor: activeColor,
+      inactiveColor: inactiveColor,
+      activeThumbImage: activeThumbImage,
+      inactiveThumbImage: inactiveThumbImage,
+      activeTrackColor: activeTrackColor,
+      inactiveTrackColor: inactiveTrackColor,
+      configuration: configuration,
+      onChanged: onChanged,
+      textDirection: Directionality.of(context),
+      vsync: vsync,
+    );
+  }
 
   @override
   void updateRenderObject(BuildContext context, _RenderSwitch renderObject) {
@@ -188,6 +214,7 @@ class _SwitchRenderObjectWidget extends LeafRenderObjectWidget {
       ..inactiveTrackColor = inactiveTrackColor
       ..configuration = configuration
       ..onChanged = onChanged
+      ..textDirection = Directionality.of(context)
       ..vsync = vsync;
   }
 }
@@ -209,13 +236,16 @@ class _RenderSwitch extends RenderToggleable {
     Color activeTrackColor,
     Color inactiveTrackColor,
     ImageConfiguration configuration,
+    @required TextDirection textDirection,
     ValueChanged<bool> onChanged,
     @required TickerProvider vsync,
-  }) : _activeThumbImage = activeThumbImage,
+  }) : assert(textDirection != null),
+       _activeThumbImage = activeThumbImage,
        _inactiveThumbImage = inactiveThumbImage,
        _activeTrackColor = activeTrackColor,
        _inactiveTrackColor = inactiveTrackColor,
        _configuration = configuration,
+       _textDirection = textDirection,
        super(
          value: value,
          activeColor: activeColor,
@@ -270,11 +300,21 @@ class _RenderSwitch extends RenderToggleable {
 
   ImageConfiguration get configuration => _configuration;
   ImageConfiguration _configuration;
-  set configuration (ImageConfiguration value) {
+  set configuration(ImageConfiguration value) {
     assert(value != null);
     if (value == _configuration)
       return;
     _configuration = value;
+    markNeedsPaint();
+  }
+
+  TextDirection get textDirection => _textDirection;
+  TextDirection _textDirection;
+  set textDirection(TextDirection value) {
+    assert(value != null);
+    if (_textDirection == value)
+      return;
+    _textDirection = value;
     markNeedsPaint();
   }
 
@@ -290,16 +330,24 @@ class _RenderSwitch extends RenderToggleable {
   HorizontalDragGestureRecognizer _drag;
 
   void _handleDragStart(DragStartDetails details) {
-    if (onChanged != null)
+    if (isInteractive)
       reactionController.forward();
   }
 
   void _handleDragUpdate(DragUpdateDetails details) {
-    if (onChanged != null) {
+    if (isInteractive) {
       position
         ..curve = null
         ..reverseCurve = null;
-      positionController.value += details.primaryDelta / _trackInnerLength;
+      final double delta = details.primaryDelta / _trackInnerLength;
+      switch (textDirection) {
+        case TextDirection.rtl:
+          positionController.value -= delta;
+          break;
+        case TextDirection.ltr:
+          positionController.value += delta;
+          break;
+      }
     }
   }
 
@@ -325,8 +373,8 @@ class _RenderSwitch extends RenderToggleable {
 
   BoxDecoration _createDefaultThumbDecoration(Color color, ImageProvider image) {
     return new BoxDecoration(
-      backgroundColor: color,
-      backgroundImage: image == null ? null : new BackgroundImage(image: image),
+      color: color,
+      image: image == null ? null : new DecorationImage(image: image),
       shape: BoxShape.circle,
       boxShadow: kElevationToShadow[1]
     );
@@ -348,9 +396,19 @@ class _RenderSwitch extends RenderToggleable {
     final Canvas canvas = context.canvas;
 
     final bool isActive = onChanged != null;
-    final double currentPosition = position.value;
+    final double currentValue = position.value;
 
-    final Color trackColor = isActive ? Color.lerp(inactiveTrackColor, activeTrackColor, currentPosition) : inactiveTrackColor;
+    double visualPosition;
+    switch (textDirection) {
+      case TextDirection.rtl:
+        visualPosition = 1.0 - currentValue;
+        break;
+      case TextDirection.ltr:
+        visualPosition = currentValue;
+        break;
+    }
+
+    final Color trackColor = isActive ? Color.lerp(inactiveTrackColor, activeTrackColor, currentValue) : inactiveTrackColor;
 
     // Paint the track
     final Paint paint = new Paint()
@@ -365,8 +423,8 @@ class _RenderSwitch extends RenderToggleable {
     final RRect trackRRect = new RRect.fromRectAndRadius(trackRect, const Radius.circular(_kTrackRadius));
     canvas.drawRRect(trackRRect, paint);
 
-    final Point thumbPosition = new Point(
-      kRadialReactionRadius + currentPosition * _trackInnerLength,
+    final Offset thumbPosition = new Offset(
+      kRadialReactionRadius + visualPosition * _trackInnerLength,
       size.height / 2.0
     );
 
@@ -375,8 +433,8 @@ class _RenderSwitch extends RenderToggleable {
     try {
       _isPainting = true;
       BoxPainter thumbPainter;
-      final Color thumbColor = isActive ? Color.lerp(inactiveColor, activeColor, currentPosition) : inactiveColor;
-      final ImageProvider thumbImage = isActive ? (currentPosition < 0.5 ? inactiveThumbImage : activeThumbImage) : inactiveThumbImage;
+      final Color thumbColor = isActive ? Color.lerp(inactiveColor, activeColor, currentValue) : inactiveColor;
+      final ImageProvider thumbImage = isActive ? (currentValue < 0.5 ? inactiveThumbImage : activeThumbImage) : inactiveThumbImage;
       if (_cachedThumbPainter == null || thumbColor != _cachedThumbColor || thumbImage != _cachedThumbImage) {
         _cachedThumbColor = thumbColor;
         _cachedThumbImage = thumbImage;
@@ -385,11 +443,11 @@ class _RenderSwitch extends RenderToggleable {
       thumbPainter = _cachedThumbPainter;
 
       // The thumb contracts slightly during the animation
-      final double inset = 1.0 - (currentPosition - 0.5).abs() * 2.0;
+      final double inset = 1.0 - (currentValue - 0.5).abs() * 2.0;
       final double radius = _kThumbRadius - inset;
       thumbPainter.paint(
         canvas,
-        thumbPosition.toOffset() + offset - new Offset(radius, radius),
+        thumbPosition + offset - new Offset(radius, radius),
         configuration.copyWith(size: new Size.fromRadius(radius))
       );
     } finally {

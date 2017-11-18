@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
-import 'package:meta/meta.dart';
 
 import 'button.dart';
 import 'theme.dart';
@@ -21,39 +21,52 @@ import 'theme.dart';
 /// corners. Avoid using flat buttons where they would blend in with other
 /// content, for example in the middle of lists.
 ///
-/// If the [onPressed] callback is not specified or null, then the button will
-/// be disabled, will not react to touch, and will be colored as specified by
+/// Material design flat buttons have an all-caps label, some internal padding,
+/// and some defined dimensions. To have a part of your application be
+/// interactive, with ink splashes, without also committing to these stylistic
+/// choices, consider using [InkWell] instead.
+///
+/// If the [onPressed] callback is null, then the button will be disabled,
+/// will not react to touch, and will be colored as specified by
 /// the [disabledColor] property instead of the [color] property. If you are
 /// trying to change the button's [color] and it is not having any effect, check
 /// that you are passing a non-null [onPressed] handler.
 ///
 /// Requires one of its ancestors to be a [Material] widget.
 ///
+/// Flat buttons will expand to fit the child widget, if necessary.
+///
 /// See also:
 ///
-///  * [RaisedButton]
-///  * [DropdownButton]
+///  * [RaisedButton], which is a button that hovers above the containing
+///    material.
+///  * [DropdownButton], which offers the user a choice of a number of options.
+///  * [SimpleDialogOption], which is used in [SimpleDialog]s.
+///  * [IconButton], to create buttons that just contain icons.
+///  * [InkWell], which implements the ink splash part of a flat button.
 ///  * <https://material.google.com/components/buttons.html>
 class FlatButton extends StatelessWidget {
   /// Creates a flat button.
   ///
   /// The [child] argument is required and is typically a [Text] widget in all
   /// caps.
-  FlatButton({
+  const FlatButton({
     Key key,
     @required this.onPressed,
     this.textColor,
     this.disabledTextColor,
     this.color,
+    this.highlightColor,
+    this.splashColor,
     this.disabledColor,
     this.textTheme,
     this.colorBrightness,
-    this.child
-  }) : super(key: key) {
-    assert(child != null);
-  }
+    @required this.child
+  }) : assert(child != null),
+       super(key: key);
 
-  /// The callback that is called when the button is tapped or otherwise activated.
+  /// The callback that is called when the button is tapped or otherwise
+  /// activated.
   ///
   /// If this is set to null, the button will be disabled.
   final VoidCallback onPressed;
@@ -68,23 +81,51 @@ class FlatButton extends StatelessWidget {
   /// Defaults to a color derived from the [Theme].
   final Color disabledTextColor;
 
-  /// The color of the button, as printed on the [Material]. Defaults to null,
-  /// meaning that the color is automatically derived from the [Theme].
+  /// The primary color of the button, as printed on the [Material], while it
+  /// is in its default (unpressed, enabled) state.
+  ///
+  /// Defaults to null, meaning that the color is automatically derived from the
+  /// [Theme].
   ///
   /// Typically, a material design color will be used, as follows:
   ///
   /// ```dart
   ///  new FlatButton(
-  ///    color: Colors.blue[500],
+  ///    color: Colors.blue,
   ///    onPressed: _handleTap,
   ///    child: new Text('DEMO'),
   ///  ),
   /// ```
   final Color color;
 
-  /// The color of the button when the button is disabled. Buttons are disabled
-  /// by default. To enable a button, set its [onPressed] property to a non-null
-  /// value.
+  /// The primary color of the button when the button is in the down (pressed)
+  /// state.
+  ///
+  /// The splash is represented as a circular overlay that appears above the
+  /// [highlightColor] overlay. The splash overlay has a center point that
+  /// matches the hit point of the user touch event. The splash overlay will
+  /// expand to fill the button area if the touch is held for long enough time.
+  /// If the splash color has transparency then the highlight and button color
+  /// will show through.
+  ///
+  /// Defaults to the Theme's splash color, [ThemeData.splashColor].
+  final Color splashColor;
+
+  /// The secondary color of the button when the button is in the down (pressed)
+  /// state.
+  ///
+  /// The highlight color is represented as a solid color that is overlaid over
+  /// the button color (if any). If the highlight color has transparency, the
+  /// button color will show through. The highlight fades in quickly as the
+  /// button is held down.
+  ///
+  /// Defaults to the Theme's highlight color, [ThemeData.highlightColor].
+  final Color highlightColor;
+
+  /// The color of the button when the button is disabled.
+  ///
+  /// Buttons are disabled by default. To enable a button, set its [onPressed]
+  /// property to a non-null value.
   final Color disabledColor;
 
   /// The color scheme to use for this button's text.
@@ -102,8 +143,10 @@ class FlatButton extends StatelessWidget {
   /// Typically a [Text] widget in all caps.
   final Widget child;
 
-  /// Whether the button is enabled or disabled. Buttons are disabled by default. To
-  /// enable a button, set its [onPressed] property to a non-null value.
+  /// Whether the button is enabled or disabled.
+  ///
+  /// Buttons are disabled by default. To enable a button, set its [onPressed]
+  /// property to a non-null value.
   bool get enabled => onPressed != null;
 
   @override
@@ -112,6 +155,8 @@ class FlatButton extends StatelessWidget {
       onPressed: onPressed,
       textColor: enabled ? textColor : disabledTextColor,
       color: enabled ? color : disabledColor,
+      highlightColor: highlightColor ?? Theme.of(context).highlightColor,
+      splashColor: splashColor ?? Theme.of(context).splashColor,
       textTheme: textTheme,
       colorBrightness: colorBrightness,
       child: child

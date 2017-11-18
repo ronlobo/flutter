@@ -2,10 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// Thanks for checking out Flutter!
+// Like what you see? Tweet us @flutterio
+
 import 'package:flutter/widgets.dart';
 
 import 'gallery/app.dart';
 
 void main() {
-  runApp(new GalleryApp());
+  runApp(const GalleryApp());
 }

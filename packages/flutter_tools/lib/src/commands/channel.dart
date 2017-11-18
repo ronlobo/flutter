@@ -4,6 +4,7 @@
 
 import 'dart:async';
 
+import '../base/common.dart';
 import '../base/process.dart';
 import '../cache.dart';
 import '../globals.dart';
@@ -20,44 +21,49 @@ class ChannelCommand extends FlutterCommand {
   String get invocation => '${runner.executableName} $name [<channel-name>]';
 
   @override
-  Future<int> runCommand() async {
+  Future<Null> runCommand() {
     switch (argResults.rest.length) {
       case 0:
-        return await _listChannels();
+        return _listChannels();
       case 1:
-        return await _switchChannel(argResults.rest[0]);
+        return _switchChannel(argResults.rest[0]);
       default:
-        printStatus('Too many arguments.');
-        printStatus(usage);
-        return 2;
+        throw new ToolExit('Too many arguments.\n$usage');
     }
   }
 
-  Future<int> _listChannels() async {
-    String currentBranch = runSync(
+  Future<Null> _listChannels() async {
+    final String currentBranch = runSync(
         <String>['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
         workingDirectory: Cache.flutterRoot);
 
     printStatus('Flutter channels:');
-    return runCommandAndStreamOutput(
+    final int result = await runCommandAndStreamOutput(
       <String>['git', 'branch', '-r'],
       workingDirectory: Cache.flutterRoot,
       mapFunction: (String line) {
-        List<String> split = line.split('/');
-        if (split.length < 2) return null;
-        String branchName = split[1];
-        if (branchName.startsWith('HEAD')) return null;
-        if (branchName == currentBranch) return '* $branchName';
+        final List<String> split = line.split('/');
+        if (split.length < 2)
+          return null;
+        final String branchName = split[1];
+        if (branchName.startsWith('HEAD'))
+          return null;
+        if (branchName == currentBranch)
+          return '* $branchName';
         return '  $branchName';
       },
     );
+    if (result != 0)
+      throwToolExit('List channels failed: $result', exitCode: result);
   }
 
-  Future<int> _switchChannel(String branchName) {
+  Future<Null> _switchChannel(String branchName) async {
     printStatus('Switching to flutter channel named $branchName');
-    return runCommandAndStreamOutput(
+    final int result = await runCommandAndStreamOutput(
       <String>['git', 'checkout', branchName],
       workingDirectory: Cache.flutterRoot,
     );
+    if (result != 0)
+      throwToolExit('Switch channel failed: $result', exitCode: result);
   }
 }

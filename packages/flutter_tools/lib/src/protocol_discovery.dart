@@ -4,54 +4,92 @@
 
 import 'dart:async';
 
+import 'base/common.dart';
+import 'base/port_scanner.dart';
 import 'device.dart';
+import 'globals.dart';
 
-/// Discover service protocol ports on devices.
+/// Discovers a specific service protocol on a device, and forwards the service
+/// protocol device port to the host.
 class ProtocolDiscovery {
-  /// [logReader] - a [DeviceLogReader] to look for service messages in.
-  ProtocolDiscovery(DeviceLogReader logReader, String serviceName)
-      : _logReader = logReader, _serviceName = serviceName {
-    assert(_logReader != null);
-    _subscription = _logReader.logLines.listen(_onLine);
+  ProtocolDiscovery._(
+    this.logReader,
+    this.serviceName, {
+    this.portForwarder,
+    this.hostPort,
+    this.defaultHostPort,
+  }) : assert(logReader != null),
+       assert(portForwarder == null || defaultHostPort != null),
+       _prefix = '$serviceName listening on ' {
+    _deviceLogSubscription = logReader.logLines.listen(_handleLine);
   }
 
-  static const String kObservatoryService = 'Observatory';
-  static const String kDiagnosticService = 'Diagnostic server';
-
-  final DeviceLogReader _logReader;
-  final String _serviceName;
-
-  Completer<int> _completer = new Completer<int>();
-  StreamSubscription<String> _subscription;
-
-  /// The [Future] returned by this function will complete when the next service
-  /// protocol port is found.
-  Future<int> nextPort() => _completer.future;
-
-  void cancel() {
-    _subscription.cancel();
+  factory ProtocolDiscovery.observatory(
+    DeviceLogReader logReader, {
+    DevicePortForwarder portForwarder,
+    int hostPort,
+  }) {
+    const String kObservatoryService = 'Observatory';
+    return new ProtocolDiscovery._(
+      logReader, kObservatoryService,
+      portForwarder: portForwarder,
+      hostPort: hostPort,
+      defaultHostPort: kDefaultObservatoryPort,
+    );
   }
 
-  void _onLine(String line) {
-    int portNumber = 0;
-    if (line.contains('$_serviceName listening on http://')) {
+  final DeviceLogReader logReader;
+  final String serviceName;
+  final DevicePortForwarder portForwarder;
+  final int hostPort;
+  final int defaultHostPort;
+
+  final String _prefix;
+  final Completer<Uri> _completer = new Completer<Uri>();
+
+  StreamSubscription<String> _deviceLogSubscription;
+
+  /// The discovered service URI.
+  Future<Uri> get uri => _completer.future;
+
+  Future<Null> cancel() => _stopScrapingLogs();
+
+  Future<Null> _stopScrapingLogs() async {
+    await _deviceLogSubscription?.cancel();
+    _deviceLogSubscription = null;
+  }
+
+  void _handleLine(String line) {
+    Uri uri;
+    final int index = line.indexOf(_prefix + 'http://');
+    if (index >= 0) {
       try {
-        RegExp portExp = new RegExp(r"\d+.\d+.\d+.\d+:(\d+)");
-        String port = portExp.firstMatch(line).group(1);
-        portNumber = int.parse(port);
-      } catch (_) {
-        // Ignore errors.
+        uri = Uri.parse(line.substring(index + _prefix.length));
+      } catch (error) {
+        _stopScrapingLogs();
+        _completer.completeError(error);
       }
     }
-    if (portNumber != 0)
-      _located(portNumber);
+
+    if (uri != null) {
+      assert(!_completer.isCompleted);
+      _stopScrapingLogs();
+      _completer.complete(_forwardPort(uri));
+    }
   }
 
-  void _located(int port) {
-    assert(_completer != null);
-    assert(!_completer.isCompleted);
+  Future<Uri> _forwardPort(Uri deviceUri) async {
+    printTrace('$serviceName URL on device: $deviceUri');
+    Uri hostUri = deviceUri;
 
-    _completer.complete(port);
-    _completer = new Completer<int>();
+    if (portForwarder != null) {
+      final int devicePort = deviceUri.port;
+      int hostPort = this.hostPort ?? await portScanner.findPreferredPort(defaultHostPort);
+      hostPort = await portForwarder.forward(devicePort, hostPort: hostPort);
+      printTrace('Forwarded host port $hostPort to device port $devicePort for $serviceName');
+      hostUri = deviceUri.replace(port: hostPort);
+    }
+
+    return hostUri;
   }
 }

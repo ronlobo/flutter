@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 import 'dart:async';
-import 'dart:ui' show Point, Offset;
+import 'dart:ui' show Offset;
 
 import 'arena.dart';
 import 'binding.dart';
@@ -41,7 +41,7 @@ class _TapTracker {
 
   final int pointer;
   final GestureArenaEntry entry;
-  final Point _initialPosition;
+  final Offset _initialPosition;
 
   bool _isTrackingPointer = false;
 
@@ -60,7 +60,7 @@ class _TapTracker {
   }
 
   bool isWithinTolerance(PointerEvent event, double tolerance) {
-    Offset offset = event.position - _initialPosition;
+    final Offset offset = event.position - _initialPosition;
     return offset.distance <= tolerance;
   }
 }
@@ -68,6 +68,9 @@ class _TapTracker {
 /// Recognizes when the user has tapped the screen at the same location twice in
 /// quick succession.
 class DoubleTapGestureRecognizer extends GestureRecognizer {
+  /// Create a gesture recognizer for double taps.
+  DoubleTapGestureRecognizer({ Object debugOwner }) : super(debugOwner: debugOwner);
+
   // Implementation notes:
   // The double tap recognizer can be in one of four states. There's no
   // explicit enum for the states, because they are already captured by
@@ -94,7 +97,7 @@ class DoubleTapGestureRecognizer extends GestureRecognizer {
 
   Timer _doubleTapTimer;
   _TapTracker _firstTap;
-  final Map<int, _TapTracker> _trackers = new Map<int, _TapTracker>();
+  final Map<int, _TapTracker> _trackers = <int, _TapTracker>{};
 
   @override
   void addPointer(PointerEvent event) {
@@ -103,7 +106,7 @@ class DoubleTapGestureRecognizer extends GestureRecognizer {
         !_firstTap.isWithinTolerance(event, kDoubleTapSlop))
       return;
     _stopDoubleTapTimer();
-    _TapTracker tracker = new _TapTracker(
+    final _TapTracker tracker = new _TapTracker(
       event: event,
       entry: GestureBinding.instance.gestureArena.add(event.pointer, this)
     );
@@ -112,7 +115,7 @@ class DoubleTapGestureRecognizer extends GestureRecognizer {
   }
 
   void _handleEvent(PointerEvent event) {
-    _TapTracker tracker = _trackers[event.pointer];
+    final _TapTracker tracker = _trackers[event.pointer];
     assert(tracker != null);
     if (event is PointerUpEvent) {
       if (_firstTap == null)
@@ -166,7 +169,7 @@ class DoubleTapGestureRecognizer extends GestureRecognizer {
     if (_firstTap != null) {
       // Note, order is important below in order for the resolve -> reject logic
       // to work properly.
-      _TapTracker tracker = _firstTap;
+      final _TapTracker tracker = _firstTap;
       _firstTap = null;
       _reject(tracker);
       GestureBinding.instance.gestureArena.release(tracker.pointer);
@@ -191,14 +194,12 @@ class DoubleTapGestureRecognizer extends GestureRecognizer {
     _freezeTracker(tracker);
     _trackers.remove(tracker.pointer);
     if (onDoubleTap != null)
-      invokeCallback/*<Null>*/('onDoubleTap', onDoubleTap);
+      invokeCallback<Null>('onDoubleTap', onDoubleTap); // ignore: STRONG_MODE_INVALID_CAST_FUNCTION_EXPR, https://github.com/dart-lang/sdk/issues/27504
     _reset();
   }
 
   void _clearTrackers() {
-    List<_TapTracker> localTrackers = new List<_TapTracker>.from(_trackers.values);
-    for (_TapTracker tracker in localTrackers)
-      _reject(tracker);
+    _trackers.values.toList().forEach(_reject);
     assert(_trackers.isEmpty);
   }
 
@@ -207,7 +208,7 @@ class DoubleTapGestureRecognizer extends GestureRecognizer {
   }
 
   void _startDoubleTapTimer() {
-    _doubleTapTimer ??= new Timer(kDoubleTapTimeout, () => _reset());
+    _doubleTapTimer ??= new Timer(kDoubleTapTimeout, _reset);
   }
 
   void _stopDoubleTapTimer() {
@@ -218,13 +219,7 @@ class DoubleTapGestureRecognizer extends GestureRecognizer {
   }
 
   @override
-  String toStringShort() => 'double tap';
-}
-
-
-enum _TapResolution {
-  tap,
-  cancel
+  String get debugDescription => 'double tap';
 }
 
 /// TapGesture represents a full gesture resulting from a single tap sequence,
@@ -233,11 +228,10 @@ enum _TapResolution {
 class _TapGesture extends _TapTracker {
 
   _TapGesture({
-    MultiTapGestureRecognizer gestureRecognizer,
+    this.gestureRecognizer,
     PointerEvent event,
     Duration longTapDelay
-  }) : gestureRecognizer = gestureRecognizer,
-       _lastPosition = event.position,
+  }) : _lastPosition = event.position,
        super(
     event: event,
     entry: GestureBinding.instance.gestureArena.add(event.pointer, gestureRecognizer)
@@ -246,7 +240,7 @@ class _TapGesture extends _TapTracker {
     if (longTapDelay > Duration.ZERO) {
       _timer = new Timer(longTapDelay, () {
         _timer = null;
-        gestureRecognizer._handleLongTap(event.pointer, _lastPosition);
+        gestureRecognizer._dispatchLongTap(event.pointer, _lastPosition);
       });
     }
   }
@@ -256,8 +250,8 @@ class _TapGesture extends _TapTracker {
   bool _wonArena = false;
   Timer _timer;
 
-  Point _lastPosition;
-  Point _finalPosition;
+  Offset _lastPosition;
+  Offset _finalPosition;
 
   void handleEvent(PointerEvent event) {
     assert(event.pointer == pointer);
@@ -289,7 +283,7 @@ class _TapGesture extends _TapTracker {
 
   void reject() {
     stopTrackingPointer(handleEvent);
-    gestureRecognizer._resolveTap(pointer, _TapResolution.cancel, null);
+    gestureRecognizer._dispatchCancel(pointer);
   }
 
   void cancel() {
@@ -303,9 +297,8 @@ class _TapGesture extends _TapTracker {
 
   void _check() {
     if (_wonArena && _finalPosition != null)
-      gestureRecognizer._resolveTap(pointer, _TapResolution.tap, _finalPosition);
+      gestureRecognizer._dispatchTap(pointer, _finalPosition);
   }
-
 }
 
 /// Recognizes taps on a per-pointer basis.
@@ -323,8 +316,9 @@ class MultiTapGestureRecognizer extends GestureRecognizer {
   /// The [longTapDelay] defaults to [Duration.ZERO], which means
   /// [onLongTapDown] is called immediately after [onTapDown].
   MultiTapGestureRecognizer({
-    this.longTapDelay: Duration.ZERO
-  });
+    this.longTapDelay: Duration.ZERO,
+    Object debugOwner,
+  }) : super(debugOwner: debugOwner);
 
   /// A pointer that might cause a tap has contacted the screen at a particular
   /// location.
@@ -348,7 +342,7 @@ class MultiTapGestureRecognizer extends GestureRecognizer {
   /// particular location after [longTapDelay].
   GestureMultiTapDownCallback onLongTapDown;
 
-  final Map<int, _TapGesture> _gestureMap = new Map<int, _TapGesture>();
+  final Map<int, _TapGesture> _gestureMap = <int, _TapGesture>{};
 
   @override
   void addPointer(PointerEvent event) {
@@ -359,45 +353,47 @@ class MultiTapGestureRecognizer extends GestureRecognizer {
       longTapDelay: longTapDelay
     );
     if (onTapDown != null)
-      invokeCallback/*<Null>*/('onTapDown', () => onTapDown(event.pointer, new TapDownDetails(globalPosition: event.position)));
+      invokeCallback<Null>('onTapDown', () => onTapDown(event.pointer, new TapDownDetails(globalPosition: event.position))); // ignore: STRONG_MODE_INVALID_CAST_FUNCTION_EXPR, https://github.com/dart-lang/sdk/issues/27504
   }
 
   @override
   void acceptGesture(int pointer) {
     assert(_gestureMap.containsKey(pointer));
-    _gestureMap[pointer]?.accept();
-    assert(!_gestureMap.containsKey(pointer));
+    _gestureMap[pointer].accept();
   }
 
   @override
   void rejectGesture(int pointer) {
     assert(_gestureMap.containsKey(pointer));
-    _gestureMap[pointer]?.reject();
+    _gestureMap[pointer].reject();
     assert(!_gestureMap.containsKey(pointer));
   }
 
-  void _resolveTap(int pointer, _TapResolution resolution, Point globalPosition) {
+  void _dispatchCancel(int pointer) {
+    assert(_gestureMap.containsKey(pointer));
     _gestureMap.remove(pointer);
-    if (resolution == _TapResolution.tap) {
-      if (onTapUp != null)
-        invokeCallback/*<Null>*/('onTapUp', () => onTapUp(pointer, new TapUpDetails(globalPosition: globalPosition)));
-      if (onTap != null)
-        invokeCallback/*<Null>*/('onTap', () => onTap(pointer));
-    } else {
-      if (onTapCancel != null)
-        invokeCallback/*<Null>*/('onTapCancel', () => onTapCancel(pointer));
-    }
+    if (onTapCancel != null)
+      invokeCallback<Null>('onTapCancel', () => onTapCancel(pointer)); // ignore: STRONG_MODE_INVALID_CAST_FUNCTION_EXPR, https://github.com/dart-lang/sdk/issues/27504
   }
 
-  void _handleLongTap(int pointer, Point lastPosition) {
+  void _dispatchTap(int pointer, Offset globalPosition) {
+    assert(_gestureMap.containsKey(pointer));
+    _gestureMap.remove(pointer);
+    if (onTapUp != null)
+      invokeCallback<Null>('onTapUp', () => onTapUp(pointer, new TapUpDetails(globalPosition: globalPosition))); // ignore: STRONG_MODE_INVALID_CAST_FUNCTION_EXPR, https://github.com/dart-lang/sdk/issues/27504
+    if (onTap != null)
+      invokeCallback<Null>('onTap', () => onTap(pointer)); // ignore: STRONG_MODE_INVALID_CAST_FUNCTION_EXPR, https://github.com/dart-lang/sdk/issues/27504
+  }
+
+  void _dispatchLongTap(int pointer, Offset lastPosition) {
     assert(_gestureMap.containsKey(pointer));
     if (onLongTapDown != null)
-      invokeCallback/*<Null>*/('onLongTapDown', () => onLongTapDown(pointer, new TapDownDetails(globalPosition: lastPosition)));
+      invokeCallback<Null>('onLongTapDown', () => onLongTapDown(pointer, new TapDownDetails(globalPosition: lastPosition))); // ignore: STRONG_MODE_INVALID_CAST_FUNCTION_EXPR, https://github.com/dart-lang/sdk/issues/27504
   }
 
   @override
   void dispose() {
-    List<_TapGesture> localGestures = new List<_TapGesture>.from(_gestureMap.values);
+    final List<_TapGesture> localGestures = new List<_TapGesture>.from(_gestureMap.values);
     for (_TapGesture gesture in localGestures)
       gesture.cancel();
     // Rejection of each gesture should cause it to be removed from our map
@@ -406,5 +402,5 @@ class MultiTapGestureRecognizer extends GestureRecognizer {
   }
 
   @override
-  String toStringShort() => 'multitap';
+  String get debugDescription => 'multitap';
 }

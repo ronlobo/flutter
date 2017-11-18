@@ -10,12 +10,16 @@ import 'package:flutter/foundation.dart';
 
 import 'arena.dart';
 import 'converter.dart';
+import 'debug.dart';
 import 'events.dart';
 import 'hit_test.dart';
 import 'pointer_router.dart';
 
 /// A binding for the gesture subsystem.
-abstract class GestureBinding extends BindingBase implements HitTestable, HitTestDispatcher, HitTestTarget {
+abstract class GestureBinding extends BindingBase with HitTestable, HitTestDispatcher, HitTestTarget {
+  // This class is intended to be used as a mixin, and should not be
+  // extended directly.
+  factory GestureBinding._() => null;
 
   @override
   void initInstances() {
@@ -24,20 +28,24 @@ abstract class GestureBinding extends BindingBase implements HitTestable, HitTes
     ui.window.onPointerDataPacket = _handlePointerDataPacket;
   }
 
+  @override
+  void unlocked() {
+    super.unlocked();
+    _flushPointerEventQueue();
+  }
+
   /// The singleton instance of this object.
   static GestureBinding get instance => _instance;
   static GestureBinding _instance;
 
-  void _handlePointerDataPacket(ui.PointerDataPacket packet) {
-    _pendingPointerEvents.addAll(PointerEventConverter.expand(packet.pointers, ui.window.devicePixelRatio));
-    _flushPointerEventQueue();
-  }
-
   final Queue<PointerEvent> _pendingPointerEvents = new Queue<PointerEvent>();
 
-  void _flushPointerEventQueue() {
-    while (_pendingPointerEvents.isNotEmpty)
-      _handlePointerEvent(_pendingPointerEvents.removeFirst());
+  void _handlePointerDataPacket(ui.PointerDataPacket packet) {
+    // We convert pointer data to logical pixels so that e.g. the touch slop can be
+    // defined in a device-independent manner.
+    _pendingPointerEvents.addAll(PointerEventConverter.expand(packet.data, ui.window.devicePixelRatio));
+    if (!locked)
+      _flushPointerEventQueue();
   }
 
   /// Dispatch a [PointerCancelEvent] for the given pointer soon.
@@ -45,9 +53,15 @@ abstract class GestureBinding extends BindingBase implements HitTestable, HitTes
   /// The pointer event will be dispatch before the next pointer event and
   /// before the end of the microtask but not within this function call.
   void cancelPointer(int pointer) {
-    if (_pendingPointerEvents.isEmpty)
+    if (_pendingPointerEvents.isEmpty && !locked)
       scheduleMicrotask(_flushPointerEventQueue);
     _pendingPointerEvents.addFirst(new PointerCancelEvent(pointer: pointer));
+  }
+
+  void _flushPointerEventQueue() {
+    assert(!locked);
+    while (_pendingPointerEvents.isNotEmpty)
+      _handlePointerEvent(_pendingPointerEvents.removeFirst());
   }
 
   /// A router that routes all pointer events received from the engine.
@@ -61,15 +75,21 @@ abstract class GestureBinding extends BindingBase implements HitTestable, HitTes
   ///
   /// The state of hovering pointers is not tracked because that would require
   /// hit-testing on every frame.
-  Map<int, HitTestResult> _hitTests = <int, HitTestResult>{};
+  final Map<int, HitTestResult> _hitTests = <int, HitTestResult>{};
 
   void _handlePointerEvent(PointerEvent event) {
+    assert(!locked);
     HitTestResult result;
     if (event is PointerDownEvent) {
       assert(!_hitTests.containsKey(event.pointer));
       result = new HitTestResult();
       hitTest(result, event.position);
       _hitTests[event.pointer] = result;
+      assert(() {
+        if (debugPrintHitTestResults)
+          debugPrint('$event: $result');
+        return true;
+      }());
     } else if (event is PointerUpEvent || event is PointerCancelEvent) {
       result = _hitTests.remove(event.pointer);
     } else if (event.down) {
@@ -83,7 +103,7 @@ abstract class GestureBinding extends BindingBase implements HitTestable, HitTes
 
   /// Determine which [HitTestTarget] objects are located at a given position.
   @override // from HitTestable
-  void hitTest(HitTestResult result, Point position) {
+  void hitTest(HitTestResult result, Offset position) {
     result.add(new HitTestEntry(this));
   }
 
@@ -94,6 +114,7 @@ abstract class GestureBinding extends BindingBase implements HitTestable, HitTes
   /// the handlers might throw. The `result` argument must not be null.
   @override // from HitTestDispatcher
   void dispatchEvent(PointerEvent event, HitTestResult result) {
+    assert(!locked);
     assert(result != null);
     for (HitTestEntry entry in result.path) {
       try {

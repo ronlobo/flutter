@@ -2,10 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
-import 'package:meta/meta.dart';
 
+import 'material_localizations.dart';
 import 'theme_data.dart';
+import 'typography.dart';
 
 export 'theme_data.dart' show Brightness, ThemeData;
 
@@ -20,6 +22,9 @@ const Duration kThemeAnimationDuration = const Duration(milliseconds: 200);
 /// [Theme.of]. When a widget uses [Theme.of], it is automatically rebuilt if
 /// the theme later changes, so that the changes can be applied.
 ///
+/// The [Theme] widget implies an [IconTheme] widget, set to the value of the
+/// [ThemeData.iconTheme] of the [data] for the [Theme].
+///
 /// See also:
 ///
 ///  * [ThemeData], which describes the actual configuration of a theme.
@@ -27,19 +32,18 @@ const Duration kThemeAnimationDuration = const Duration(milliseconds: 200);
 ///    than changing the theme all at once.
 ///  * [MaterialApp], which includes an [AnimatedTheme] widget configured via
 ///    the [MaterialApp.theme] argument.
-class Theme extends InheritedWidget {
+class Theme extends StatelessWidget {
   /// Applies the given theme [data] to [child].
   ///
   /// The [data] and [child] arguments must not be null.
-  Theme({
+  const Theme({
     Key key,
     @required this.data,
     this.isMaterialAppTheme: false,
-    Widget child
-  }) : super(key: key, child: child) {
-    assert(child != null);
-    assert(data != null);
-  }
+    @required this.child,
+  }) : assert(child != null),
+       assert(data != null),
+       super(key: key);
 
   /// Specifies the color and typography values for descendant widgets.
   final ThemeData data;
@@ -55,10 +59,17 @@ class Theme extends InheritedWidget {
   /// routes, like [PopupMenuButton] and [DropdownButton], do this.
   final bool isMaterialAppTheme;
 
+  /// The widget below this widget in the tree.
+  final Widget child;
+
   static final ThemeData _kFallbackTheme = new ThemeData.fallback();
 
   /// The data from the closest [Theme] instance that encloses the given
   /// context.
+  ///
+  /// If the given context is enclosed in a [Localizations] widget providing
+  /// [MaterialLocalizations], the returned data is localized according to the
+  /// nearest available [MaterialLocalizations].
   ///
   /// Defaults to [new ThemeData.fallback] if there is no [Theme] in the given
   /// build context.
@@ -111,28 +122,64 @@ class Theme extends InheritedWidget {
   /// }
   /// ```
   static ThemeData of(BuildContext context, { bool shadowThemeOnly: false }) {
-    final Theme theme = context.inheritFromWidgetOfExactType(Theme);
+    final _InheritedTheme inheritedTheme =
+        context.inheritFromWidgetOfExactType(_InheritedTheme);
     if (shadowThemeOnly) {
-      if (theme == null || theme.isMaterialAppTheme)
+      if (inheritedTheme == null || inheritedTheme.theme.isMaterialAppTheme)
         return null;
-      return theme.data;
+      return inheritedTheme.theme.data;
     }
-    return (theme != null) ? theme.data : _kFallbackTheme;
+
+    final ThemeData colorTheme = (inheritedTheme != null) ? inheritedTheme.theme.data : _kFallbackTheme;
+    final MaterialLocalizations localizations = MaterialLocalizations.of(context);
+    final TextTheme geometryTheme = localizations?.localTextGeometry ?? MaterialTextGeometry.englishLike;
+    return ThemeData.localize(colorTheme, geometryTheme);
   }
 
   @override
-  bool updateShouldNotify(Theme old) => data != old.data;
+  Widget build(BuildContext context) {
+    return new _InheritedTheme(
+      theme: this,
+      child: new IconTheme(
+        data: data.iconTheme,
+        child: child,
+      ),
+    );
+  }
 
   @override
-  void debugFillDescription(List<String> description) {
-    super.debugFillDescription(description);
-    description.add('$data');
+  void debugFillProperties(DiagnosticPropertiesBuilder description) {
+    super.debugFillProperties(description);
+    description.add(new DiagnosticsProperty<ThemeData>('data', data, showName: false));
   }
 }
 
-/// An animated value that interpolates [ThemeData]s.
+class _InheritedTheme extends InheritedWidget {
+  const _InheritedTheme({
+    Key key,
+    @required this.theme,
+    @required Widget child
+  }) : assert(theme != null),
+       super(key: key, child: child);
+
+  final Theme theme;
+
+  @override
+  bool updateShouldNotify(_InheritedTheme old) => theme.data != old.theme.data;
+}
+
+/// An interpolation between two [ThemeData]s.
+///
+/// This class specializes the interpolation of [Tween<ThemeData>] to call the
+/// [ThemeData.lerp] method.
+///
+/// See [Tween] for a discussion on how to use interpolation objects.
 class ThemeDataTween extends Tween<ThemeData> {
-  /// Creates an interpolation between [begin] and [end].
+  /// Creates a [ThemeData] tween.
+  ///
+  /// The [begin] and [end] properties must be non-null before the tween is
+  /// first used, but the arguments can be null if the values are going to be
+  /// filled in later.
   ThemeDataTween({ ThemeData begin, ThemeData end }) : super(begin: begin, end: end);
 
   @override
@@ -154,17 +201,16 @@ class AnimatedTheme extends ImplicitlyAnimatedWidget {
   ///
   /// By default, the theme transition uses a linear curve. The [data] and
   /// [child] arguments must not be null.
-  AnimatedTheme({
+  const AnimatedTheme({
     Key key,
     @required this.data,
     this.isMaterialAppTheme: false,
     Curve curve: Curves.linear,
     Duration duration: kThemeAnimationDuration,
-    this.child
-  }) : super(key: key, curve: curve, duration: duration) {
-    assert(child != null);
-    assert(data != null);
-  }
+    @required this.child,
+  }) : assert(child != null),
+       assert(data != null),
+       super(key: key, curve: curve, duration: duration);
 
   /// Specifies the color and typography values for descendant widgets.
   final ThemeData data;
@@ -185,23 +231,22 @@ class _AnimatedThemeState extends AnimatedWidgetBaseState<AnimatedTheme> {
   @override
   void forEachTween(TweenVisitor<dynamic> visitor) {
     // TODO(ianh): Use constructor tear-offs when it becomes possible
-    _data = visitor(_data, config.data, (dynamic value) => new ThemeDataTween(begin: value));
+    _data = visitor(_data, widget.data, (dynamic value) => new ThemeDataTween(begin: value));
     assert(_data != null);
   }
 
   @override
   Widget build(BuildContext context) {
     return new Theme(
-      isMaterialAppTheme: config.isMaterialAppTheme,
-      child: config.child,
+      isMaterialAppTheme: widget.isMaterialAppTheme,
+      child: widget.child,
       data: _data.evaluate(animation)
     );
   }
 
   @override
-  void debugFillDescription(List<String> description) {
-    super.debugFillDescription(description);
-    if (_data != null)
-      description.add('$_data');
+  void debugFillProperties(DiagnosticPropertiesBuilder description) {
+    super.debugFillProperties(description);
+    description.add(new DiagnosticsProperty<ThemeDataTween>('data', _data, showName: false, defaultValue: null));
   }
 }

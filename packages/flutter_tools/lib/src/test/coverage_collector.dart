@@ -3,74 +3,100 @@
 // found in the LICENSE file.
 
 import 'dart:async';
-import 'dart:io';
 
-import 'package:coverage/coverage.dart';
-import 'package:path/path.dart' as path;
+import 'package:coverage/coverage.dart' as coverage;
 
+import '../base/file_system.dart';
+import '../base/io.dart';
 import '../dart/package_map.dart';
 import '../globals.dart';
 
-class CoverageCollector {
-  static final CoverageCollector instance = new CoverageCollector();
+import 'watcher.dart';
 
-  bool enabled = false;
-  int observatoryPort;
+/// A class that's used to collect coverage data during tests.
+class CoverageCollector extends TestWatcher {
+  Map<String, dynamic> _globalHitmap;
 
-  void collectCoverage({
-    String host,
-    int port,
-    Process processToKill
-  }) {
-    if (enabled) {
-      assert(_jobs != null);
-      _jobs.add(_startJob(
-        host: host,
-        port: port,
-        processToKill: processToKill
-      ));
-    } else {
-      processToKill.kill();
-    }
+  @override
+  Future<Null> onFinishedTests(ProcessEvent event) async {
+    printTrace('test ${event.childIndex}: collecting coverage');
+    await collectCoverage(event.process, event.observatoryUri);
   }
 
-  Future<Null> _startJob({
-    String host,
-    int port,
-    Process processToKill
-  }) async {
-    int pid = processToKill.pid;
-    printTrace('collecting coverage data from pid $pid on port $port');
-    Map<String, dynamic> data = await collect(host, port, false, false);
-    printTrace('done collecting coverage data from pid $pid');
-    processToKill.kill();
-    Map<String, dynamic> hitmap = createHitmap(data['coverage']);
+  void _addHitmap(Map<String, dynamic> hitmap) {
     if (_globalHitmap == null)
       _globalHitmap = hitmap;
     else
-      mergeHitmaps(hitmap, _globalHitmap);
-    printTrace('done merging data from pid $pid into global coverage map');
+      coverage.mergeHitmaps(hitmap, _globalHitmap);
   }
 
-  Future<Null> finishPendingJobs() async {
-    await Future.wait(_jobs.toList(), eagerError: true);
+  /// Collects coverage for the given [Process] using the given `port`.
+  ///
+  /// This should be called when the code whose coverage data is being collected
+  /// has been run to completion so that all coverage data has been recorded.
+  ///
+  /// The returned [Future] completes when the coverage is collected.
+  Future<Null> collectCoverage(Process process, Uri observatoryUri) async {
+    assert(process != null);
+    assert(observatoryUri != null);
+
+    final int pid = process.pid;
+    int exitCode;
+    // Synchronization is enforced by the API contract. Error handling
+    // synchronization is done in the code below where `exitCode` is checked.
+    // Callback cannot throw.
+    process.exitCode.then<Null>((int code) { // ignore: unawaited_futures
+      exitCode = code;
+    });
+    if (exitCode != null)
+      throw new Exception('Failed to collect coverage, process terminated before coverage could be collected.');
+
+    printTrace('pid $pid: collecting coverage data from $observatoryUri...');
+    final Map<String, dynamic> data = await coverage
+        .collect(observatoryUri, false, false)
+        .timeout(
+          const Duration(seconds: 30),
+          onTimeout: () {
+            throw new Exception('Failed to collect coverage, it took more than thirty seconds.');
+          },
+        );
+    printTrace(() {
+      final StringBuffer buf = new StringBuffer()
+          ..write('pid $pid ($observatoryUri): ')
+          ..write(exitCode == null
+              ? 'collected coverage data; merging...'
+              : 'process terminated prematurely with exit code $exitCode; aborting');
+      return buf.toString();
+    }());
+    if (exitCode != null)
+      throw new Exception('Failed to collect coverage, process terminated while coverage was being collected.');
+    _addHitmap(coverage.createHitmap(data['coverage']));
+    printTrace('pid $pid ($observatoryUri): done merging coverage data into global coverage map.');
   }
 
-  List<Future<Null>> _jobs = <Future<Null>>[];
-  Map<String, dynamic> _globalHitmap;
-
-  Future<String> finalizeCoverage({ Formatter formatter }) async {
-    assert(enabled);
-    await finishPendingJobs();
+  /// Returns a future that will complete with the formatted coverage data
+  /// (using [formatter]) once all coverage data has been collected.
+  ///
+  /// This will not start any collection tasks. It us up to the caller of to
+  /// call [collectCoverage] for each process first.
+  ///
+  /// If [timeout] is specified, the future will timeout (with a
+  /// [TimeoutException]) after the specified duration.
+  Future<String> finalizeCoverage({
+    coverage.Formatter formatter,
+    Duration timeout,
+  }) async {
     printTrace('formating coverage data');
     if (_globalHitmap == null)
       return null;
     if (formatter == null) {
-      Resolver resolver = new Resolver(packagesPath: PackageMap.globalPackagesPath);
-      String packagePath = Directory.current.path;
-      List<String> reportOn = <String>[path.join(packagePath, 'lib')];
-      formatter = new LcovFormatter(resolver, reportOn: reportOn, basePath: packagePath);
+      final coverage.Resolver resolver = new coverage.Resolver(packagesPath: PackageMap.globalPackagesPath);
+      final String packagePath = fs.currentDirectory.path;
+      final List<String> reportOn = <String>[fs.path.join(packagePath, 'lib')];
+      formatter = new coverage.LcovFormatter(resolver, reportOn: reportOn, basePath: packagePath);
     }
-    return await formatter.format(_globalHitmap);
+    final String result = await formatter.format(_globalHitmap);
+    _globalHitmap = null;
+    return result;
   }
 }

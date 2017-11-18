@@ -4,16 +4,32 @@
 
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, required;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+
+import 'package:url_launcher/url_launcher.dart';
 
 class LinkTextSpan extends TextSpan {
+
+  // Beware!
+  //
+  // This class is only safe because the TapGestureRecognizer is not
+  // given a deadline and therefore never allocates any resources.
+  //
+  // In any other situation -- setting a deadline, using any of the less trivial
+  // recognizers, etc -- you would have to manage the gesture recognizer's
+  // lifetime and call dispose() when the TextSpan was no longer being rendered.
+  //
+  // Since TextSpan itself is @immutable, this means that you would have to
+  // manage the recognizer from outside the TextSpan, e.g. in the State of a
+  // stateful widget that then hands the recognizer to the TextSpan.
+
   LinkTextSpan({ TextStyle style, String url, String text }) : super(
     style: style,
     text: text ?? url,
     recognizer: new TapGestureRecognizer()..onTap = () {
-      UrlLauncher.launch(url);
+      launch(url);
     }
   );
 }
@@ -30,7 +46,7 @@ class GalleryDrawerHeader extends StatefulWidget {
 class _GalleryDrawerHeaderState extends State<GalleryDrawerHeader> {
   bool _logoHasName = true;
   bool _logoHorizontal = true;
-  Map<int, Color> _swatch = Colors.blue;
+  MaterialColor _logoColor = Colors.blue;
 
   @override
   Widget build(BuildContext context) {
@@ -42,8 +58,9 @@ class _GalleryDrawerHeaderState extends State<GalleryDrawerHeader> {
         style: _logoHasName ? _logoHorizontal ? FlutterLogoStyle.horizontal
                                               : FlutterLogoStyle.stacked
                                               : FlutterLogoStyle.markOnly,
-        swatch: _swatch,
-        textColor: config.light ? const Color(0xFF616161) : const Color(0xFF9E9E9E),
+        lightColor: _logoColor.shade400,
+        darkColor: _logoColor.shade900,
+        textColor: widget.light ? const Color(0xFF616161) : const Color(0xFF9E9E9E),
       ),
       duration: const Duration(milliseconds: 750),
       child: new GestureDetector(
@@ -61,22 +78,22 @@ class _GalleryDrawerHeaderState extends State<GalleryDrawerHeader> {
         },
         onDoubleTap: () {
           setState(() {
-            final List<Map<int, Color>> options = <Map<int, Color>>[];
-            if (_swatch != Colors.blue)
-              options.addAll(<Map<int, Color>>[Colors.blue, Colors.blue, Colors.blue, Colors.blue, Colors.blue, Colors.blue, Colors.blue]);
-            if (_swatch != Colors.amber)
-              options.addAll(<Map<int, Color>>[Colors.amber, Colors.amber, Colors.amber]);
-            if (_swatch != Colors.red)
-              options.addAll(<Map<int, Color>>[Colors.red, Colors.red, Colors.red]);
-            if (_swatch != Colors.indigo)
-              options.addAll(<Map<int, Color>>[Colors.indigo, Colors.indigo, Colors.indigo]);
-            if (_swatch != Colors.pink)
-              options.addAll(<Map<int, Color>>[Colors.pink]);
-            if (_swatch != Colors.purple)
-              options.addAll(<Map<int, Color>>[Colors.purple]);
-            if (_swatch != Colors.cyan)
-              options.addAll(<Map<int, Color>>[Colors.cyan]);
-            _swatch = options[new math.Random().nextInt(options.length)];
+            final List<MaterialColor> options = <MaterialColor>[];
+            if (_logoColor != Colors.blue)
+              options.addAll(<MaterialColor>[Colors.blue, Colors.blue, Colors.blue, Colors.blue, Colors.blue, Colors.blue, Colors.blue]);
+            if (_logoColor != Colors.amber)
+              options.addAll(<MaterialColor>[Colors.amber, Colors.amber, Colors.amber]);
+            if (_logoColor != Colors.red)
+              options.addAll(<MaterialColor>[Colors.red, Colors.red, Colors.red]);
+            if (_logoColor != Colors.indigo)
+              options.addAll(<MaterialColor>[Colors.indigo, Colors.indigo, Colors.indigo]);
+            if (_logoColor != Colors.pink)
+              options.addAll(<MaterialColor>[Colors.pink]);
+            if (_logoColor != Colors.purple)
+              options.addAll(<MaterialColor>[Colors.purple]);
+            if (_logoColor != Colors.cyan)
+              options.addAll(<MaterialColor>[Colors.cyan]);
+            _logoColor = options[new math.Random().nextInt(options.length)];
           });
         }
       )
@@ -85,19 +102,25 @@ class _GalleryDrawerHeaderState extends State<GalleryDrawerHeader> {
 }
 
 class GalleryDrawer extends StatelessWidget {
-  GalleryDrawer({
+  const GalleryDrawer({
     Key key,
     this.useLightTheme,
-    this.onThemeChanged,
+    @required this.onThemeChanged,
     this.timeDilation,
-    this.onTimeDilationChanged,
+    @required this.onTimeDilationChanged,
+    this.textScaleFactor,
+    this.onTextScaleFactorChanged,
     this.showPerformanceOverlay,
     this.onShowPerformanceOverlayChanged,
+    this.checkerboardRasterCacheImages,
+    this.onCheckerboardRasterCacheImagesChanged,
+    this.checkerboardOffscreenLayers,
+    this.onCheckerboardOffscreenLayersChanged,
     this.onPlatformChanged,
-  }) : super(key: key) {
-    assert(onThemeChanged != null);
-    assert(onTimeDilationChanged != null);
-  }
+    this.onSendFeedback,
+  }) : assert(onThemeChanged != null),
+       assert(onTimeDilationChanged != null),
+       super(key: key);
 
   final bool useLightTheme;
   final ValueChanged<bool> onThemeChanged;
@@ -105,10 +128,21 @@ class GalleryDrawer extends StatelessWidget {
   final double timeDilation;
   final ValueChanged<double> onTimeDilationChanged;
 
+  final double textScaleFactor;
+  final ValueChanged<double> onTextScaleFactorChanged;
+
   final bool showPerformanceOverlay;
   final ValueChanged<bool> onShowPerformanceOverlayChanged;
 
+  final bool checkerboardRasterCacheImages;
+  final ValueChanged<bool> onCheckerboardRasterCacheImagesChanged;
+
+  final bool checkerboardOffscreenLayers;
+  final ValueChanged<bool> onCheckerboardOffscreenLayersChanged;
+
   final ValueChanged<TargetPlatform> onPlatformChanged;
+
+  final VoidCallback onSendFeedback;
 
   @override
   Widget build(BuildContext context) {
@@ -116,100 +150,86 @@ class GalleryDrawer extends StatelessWidget {
     final TextStyle aboutTextStyle = themeData.textTheme.body2;
     final TextStyle linkStyle = themeData.textTheme.body2.copyWith(color: themeData.accentColor);
 
-    final Widget lightThemeItem = new DrawerItem(
-      icon: new Icon(Icons.brightness_5),
-      onPressed: () { onThemeChanged(true); },
+    final Widget lightThemeItem = new RadioListTile<bool>(
+      secondary: const Icon(Icons.brightness_5),
+      title: const Text('Light'),
+      value: true,
+      groupValue: useLightTheme,
+      onChanged: onThemeChanged,
       selected: useLightTheme,
-      child: new Row(
-        children: <Widget>[
-          new Flexible(child: new Text('Light')),
-          new Radio<bool>(
-            value: true,
-            groupValue: useLightTheme,
-            onChanged: onThemeChanged
-          )
-        ]
-      )
     );
 
-    final Widget darkThemeItem = new DrawerItem(
-      icon: new Icon(Icons.brightness_7),
-      onPressed: () { onThemeChanged(false); },
-      selected: useLightTheme,
-      child: new Row(
-        children: <Widget>[
-          new Flexible(child: new Text('Dark')),
-          new Radio<bool>(
-            value: false,
-            groupValue: useLightTheme,
-            onChanged: onThemeChanged
-          )
-        ]
-      )
+    final Widget darkThemeItem = new RadioListTile<bool>(
+      secondary: const Icon(Icons.brightness_7),
+      title: const Text('Dark'),
+      value: false,
+      groupValue: useLightTheme,
+      onChanged: onThemeChanged,
+      selected: !useLightTheme,
     );
 
-    final Widget mountainViewItem = new DrawerItem(
+    final Widget mountainViewItem = new RadioListTile<TargetPlatform>(
       // on iOS, we don't want to show an Android phone icon
-      icon: new Icon(defaultTargetPlatform == TargetPlatform.iOS ? Icons.star : Icons.phone_android),
-      onPressed: () { onPlatformChanged(TargetPlatform.android); },
+      secondary: new Icon(defaultTargetPlatform == TargetPlatform.iOS ? Icons.star : Icons.phone_android),
+      title: new Text(defaultTargetPlatform == TargetPlatform.iOS ? 'Mountain View' : 'Android'),
+      value: TargetPlatform.android,
+      groupValue: Theme.of(context).platform,
+      onChanged: onPlatformChanged,
       selected: Theme.of(context).platform == TargetPlatform.android,
-      child: new Row(
-        children: <Widget>[
-          new Flexible(child: new Text('Android')),
-          new Radio<TargetPlatform>(
-            value: TargetPlatform.android,
-            groupValue: Theme.of(context).platform,
-            onChanged: onPlatformChanged,
-          )
-        ]
-      )
     );
 
-    final Widget cupertinoItem = new DrawerItem(
+    final Widget cupertinoItem = new RadioListTile<TargetPlatform>(
       // on iOS, we don't want to show the iPhone icon
-      icon: new Icon(defaultTargetPlatform == TargetPlatform.iOS ? Icons.star_border : Icons.phone_iphone),
-      onPressed: () { onPlatformChanged(TargetPlatform.iOS); },
+      secondary: new Icon(defaultTargetPlatform == TargetPlatform.iOS ? Icons.star_border : Icons.phone_iphone),
+      title: new Text(defaultTargetPlatform == TargetPlatform.iOS ? 'Cupertino' : 'iOS'),
+      value: TargetPlatform.iOS,
+      groupValue: Theme.of(context).platform,
+      onChanged: onPlatformChanged,
       selected: Theme.of(context).platform == TargetPlatform.iOS,
-      child: new Row(
-        children: <Widget>[
-          new Flexible(child: new Text('iOS')),
-          new Radio<TargetPlatform>(
-            value: TargetPlatform.iOS,
-            groupValue: Theme.of(context).platform,
-            onChanged: onPlatformChanged,
-          )
-        ]
-      )
     );
 
-    final Widget animateSlowlyItem = new DrawerItem(
-      icon: new Icon(Icons.hourglass_empty),
-      selected: timeDilation != 1.0,
-      onPressed: () { onTimeDilationChanged(timeDilation != 1.0 ? 1.0 : 20.0); },
-      child: new Row(
-        children: <Widget>[
-          new Flexible(child: new Text('Animate Slowly')),
-          new Checkbox(
-            value: timeDilation != 1.0,
-            onChanged: (bool value) { onTimeDilationChanged(value ? 20.0 : 1.0); }
-          )
-        ]
-      )
-    );
+    final List<Widget> textSizeItems = <Widget>[];
+    final Map<double, String> textSizes = <double, String>{
+      null: 'System Default',
+      0.8: 'Small',
+      1.0: 'Normal',
+      1.3: 'Large',
+      2.0: 'Huge',
+    };
+    for (double size in textSizes.keys) {
+      textSizeItems.add(new RadioListTile<double>(
+        secondary: const Icon(Icons.text_fields),
+        title: new Text(textSizes[size]),
+        value: size,
+        groupValue: textScaleFactor,
+        onChanged: onTextScaleFactorChanged,
+        selected: textScaleFactor == size,
+      ));
+    }
 
-    final Widget fileAnIssueItem = new DrawerItem(
-      icon: new Icon(Icons.report),
-      onPressed: () {
-        UrlLauncher.launch('https://github.com/flutter/flutter/issues/new');
+    final Widget animateSlowlyItem = new CheckboxListTile(
+      title: const Text('Animate Slowly'),
+      value: timeDilation != 1.0,
+      onChanged: (bool value) {
+        onTimeDilationChanged(value ? 20.0 : 1.0);
       },
-      child: new Text('File an issue')
+      secondary: const Icon(Icons.hourglass_empty),
+      selected: timeDilation != 1.0,
     );
 
-    final Widget aboutItem = new AboutDrawerItem(
-      icon: new FlutterLogo(),
-      applicationVersion: '2016 Q3 Preview',
-      applicationIcon: new FlutterLogo(),
-      applicationLegalese: '© 2016 The Chromium Authors',
+    final Widget sendFeedbackItem = new ListTile(
+      leading: const Icon(Icons.report),
+      title: const Text('Send feedback'),
+      onTap: onSendFeedback ?? () {
+        launch('https://github.com/flutter/flutter/issues/new');
+      },
+    );
+
+    final Widget aboutItem = new AboutListTile(
+      icon: const FlutterLogo(),
+      applicationVersion: 'April 2017 Preview',
+      applicationIcon: const FlutterLogo(),
+      applicationLegalese: '© 2017 The Chromium Authors',
       aboutBoxChildren: <Widget>[
         new Padding(
           padding: const EdgeInsets.only(top: 24.0),
@@ -218,11 +238,12 @@ class GalleryDrawer extends StatelessWidget {
               children: <TextSpan>[
                 new TextSpan(
                   style: aboutTextStyle,
-                  text: "Flutter is an early-stage, open-source project to help "
-                  "developers build high-performance, high-fidelity, mobile "
-                  "apps for iOS and Android from a single codebase. This "
-                  "gallery is a preview of Flutter's many widgets, behaviors, "
-                  "animations, layouts, and more. Learn more about Flutter at "
+                  text: 'Flutter is an early-stage, open-source project to help developers'
+                        'build high-performance, high-fidelity, mobile apps for '
+                        '${defaultTargetPlatform == TargetPlatform.iOS ? 'multiple platforms' : 'iOS and Android'} '
+                        'from a single codebase. This gallery is a preview of '
+                        "Flutter's many widgets, behaviors, animations, layouts, "
+                        'and more. Learn more about Flutter at '
                 ),
                 new LinkTextSpan(
                   style: linkStyle,
@@ -230,7 +251,7 @@ class GalleryDrawer extends StatelessWidget {
                 ),
                 new TextSpan(
                   style: aboutTextStyle,
-                  text: ".\n\nTo see the source code for this app, please visit the "
+                  text: '.\n\nTo see the source code for this app, please visit the '
                 ),
                 new LinkTextSpan(
                   style: linkStyle,
@@ -239,7 +260,7 @@ class GalleryDrawer extends StatelessWidget {
                 ),
                 new TextSpan(
                   style: aboutTextStyle,
-                  text: "."
+                  text: '.'
                 )
               ]
             )
@@ -252,33 +273,62 @@ class GalleryDrawer extends StatelessWidget {
       new GalleryDrawerHeader(light: useLightTheme),
       lightThemeItem,
       darkThemeItem,
-      new Divider(),
+      const Divider(),
       mountainViewItem,
       cupertinoItem,
-      new Divider(),
-      animateSlowlyItem,
-      // index 8, optional: Performance Overlay
-      fileAnIssueItem,
-      aboutItem
+      const Divider(),
     ];
 
-    if (onShowPerformanceOverlayChanged != null) {
-      allDrawerItems.insert(8, new DrawerItem(
-        icon: new Icon(Icons.assessment),
-        onPressed: () { onShowPerformanceOverlayChanged(!showPerformanceOverlay); },
-        selected: showPerformanceOverlay,
-        child: new Row(
-          children: <Widget>[
-            new Flexible(child: new Text('Performance Overlay')),
-            new Checkbox(
-              value: showPerformanceOverlay,
-              onChanged: (bool value) { onShowPerformanceOverlayChanged(!showPerformanceOverlay); }
-            )
-          ]
-        )
+    allDrawerItems.addAll(textSizeItems);
+
+    allDrawerItems..addAll(<Widget>[
+      const Divider(),
+      animateSlowlyItem,
+      const Divider(),
+    ]);
+
+    bool addedOptionalItem = false;
+    if (onCheckerboardOffscreenLayersChanged != null) {
+      allDrawerItems.add(new CheckboxListTile(
+        title: const Text('Checkerboard Offscreen Layers'),
+        value: checkerboardOffscreenLayers,
+        onChanged: onCheckerboardOffscreenLayersChanged,
+        secondary: const Icon(Icons.assessment),
+        selected: checkerboardOffscreenLayers,
       ));
+      addedOptionalItem = true;
     }
 
-    return new Drawer(child: new Block(children: allDrawerItems));
+    if (onCheckerboardRasterCacheImagesChanged != null) {
+      allDrawerItems.add(new CheckboxListTile(
+        title: const Text('Checkerboard Raster Cache Images'),
+        value: checkerboardRasterCacheImages,
+        onChanged: onCheckerboardRasterCacheImagesChanged,
+        secondary: const Icon(Icons.assessment),
+        selected: checkerboardRasterCacheImages,
+      ));
+      addedOptionalItem = true;
+    }
+
+    if (onShowPerformanceOverlayChanged != null) {
+      allDrawerItems.add(new CheckboxListTile(
+        title: const Text('Performance Overlay'),
+        value: showPerformanceOverlay,
+        onChanged: onShowPerformanceOverlayChanged,
+        secondary: const Icon(Icons.assessment),
+        selected: showPerformanceOverlay,
+      ));
+      addedOptionalItem = true;
+    }
+
+    if (addedOptionalItem)
+      allDrawerItems.add(const Divider());
+
+    allDrawerItems.addAll(<Widget>[
+      sendFeedbackItem,
+      aboutItem,
+    ]);
+
+    return new Drawer(child: new ListView(primary: false, children: allDrawerItems));
   }
 }

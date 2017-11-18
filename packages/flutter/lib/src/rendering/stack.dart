@@ -5,7 +5,7 @@
 import 'dart:math' as math;
 import 'dart:ui' show lerpDouble, hashValues;
 
-import 'package:meta/meta.dart';
+import 'package:flutter/foundation.dart';
 
 import 'box.dart';
 import 'object.dart';
@@ -17,11 +17,14 @@ import 'object.dart';
 /// width or height of the rectangle, convert it to a [Rect] using [toRect()]
 /// (passing the container's own Rect), and then examine that object.
 ///
-/// If you create the RelativeRect with null values, the methods on
-/// RelativeRect will not work usefully (or at all).
+/// The fields [left], [right], [bottom], and [top] must not be null.
+@immutable
 class RelativeRect {
   /// Creates a RelativeRect with the given values.
-  const RelativeRect.fromLTRB(this.left, this.top, this.right, this.bottom);
+  ///
+  /// The arguments must not be null.
+  const RelativeRect.fromLTRB(this.left, this.top, this.right, this.bottom)
+    : assert(left != null && top != null && right != null && bottom != null);
 
   /// Creates a RelativeRect from a Rect and a Size. The Rect (first argument)
   /// and the RelativeRect (the output) are in the coordinate space of the
@@ -52,28 +55,36 @@ class RelativeRect {
   }
 
   /// A rect that covers the entire container.
-  static final RelativeRect fill = new RelativeRect.fromLTRB(0.0, 0.0, 0.0, 0.0);
+  static final RelativeRect fill = const RelativeRect.fromLTRB(0.0, 0.0, 0.0, 0.0);
 
   /// Distance from the left side of the container to the left side of this rectangle.
+  ///
+  /// May be negative if the left side of the rectangle is outside of the container.
   final double left;
 
   /// Distance from the top side of the container to the top side of this rectangle.
+  ///
+  /// May be negative if the top side of the rectangle is outside of the container.
   final double top;
 
   /// Distance from the right side of the container to the right side of this rectangle.
+  ///
+  /// May be negative if the right side of the rectangle is outside of the container.
   final double right;
 
   /// Distance from the bottom side of the container to the bottom side of this rectangle.
+  ///
+  /// May be negative if the bottom side of the rectangle is outside of the container.
   final double bottom;
 
   /// Returns a new rectangle object translated by the given offset.
   RelativeRect shift(Offset offset) {
-    return new RelativeRect.fromLTRB(left + offset.dx, top + offset.dy, right + offset.dx, bottom + offset.dy);
+    return new RelativeRect.fromLTRB(left + offset.dx, top + offset.dy, right - offset.dx, bottom - offset.dy);
   }
 
   /// Returns a new rectangle with edges moved outwards by the given delta.
   RelativeRect inflate(double delta) {
-    return new RelativeRect.fromLTRB(left - delta, top - delta, right + delta, bottom + delta);
+    return new RelativeRect.fromLTRB(left - delta, top - delta, right - delta, bottom - delta);
   }
 
   /// Returns a new rectangle with edges moved inwards by the given delta.
@@ -91,7 +102,7 @@ class RelativeRect {
     );
   }
 
-  /// Convert this RelativeRect to a Rect, in the coordinate space of the container.
+  /// Convert this [RelativeRect] to a [Rect], in the coordinate space of the container.
   Rect toRect(Rect container) {
     return new Rect.fromLTRB(left, top, container.width - right, container.height - bottom);
   }
@@ -105,7 +116,7 @@ class RelativeRect {
     if (a == null)
       return new RelativeRect.fromLTRB(b.left * t, b.top * t, b.right * t, b.bottom * t);
     if (b == null) {
-      double k = 1.0 - t;
+      final double k = 1.0 - t;
       return new RelativeRect.fromLTRB(b.left * k, b.top * k, b.right * k, b.bottom * k);
     }
     return new RelativeRect.fromLTRB(
@@ -133,11 +144,11 @@ class RelativeRect {
   int get hashCode => hashValues(left, top, right, bottom);
 
   @override
-  String toString() => "RelativeRect.fromLTRB(${left?.toStringAsFixed(1)}, ${top?.toStringAsFixed(1)}, ${right?.toStringAsFixed(1)}, ${bottom?.toStringAsFixed(1)})";
+  String toString() => 'RelativeRect.fromLTRB(${left?.toStringAsFixed(1)}, ${top?.toStringAsFixed(1)}, ${right?.toStringAsFixed(1)}, ${bottom?.toStringAsFixed(1)})';
 }
 
 /// Parent data for use with [RenderStack].
-class StackParentData extends ContainerBoxParentDataMixin<RenderBox> {
+class StackParentData extends ContainerBoxParentData<RenderBox> {
   /// The distance by which the child's top edge is inset from the top of the stack.
   double top;
 
@@ -179,7 +190,7 @@ class StackParentData extends ContainerBoxParentDataMixin<RenderBox> {
 
   @override
   String toString() {
-    List<String> values = <String>[];
+    final List<String> values = <String>[];
     if (top != null)
       values.add('top=$top');
     if (right != null)
@@ -199,11 +210,54 @@ class StackParentData extends ContainerBoxParentDataMixin<RenderBox> {
   }
 }
 
+/// How to size the non-positioned children of a [Stack].
+///
+/// This enum is used with [Stack.fit] and [RenderStack.fit] to control
+/// how the [BoxConstraints] passed from the stack's parent to the stack's child
+/// are adjusted.
+///
+/// See also:
+///
+///  * [Stack], the widget that uses this.
+///  * [RenderStack], the render object that implements the stack algorithm.
+enum StackFit {
+  /// The constraints passed to the stack from its parent are loosened.
+  ///
+  /// For example, if the stack has constraints that force it to 350x600, then
+  /// this would allow the non-positioned children of the stack to have any
+  /// width from zero to 350 and any height from zero to 600.
+  ///
+  /// See also:
+  ///
+  ///  * [Center], which loosens the constraints passed to its child and then
+  ///    centers the child in itself.
+  ///  * [BoxConstraints.loosen], which implements the loosening of box
+  ///    constraints.
+  loose,
+
+  /// The constraints passed to the stack from its parent are tightened to the
+  /// biggest size allowed.
+  ///
+  /// For example, if the stack has loose constraints with a width in the range
+  /// 10 to 100 and a height in the range 0 to 600, then the non-positioned
+  /// children of the stack would all be sized as 100 pixels wide and 600 high.
+  expand,
+
+  /// The constraints passed to the stack from its parent are passed unmodified
+  /// to the non-positioned children.
+  ///
+  /// For example, if a [Stack] is an [Expanded] child of a [Row], the
+  /// horizontal constraints will be tight and the vertical constraints will be
+  /// loose.
+  passthrough,
+}
+
 /// Whether overflowing children should be clipped, or their overflow be
 /// visible.
 enum Overflow {
   /// Overflowing children will be visible.
   visible,
+
   /// Overflowing children will be clipped to the bounds of their parent.
   clip,
 }
@@ -253,11 +307,17 @@ class RenderStack extends RenderBox
   /// top left corners.
   RenderStack({
     List<RenderBox> children,
-    FractionalOffset alignment: FractionalOffset.topLeft,
-    Overflow overflow: Overflow.clip
-  }) : _alignment = alignment,
+    AlignmentGeometry alignment: AlignmentDirectional.topStart,
+    TextDirection textDirection,
+    StackFit fit: StackFit.loose,
+    Overflow overflow: Overflow.clip,
+  }) : assert(alignment != null),
+       assert(fit != null),
+       assert(overflow != null),
+       _alignment = alignment,
+       _textDirection = textDirection,
+       _fit = fit,
        _overflow = overflow {
-    assert(overflow != null);
     addAll(children);
   }
 
@@ -269,32 +329,83 @@ class RenderStack extends RenderBox
       child.parentData = new StackParentData();
   }
 
+  Alignment _resolvedAlignment;
+
+  void _resolve() {
+    if (_resolvedAlignment != null)
+      return;
+    _resolvedAlignment = alignment.resolve(textDirection);
+  }
+
+  void _markNeedResolution() {
+    _resolvedAlignment = null;
+    markNeedsLayout();
+  }
+
+  /// How to align the non-positioned or partially-positioned children in the
+  /// stack.
+  ///
+  /// The non-positioned children are placed relative to each other such that
+  /// the points determined by [alignment] are co-located. For example, if the
+  /// [alignment] is [Alignment.topLeft], then the top left corner of
+  /// each non-positioned child will be located at the same global coordinate.
+  ///
+  /// Partially-positioned children, those that do not specify an alignment in a
+  /// particular axis (e.g. that have neither `top` nor `bottom` set), use the
+  /// alignment to determine how they should be positioned in that
+  /// under-specified axis.
+  ///
+  /// If this is set to an [AlignmentDirectional] object, then [textDirection]
+  /// must not be null.
+  AlignmentGeometry get alignment => _alignment;
+  AlignmentGeometry _alignment;
+  set alignment(AlignmentGeometry value) {
+    assert(value != null);
+    if (_alignment == value)
+      return;
+    _alignment = value;
+    _markNeedResolution();
+  }
+
+  /// The text direction with which to resolve [alignment].
+  ///
+  /// This may be changed to null, but only after the [alignment] has been changed
+  /// to a value that does not depend on the direction.
+  TextDirection get textDirection => _textDirection;
+  TextDirection _textDirection;
+  set textDirection(TextDirection value) {
+    if (_textDirection == value)
+      return;
+    _textDirection = value;
+    _markNeedResolution();
+  }
+
+  /// How to size the non-positioned children in the stack.
+  ///
+  /// The constraints passed into the [RenderStack] from its parent are either
+  /// loosened ([StackFit.loose]) or tightened to their biggest size
+  /// ([StackFit.expand]).
+  StackFit get fit => _fit;
+  StackFit _fit;
+  set fit(StackFit value) {
+    assert(value != null);
+    if (_fit != value) {
+      _fit = value;
+      markNeedsLayout();
+    }
+  }
+
   /// Whether overflowing children should be clipped. See [Overflow].
   ///
   /// Some children in a stack might overflow its box. When this flag is set to
-  /// [Overflow.clipped], children cannot paint outside of the stack's box.
+  /// [Overflow.clip], children cannot paint outside of the stack's box.
   Overflow get overflow => _overflow;
   Overflow _overflow;
-  set overflow (Overflow value) {
+  set overflow(Overflow value) {
     assert(value != null);
     if (_overflow != value) {
       _overflow = value;
       markNeedsPaint();
-    }
-  }
-
-  /// How to align the non-positioned children in the stack.
-  ///
-  /// The non-positioned children are placed relative to each other such that
-  /// the points determined by [alignment] are co-located. For example, if the
-  /// [alignment] is [FractionalOffset.topLeft], then the top left corner of
-  /// each non-positioned child will be located at the same global coordinate.
-  FractionalOffset get alignment => _alignment;
-  FractionalOffset _alignment;
-  set alignment (FractionalOffset value) {
-    if (_alignment != value) {
-      _alignment = value;
-      markNeedsLayout();
     }
   }
 
@@ -338,11 +449,28 @@ class RenderStack extends RenderBox
 
   @override
   void performLayout() {
+    _resolve();
+    assert(_resolvedAlignment != null);
     _hasVisualOverflow = false;
     bool hasNonPositionedChildren = false;
 
-    double width = 0.0;
-    double height = 0.0;
+    double width = constraints.minWidth;
+    double height = constraints.minHeight;
+
+    BoxConstraints nonPositionedConstraints;
+    assert(fit != null);
+    switch (fit) {
+      case StackFit.loose:
+        nonPositionedConstraints = constraints.loosen();
+        break;
+      case StackFit.expand:
+        nonPositionedConstraints = new BoxConstraints.tight(constraints.biggest);
+        break;
+      case StackFit.passthrough:
+        nonPositionedConstraints = constraints;
+        break;
+    }
+    assert(nonPositionedConstraints != null);
 
     RenderBox child = firstChild;
     while (child != null) {
@@ -351,8 +479,7 @@ class RenderStack extends RenderBox
       if (!childParentData.isPositioned) {
         hasNonPositionedChildren = true;
 
-        child.layout(constraints, parentUsesSize: true);
-        childParentData.offset = Offset.zero;
+        child.layout(nonPositionedConstraints, parentUsesSize: true);
 
         final Size childSize = child.size;
         width = math.max(width, childSize.width);
@@ -370,14 +497,14 @@ class RenderStack extends RenderBox
       size = constraints.biggest;
     }
 
-    assert(!size.isInfinite);
+    assert(size.isFinite);
 
     child = firstChild;
     while (child != null) {
       final StackParentData childParentData = child.parentData;
 
       if (!childParentData.isPositioned) {
-        childParentData.offset = alignment.alongOffset(size - child.size);
+        childParentData.offset = _resolvedAlignment.alongOffset(size - child.size);
       } else {
         BoxConstraints childConstraints = const BoxConstraints();
 
@@ -393,20 +520,26 @@ class RenderStack extends RenderBox
 
         child.layout(childConstraints, parentUsesSize: true);
 
-        double x = 0.0;
-        if (childParentData.left != null)
+        double x;
+        if (childParentData.left != null) {
           x = childParentData.left;
-        else if (childParentData.right != null)
+        } else if (childParentData.right != null) {
           x = size.width - childParentData.right - child.size.width;
+        } else {
+          x = _resolvedAlignment.alongOffset(size - child.size).dx;
+        }
 
         if (x < 0.0 || x + child.size.width > size.width)
           _hasVisualOverflow = true;
 
-        double y = 0.0;
-        if (childParentData.top != null)
+        double y;
+        if (childParentData.top != null) {
           y = childParentData.top;
-        else if (childParentData.bottom != null)
+        } else if (childParentData.bottom != null) {
           y = size.height - childParentData.bottom - child.size.height;
+        } else {
+          y = _resolvedAlignment.alongOffset(size - child.size).dy;
+        }
 
         if (y < 0.0 || y + child.size.height > size.height)
           _hasVisualOverflow = true;
@@ -420,7 +553,7 @@ class RenderStack extends RenderBox
   }
 
   @override
-  bool hitTestChildren(HitTestResult result, { Point position }) {
+  bool hitTestChildren(HitTestResult result, { Offset position }) {
     return defaultHitTestChildren(result, position: position);
   }
 
@@ -436,14 +569,23 @@ class RenderStack extends RenderBox
   @override
   void paint(PaintingContext context, Offset offset) {
     if (_overflow == Overflow.clip && _hasVisualOverflow) {
-      context.pushClipRect(needsCompositing, offset, Point.origin & size, paintStack);
+      context.pushClipRect(needsCompositing, offset, Offset.zero & size, paintStack);
     } else {
       paintStack(context, offset);
     }
   }
 
   @override
-  Rect describeApproximatePaintClip(RenderObject child) => _hasVisualOverflow ? Point.origin & size : null;
+  Rect describeApproximatePaintClip(RenderObject child) => _hasVisualOverflow ? Offset.zero & size : null;
+
+  @override
+  void debugFillProperties(DiagnosticPropertiesBuilder description) {
+    super.debugFillProperties(description);
+    description.add(new DiagnosticsProperty<AlignmentGeometry>('alignment', alignment));
+    description.add(new EnumProperty<TextDirection>('textDirection', textDirection));
+    description.add(new EnumProperty<StackFit>('fit', fit));
+    description.add(new EnumProperty<Overflow>('overflow', overflow));
+  }
 }
 
 /// Implements the same layout algorithm as RenderStack but only paints the child
@@ -454,23 +596,28 @@ class RenderStack extends RenderBox
 class RenderIndexedStack extends RenderStack {
   /// Creates a stack render object that paints a single child.
   ///
-  /// The [index] argument must not be null.
+  /// If the [index] parameter is null, nothing is displayed.
   RenderIndexedStack({
     List<RenderBox> children,
-    FractionalOffset alignment: FractionalOffset.topLeft,
-    int index: 0
+    AlignmentGeometry alignment: AlignmentDirectional.topStart,
+    TextDirection textDirection,
+    int index: 0,
   }) : _index = index, super(
-   children: children,
-   alignment: alignment
-  ) {
-    assert(index != null);
+    children: children,
+    alignment: alignment,
+    textDirection: textDirection,
+  );
+
+  @override
+  void visitChildrenForSemantics(RenderObjectVisitor visitor) {
+    if (index != null)
+      visitor(_childAtIndex());
   }
 
-  /// The index of the child to show.
+  /// The index of the child to show, null if nothing is to be displayed.
   int get index => _index;
   int _index;
-  set index (int value) {
-    assert(value != null);
+  set index(int value) {
     if (_index != value) {
       _index = value;
       markNeedsLayout();
@@ -478,6 +625,7 @@ class RenderIndexedStack extends RenderStack {
   }
 
   RenderBox _childAtIndex() {
+    assert(index != null);
     RenderBox child = firstChild;
     int i = 0;
     while (child != null && i < index) {
@@ -491,23 +639,27 @@ class RenderIndexedStack extends RenderStack {
   }
 
   @override
-  bool hitTestChildren(HitTestResult result, { Point position }) {
-    if (firstChild == null)
+  bool hitTestChildren(HitTestResult result, { @required Offset position }) {
+    if (firstChild == null || index == null)
       return false;
     assert(position != null);
-    RenderBox child = _childAtIndex();
+    final RenderBox child = _childAtIndex();
     final StackParentData childParentData = child.parentData;
-    Point transformed = new Point(position.x - childParentData.offset.dx,
-                                  position.y - childParentData.offset.dy);
-    return child.hitTest(result, position: transformed);
+    return child.hitTest(result, position: position - childParentData.offset);
   }
 
   @override
   void paintStack(PaintingContext context, Offset offset) {
-    if (firstChild == null)
+    if (firstChild == null || index == null)
       return;
-    RenderBox child = _childAtIndex();
+    final RenderBox child = _childAtIndex();
     final StackParentData childParentData = child.parentData;
     context.paintChild(child, childParentData.offset + offset);
+  }
+
+  @override
+  void debugFillProperties(DiagnosticPropertiesBuilder description) {
+    super.debugFillProperties(description);
+    description.add(new IntProperty('index', index));
   }
 }

@@ -7,35 +7,35 @@ import 'dart:ui';
 import 'package:test/test.dart';
 
 void main() {
-  test("color accessors should work", () {
-    Color foo = new Color(0x12345678);
+  test('color accessors should work', () {
+    final Color foo = const Color(0x12345678);
     expect(foo.alpha, equals(0x12));
     expect(foo.red, equals(0x34));
     expect(foo.green, equals(0x56));
     expect(foo.blue, equals(0x78));
   });
 
-  test("paint set to black", () {
-    Color c = new Color(0x00000000);
-    Paint p = new Paint();
+  test('paint set to black', () {
+    final Color c = const Color(0x00000000);
+    final Paint p = new Paint();
     p.color = c;
     expect(c.toString(), equals('Color(0x00000000)'));
   });
 
-  test("color created with out of bounds value", () {
+  test('color created with out of bounds value', () {
     try {
-      Color c = new Color(0x100 << 24);
-      Paint p = new Paint();
+      final Color c = const Color(0x100 << 24);
+      final Paint p = new Paint();
       p.color = c;
     } catch (e) {
       expect(e != null, equals(true));
     }
   });
 
-  test("color created with wildly out of bounds value", () {
+  test('color created with wildly out of bounds value', () {
     try {
-      Color c = new Color(1 << 1000000);
-      Paint p = new Paint();
+      final Color c = const Color(1 << 1000000);
+      final Paint p = new Paint();
       p.color = c;
     } catch (e) {
       expect(e != null, equals(true));

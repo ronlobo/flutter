@@ -2,15 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
-import 'package:meta/meta.dart';
 
 import 'button.dart';
 import 'flat_button.dart';
 import 'material.dart';
 import 'scaffold.dart';
-import 'theme_data.dart';
 import 'theme.dart';
+import 'theme_data.dart';
 
 // https://material.google.com/components/snackbars-toasts.html#snackbars-toasts-specs
 const double _kSnackBarPadding = 24.0;
@@ -30,6 +30,40 @@ const Duration _kSnackBarDisplayDuration = const Duration(milliseconds: 1500);
 const Curve _snackBarHeightCurve = Curves.fastOutSlowIn;
 const Curve _snackBarFadeCurve = const Interval(0.72, 1.0, curve: Curves.fastOutSlowIn);
 
+/// Specify how a [SnackBar] was closed.
+///
+/// The [ScaffoldState.showSnackBar] function returns a
+/// [ScaffoldFeatureController]. The value of the controller's closed property
+/// is a Future that resolves to a SnackBarClosedReason. Applications that need
+/// to know how a snackbar was closed can use this value.
+///
+/// Example:
+///
+/// ```dart
+/// Scaffold.of(context).showSnackBar(
+///   new SnackBar( ... )
+/// ).closed.then((SnackBarClosedReason reason) {
+///    ...
+/// });
+/// ```
+enum SnackBarClosedReason {
+  /// The snack bar was closed after the user tapped a [SnackBarAction].
+  action,
+
+  /// The snack bar was closed by a user's swipe.
+  swipe,
+
+  /// The snack bar was closed by the [ScaffoldFeatureController] close callback
+  /// or by calling [ScaffoldState.hideCurrentSnackBar] directly.
+  hide,
+
+  /// The snack bar was closed by an call to [ScaffoldState.removeCurrentSnackBar].
+  remove,
+
+  /// The snack bar was closed because its timer expired.
+  timeout,
+}
+
 /// A button for a [SnackBar], known as an "action".
 ///
 /// Snack bar actions are always enabled. If you want to disable a snack bar
@@ -45,14 +79,13 @@ class SnackBarAction extends StatefulWidget {
   /// Creates an action for a [SnackBar].
   ///
   /// The [label] and [onPressed] arguments must be non-null.
-  SnackBarAction({
+  const SnackBarAction({
     Key key,
-    this.label,
-    @required this.onPressed
-  }) : super(key: key) {
-    assert(label != null);
-    assert(onPressed != null);
-  }
+    @required this.label,
+    @required this.onPressed,
+  }) : assert(label != null),
+       assert(onPressed != null),
+       super(key: key);
 
   /// The button label.
   final String label;
@@ -76,14 +109,15 @@ class _SnackBarActionState extends State<SnackBarAction> {
     setState(() {
       _haveTriggeredAction = true;
     });
-    config.onPressed();
+    widget.onPressed();
+    Scaffold.of(context).hideCurrentSnackBar(reason: SnackBarClosedReason.action);
   }
 
   @override
   Widget build(BuildContext context) {
     return new FlatButton(
       onPressed: _haveTriggeredAction ? null : _handlePressed,
-      child: new Text(config.label)
+      child: new Text(widget.label),
     );
   }
 }
@@ -110,20 +144,23 @@ class SnackBar extends StatelessWidget {
   /// Creates a snack bar.
   ///
   /// The [content] argument must be non-null.
-  SnackBar({
+  const SnackBar({
     Key key,
-    this.content,
+    @required this.content,
+    this.backgroundColor,
     this.action,
     this.duration: _kSnackBarDisplayDuration,
-    this.animation
-  }) : super(key: key) {
-    assert(content != null);
-  }
+    this.animation,
+  }) : assert(content != null),
+       super(key: key);
 
   /// The primary content of the snack bar.
   ///
   /// Typically a [Text] widget.
   final Widget content;
+
+  /// The Snackbar's background color. By default the color is dark grey.
+  final Color backgroundColor;
 
   /// (optional) An action that the user can take based on the snack bar.
   ///
@@ -151,71 +188,71 @@ class SnackBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     assert(animation != null);
-    ThemeData theme = Theme.of(context);
-    ThemeData darkTheme = new ThemeData(
+    final ThemeData theme = Theme.of(context);
+    final ThemeData darkTheme = new ThemeData(
       brightness: Brightness.dark,
       accentColor: theme.accentColor,
-      accentColorBrightness: theme.accentColorBrightness
+      accentColorBrightness: theme.accentColorBrightness,
     );
-    List<Widget> children = <Widget>[
+    final List<Widget> children = <Widget>[
       const SizedBox(width: _kSnackBarPadding),
-      new Flexible(
+      new Expanded(
         child: new Container(
           padding: const EdgeInsets.symmetric(vertical: _kSingleLineVerticalPadding),
           child: new DefaultTextStyle(
             style: darkTheme.textTheme.subhead,
-            child: content
-          )
-        )
-      )
+            child: content,
+          ),
+        ),
+      ),
     ];
     if (action != null) {
       children.add(new ButtonTheme.bar(
         padding: const EdgeInsets.symmetric(horizontal: _kSnackBarPadding),
         textTheme: ButtonTextTheme.accent,
-        child: action
+        child: action,
       ));
     } else {
       children.add(const SizedBox(width: _kSnackBarPadding));
     }
-    CurvedAnimation heightAnimation = new CurvedAnimation(parent: animation, curve: _snackBarHeightCurve);
-    CurvedAnimation fadeAnimation = new CurvedAnimation(parent: animation, curve: _snackBarFadeCurve, reverseCurve: const Threshold(0.0));
+    final CurvedAnimation heightAnimation = new CurvedAnimation(parent: animation, curve: _snackBarHeightCurve);
+    final CurvedAnimation fadeAnimation = new CurvedAnimation(parent: animation, curve: _snackBarFadeCurve, reverseCurve: const Threshold(0.0));
     return new ClipRect(
       child: new AnimatedBuilder(
         animation: heightAnimation,
         builder: (BuildContext context, Widget child) {
           return new Align(
-            alignment: FractionalOffset.topLeft,
+            alignment: AlignmentDirectional.topStart,
             heightFactor: heightAnimation.value,
-            child: child
+            child: child,
           );
         },
         child: new Semantics(
           container: true,
-          child: new Dismissable(
-            key: new Key('dismissable'),
+          child: new Dismissible(
+            key: const Key('dismissible'),
             direction: DismissDirection.down,
             resizeDuration: null,
             onDismissed: (DismissDirection direction) {
-              Scaffold.of(context).removeCurrentSnackBar();
+              Scaffold.of(context).removeCurrentSnackBar(reason: SnackBarClosedReason.swipe);
             },
             child: new Material(
-              elevation: 6,
-              color: _kSnackBackground,
+              elevation: 6.0,
+              color: backgroundColor ?? _kSnackBackground,
               child: new Theme(
                 data: darkTheme,
                 child: new FadeTransition(
                   opacity: fadeAnimation,
                   child: new Row(
                     children: children,
-                    crossAxisAlignment: CrossAxisAlignment.center
-                  )
-                )
-              )
-            )
-          )
-        )
-      )
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -238,9 +275,10 @@ class SnackBar extends StatelessWidget {
     return new SnackBar(
       key: key ?? fallbackKey,
       content: content,
+      backgroundColor: backgroundColor,
       action: action,
       duration: duration,
-      animation: newAnimation
+      animation: newAnimation,
     );
   }
 }

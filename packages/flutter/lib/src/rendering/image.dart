@@ -8,44 +8,74 @@ import 'box.dart';
 import 'object.dart';
 
 export 'package:flutter/painting.dart' show
-  ImageFit,
+  BoxFit,
   ImageRepeat;
 
 /// An image in the render tree.
 ///
 /// The render image attempts to find a size for itself that fits in the given
-/// constraints and preserves the image's intrinisc aspect ratio.
+/// constraints and preserves the image's intrinsic aspect ratio.
 ///
 /// The image is painted using [paintImage], which describes the meanings of the
 /// various fields on this class in more detail.
 class RenderImage extends RenderBox {
   /// Creates a render box that displays an image.
+  ///
+  /// The [scale], [alignment], [repeat], and [matchTextDirection] arguments
+  /// must not be null. The [textDirection] argument must not be null if
+  /// [alignment] will need resolving or if [matchTextDirection] is true.
   RenderImage({
     ui.Image image,
     double width,
     double height,
     double scale: 1.0,
     Color color,
-    ImageFit fit,
-    FractionalOffset alignment,
+    BlendMode colorBlendMode,
+    BoxFit fit,
+    AlignmentGeometry alignment: Alignment.center,
     ImageRepeat repeat: ImageRepeat.noRepeat,
-    Rect centerSlice
-  }) : _image = image,
-      _width = width,
-      _height = height,
-      _scale = scale,
-      _color = color,
-      _fit = fit,
-      _alignment = alignment,
-      _repeat = repeat,
-      _centerSlice = centerSlice {
+    Rect centerSlice,
+    bool matchTextDirection: false,
+    TextDirection textDirection,
+  }) : assert(scale != null),
+       assert(repeat != null),
+       assert(alignment != null),
+       assert(matchTextDirection != null),
+       _image = image,
+       _width = width,
+       _height = height,
+       _scale = scale,
+       _color = color,
+       _colorBlendMode = colorBlendMode,
+       _fit = fit,
+       _alignment = alignment,
+       _repeat = repeat,
+       _centerSlice = centerSlice,
+       _matchTextDirection = matchTextDirection,
+       _textDirection = textDirection {
     _updateColorFilter();
+  }
+
+  Alignment _resolvedAlignment;
+  bool _flipHorizontally;
+
+  void _resolve() {
+    if (_resolvedAlignment != null)
+      return;
+    _resolvedAlignment = alignment.resolve(textDirection);
+    _flipHorizontally = matchTextDirection && textDirection == TextDirection.rtl;
+  }
+
+  void _markNeedResolution() {
+    _resolvedAlignment = null;
+    _flipHorizontally = null;
+    markNeedsPaint();
   }
 
   /// The image to display.
   ui.Image get image => _image;
   ui.Image _image;
-  set image (ui.Image value) {
+  set image(ui.Image value) {
     if (value == _image)
       return;
     _image = value;
@@ -60,7 +90,7 @@ class RenderImage extends RenderBox {
   /// aspect ratio.
   double get width => _width;
   double _width;
-  set width (double value) {
+  set width(double value) {
     if (value == _width)
       return;
     _width = value;
@@ -73,7 +103,7 @@ class RenderImage extends RenderBox {
   /// aspect ratio.
   double get height => _height;
   double _height;
-  set height (double value) {
+  set height(double value) {
     if (value == _height)
       return;
     _height = value;
@@ -85,7 +115,7 @@ class RenderImage extends RenderBox {
   /// Used when determining the best display size for the image.
   double get scale => _scale;
   double _scale;
-  set scale (double value) {
+  set scale(double value) {
     assert(value != null);
     if (value == _scale)
       return;
@@ -95,21 +125,38 @@ class RenderImage extends RenderBox {
 
   ColorFilter _colorFilter;
 
-  // Should we make the transfer mode configurable?
   void _updateColorFilter() {
     if (_color == null)
       _colorFilter = null;
     else
-      _colorFilter = new ColorFilter.mode(_color, TransferMode.srcIn);
+      _colorFilter = new ColorFilter.mode(_color, _colorBlendMode ?? BlendMode.srcIn);
   }
 
-  /// If non-null, apply this color filter to the image before painting.
+  /// If non-null, this color is blended with each image pixel using [colorBlendMode].
   Color get color => _color;
   Color _color;
-  set color (Color value) {
+  set color(Color value) {
     if (value == _color)
       return;
     _color = value;
+    _updateColorFilter();
+    markNeedsPaint();
+  }
+
+  /// Used to combine [color] with this image.
+  ///
+  /// The default is [BlendMode.srcIn]. In terms of the blend mode, [color] is
+  /// the source and this image is the destination.
+  ///
+  /// See also:
+  ///
+  ///  * [BlendMode], which includes an illustration of the effect of each blend mode.
+  BlendMode get colorBlendMode => _colorBlendMode;
+  BlendMode _colorBlendMode;
+  set colorBlendMode(BlendMode value) {
+    if (value == _colorBlendMode)
+      return;
+    _colorBlendMode = value;
     _updateColorFilter();
     markNeedsPaint();
   }
@@ -118,9 +165,9 @@ class RenderImage extends RenderBox {
   ///
   /// The default varies based on the other fields. See the discussion at
   /// [paintImage].
-  ImageFit get fit => _fit;
-  ImageFit _fit;
-  set fit (ImageFit value) {
+  BoxFit get fit => _fit;
+  BoxFit _fit;
+  set fit(BoxFit value) {
     if (value == _fit)
       return;
     _fit = value;
@@ -128,19 +175,24 @@ class RenderImage extends RenderBox {
   }
 
   /// How to align the image within its bounds.
-  FractionalOffset get alignment => _alignment;
-  FractionalOffset _alignment;
-  set alignment (FractionalOffset value) {
+  ///
+  /// If this is set to a text-direction-dependent value, [textDirection] must
+  /// not be null.
+  AlignmentGeometry get alignment => _alignment;
+  AlignmentGeometry _alignment;
+  set alignment(AlignmentGeometry value) {
+    assert(value != null);
     if (value == _alignment)
       return;
     _alignment = value;
-    markNeedsPaint();
+    _markNeedResolution();
   }
 
   /// How to repeat this image if it doesn't fill its layout bounds.
   ImageRepeat get repeat => _repeat;
   ImageRepeat _repeat;
-  set repeat (ImageRepeat value) {
+  set repeat(ImageRepeat value) {
+    assert(value != null);
     if (value == _repeat)
       return;
     _repeat = value;
@@ -156,17 +208,55 @@ class RenderImage extends RenderBox {
   /// the center slice will be stretched only vertically.
   Rect get centerSlice => _centerSlice;
   Rect _centerSlice;
-  set centerSlice (Rect value) {
+  set centerSlice(Rect value) {
     if (value == _centerSlice)
       return;
     _centerSlice = value;
     markNeedsPaint();
   }
 
+  /// Whether to paint the image in the direction of the [TextDirection].
+  ///
+  /// If this is true, then in [TextDirection.ltr] contexts, the image will be
+  /// drawn with its origin in the top left (the "normal" painting direction for
+  /// images); and in [TextDirection.rtl] contexts, the image will be drawn with
+  /// a scaling factor of -1 in the horizontal direction so that the origin is
+  /// in the top right.
+  ///
+  /// This is occasionally used with images in right-to-left environments, for
+  /// images that were designed for left-to-right locales. Be careful, when
+  /// using this, to not flip images with integral shadows, text, or other
+  /// effects that will look incorrect when flipped.
+  ///
+  /// If this is set to true, [textDirection] must not be null.
+  bool get matchTextDirection => _matchTextDirection;
+  bool _matchTextDirection;
+  set matchTextDirection(bool value) {
+    assert(value != null);
+    if (value == _matchTextDirection)
+      return;
+    _matchTextDirection = value;
+    _markNeedResolution();
+  }
+
+  /// The text direction with which to resolve [alignment].
+  ///
+  /// This may be changed to null, but only after the [alignment] and
+  /// [matchTextDirection] properties have been changed to values that do not
+  /// depend on the direction.
+  TextDirection get textDirection => _textDirection;
+  TextDirection _textDirection;
+  set textDirection(TextDirection value) {
+    if (_textDirection == value)
+      return;
+    _textDirection = value;
+    _markNeedResolution();
+  }
+
   /// Find a size for the render image within the given constraints.
   ///
   ///  - The dimensions of the RenderImage must fit within the constraints.
-  ///  - The aspect ratio of the RenderImage matches the instrinsic aspect
+  ///  - The aspect ratio of the RenderImage matches the intrinsic aspect
   ///    ratio of the image.
   ///  - The RenderImage's dimension are maximal subject to being smaller than
   ///    the intrinsic size of the image.
@@ -216,7 +306,7 @@ class RenderImage extends RenderBox {
   }
 
   @override
-  bool hitTestSelf(Point position) => true;
+  bool hitTestSelf(Offset position) => true;
 
   @override
   void performLayout() {
@@ -227,37 +317,36 @@ class RenderImage extends RenderBox {
   void paint(PaintingContext context, Offset offset) {
     if (_image == null)
       return;
+    _resolve();
+    assert(_resolvedAlignment != null);
+    assert(_flipHorizontally != null);
     paintImage(
       canvas: context.canvas,
       rect: offset & size,
       image: _image,
       colorFilter: _colorFilter,
       fit: _fit,
-      alignment: _alignment,
+      alignment: _resolvedAlignment,
       centerSlice: _centerSlice,
-      repeat: _repeat
+      repeat: _repeat,
+      flipHorizontally: _flipHorizontally,
     );
   }
 
   @override
-  void debugFillDescription(List<String> description) {
-    super.debugFillDescription(description);
-    description.add('image: $image');
-    if (width != null)
-      description.add('width: $width');
-    if (height != null)
-      description.add('height: $height');
-    if (scale != 1.0)
-      description.add('scale: $scale');
-    if (color != null)
-      description.add('color: $color');
-    if (fit != null)
-      description.add('fit: $fit');
-    if (alignment != null)
-      description.add('alignment: $alignment');
-    if (repeat != ImageRepeat.noRepeat)
-      description.add('repeat: $repeat');
-    if (centerSlice != null)
-      description.add('centerSlice: $centerSlice');
+  void debugFillProperties(DiagnosticPropertiesBuilder description) {
+    super.debugFillProperties(description);
+    description.add(new DiagnosticsProperty<ui.Image>('image', image));
+    description.add(new DoubleProperty('width', width, defaultValue: null));
+    description.add(new DoubleProperty('height', height, defaultValue: null));
+    description.add(new DoubleProperty('scale', scale, defaultValue: 1.0));
+    description.add(new DiagnosticsProperty<Color>('color', color, defaultValue: null));
+    description.add(new EnumProperty<BlendMode>('colorBlendMode', colorBlendMode, defaultValue: null));
+    description.add(new EnumProperty<BoxFit>('fit', fit, defaultValue: null));
+    description.add(new DiagnosticsProperty<AlignmentGeometry>('alignment', alignment, defaultValue: null));
+    description.add(new EnumProperty<ImageRepeat>('repeat', repeat, defaultValue: ImageRepeat.noRepeat));
+    description.add(new DiagnosticsProperty<Rect>('centerSlice', centerSlice, defaultValue: null));
+    description.add(new FlagProperty('matchTextDirection', value: matchTextDirection, ifTrue: 'match text direction'));
+    description.add(new EnumProperty<TextDirection>('textDirection', textDirection, defaultValue: null));
   }
 }

@@ -2,6 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'package:flutter/foundation.dart';
+
+// Any changes to this file should be reflected in the debugAssertAllSchedulerVarsUnset()
+// function below.
+
 /// Print a banner at the beginning of each frame.
 ///
 /// Frames triggered by the engine and handler by the scheduler binding will
@@ -16,7 +21,16 @@
 /// intra-frame output from inter-frame output, set [debugPrintEndFrameBanner]
 /// to true as well.
 ///
-/// See [SchedulerBinding.beginFrame].
+/// See also:
+///
+///  * [debugProfilePaintsEnabled], which does something similar for
+///    painting but using the timeline view.
+///
+///  * [debugPrintLayouts], which does something similar for layout but using
+///    console output.
+///
+///  * The discussions at [WidgetsBinding.drawFrame] and at
+///    [SchedulerBinding.handleBeginFrame].
 bool debugPrintBeginFrameBanner = false;
 
 /// Print a banner at the end of each frame.
@@ -24,3 +38,32 @@ bool debugPrintBeginFrameBanner = false;
 /// Combined with [debugPrintBeginFrameBanner], this can be helpful for
 /// determining if code is running during a frame or between frames.
 bool debugPrintEndFrameBanner = false;
+
+/// Log the call stacks that cause a frame to be scheduled.
+///
+/// This is called whenever [SchedulerBinding.scheduleFrame] schedules a frame. This
+/// can happen for various reasons, e.g. when a [Ticker] or
+/// [AnimationController] is started, or when [RenderObject.markNeedsLayout] is
+/// called, or when [State.setState] is called.
+///
+/// To get a stack specifically when widgets are scheduled to be built, see
+/// [debugPrintScheduleBuildForStacks].
+bool debugPrintScheduleFrameStacks = false;
+
+/// Returns true if none of the scheduler library debug variables have been changed.
+///
+/// This function is used by the test framework to ensure that debug variables
+/// haven't been inadvertently changed.
+///
+/// See [https://docs.flutter.io/flutter/scheduler/scheduler-library.html] for
+/// a complete list.
+bool debugAssertAllSchedulerVarsUnset(String reason) {
+  assert(() {
+    if (debugPrintBeginFrameBanner ||
+        debugPrintEndFrameBanner) {
+      throw new FlutterError(reason);
+    }
+    return true;
+  }());
+  return true;
+}

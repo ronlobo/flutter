@@ -2,13 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'dart:io';
-
-import 'package:path/path.dart' as path;
-
+import '../base/file_system.dart';
 import '../base/process.dart';
 
-const String kCFBundleIdentifierKey = "CFBundleIdentifier";
+const String kCFBundleIdentifierKey = 'CFBundleIdentifier';
+const String kCFBundleShortVersionStringKey = 'CFBundleShortVersionString';
 
 String getValueFromFile(String plistFilePath, String key) {
   // TODO(chinmaygarde): For now, we only need to read from plist files on a mac
@@ -18,13 +16,13 @@ String getValueFromFile(String plistFilePath, String key) {
   // 'defaults' requires the path to be absolute and without the 'plist'
   // extension.
 
-  if (!FileSystemEntity.isFileSync(plistFilePath))
+  if (!fs.isFileSync(plistFilePath))
     return null;
 
-  String normalizedPlistPath = path.withoutExtension(path.absolute(plistFilePath));
+  final String normalizedPlistPath = fs.path.withoutExtension(fs.path.absolute(plistFilePath));
 
   try {
-    String value = runCheckedSync(<String>[
+    final String value = runCheckedSync(<String>[
       '/usr/bin/defaults', 'read', normalizedPlistPath, key
     ]);
     return value.isEmpty ? null : value;

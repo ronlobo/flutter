@@ -2,176 +2,76 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
-import 'material.dart';
+
 import 'theme.dart';
 
-const double _kMinFlingVelocity = 1.0;  // screen width per second
+// Fractional offset from 1/4 screen below the top to fully on screen.
+final Tween<Offset> _kBottomUpTween = new Tween<Offset>(
+  begin: const Offset(0.0, 0.25),
+  end: Offset.zero,
+);
 
 // Used for Android and Fuchsia.
-class _MountainViewPageTransition extends AnimatedWidget {
-  static final FractionalOffsetTween _kTween = new FractionalOffsetTween(
-    begin: FractionalOffset.bottomLeft,
-    end: FractionalOffset.topLeft
-  );
-
+class _MountainViewPageTransition extends StatelessWidget {
   _MountainViewPageTransition({
     Key key,
-    Animation<double> animation,
-    this.child
-  }) : super(
-    key: key,
-    animation: _kTween.animate(new CurvedAnimation(
-      parent: animation, // The route's linear 0.0 - 1.0 animation.
-      curve: Curves.fastOutSlowIn
-    )
-  ));
+    @required Animation<double> routeAnimation,
+    @required this.child,
+  }) : _positionAnimation = _kBottomUpTween.animate(new CurvedAnimation(
+         parent: routeAnimation, // The route's linear 0.0 - 1.0 animation.
+         curve: Curves.fastOutSlowIn,
+       )),
+       super(key: key);
 
+  final Animation<Offset> _positionAnimation;
   final Widget child;
 
   @override
   Widget build(BuildContext context) {
     // TODO(ianh): tell the transform to be un-transformed for hit testing
     return new SlideTransition(
-      position: animation,
-      child: child
+      position: _positionAnimation,
+      child: child,
     );
   }
 }
 
-// Used for iOS.
-class _CupertinoPageTransition extends AnimatedWidget {
-  static final FractionalOffsetTween _kTween = new FractionalOffsetTween(
-    begin: FractionalOffset.topRight,
-    end: -FractionalOffset.topRight
-  );
-
-  _CupertinoPageTransition({
-    Key key,
-    Animation<double> animation,
-    this.child
-  }) : super(
-    key: key,
-    animation: _kTween.animate(new CurvedAnimation(
-      parent: animation,
-      curve: new _CupertinoTransitionCurve(null)
-    )
-  ));
-
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    // TODO(ianh): tell the transform to be un-transformed for hit testing
-    // but not while being controlled by a gesture.
-    return new SlideTransition(
-      position: animation,
-      child: new Material(
-        elevation: 6,
-        child: child
-      )
-    );
-  }
-}
-
-// Custom curve for iOS page transitions.
-class _CupertinoTransitionCurve extends Curve {
-  _CupertinoTransitionCurve(this.curve);
-
-  Curve curve;
-
-  @override
-  double transform(double t) {
-    // The input [t] is the average of the current and next route's animation.
-    // This means t=0.5 represents when the route is fully onscreen. At
-    // t > 0.5, it is partially offscreen to the left (which happens when there
-    // is another route on top). At t < 0.5, the route is to the right.
-    // We divide the range into two halves, each with a different transition,
-    // and scale each half to the range [0.0, 1.0] before applying curves so that
-    // each half goes through the full range of the curve.
-    if (t > 0.5) {
-      // Route is to the left of center.
-      t = (t - 0.5) * 2.0;
-      if (curve != null)
-        t = curve.transform(t);
-      t = t / 3.0;
-      t = t / 2.0 + 0.5;
-    } else {
-      // Route is to the right of center.
-      if (curve != null)
-        t = curve.transform(t * 2.0) / 2.0;
-    }
-    return t;
-  }
-}
-
-// This class responds to drag gestures to control the route's transition
-// animation progress. Used for iOS back gesture.
-class _CupertinoBackGestureController extends NavigationGestureController {
-  _CupertinoBackGestureController({
-    NavigatorState navigator,
-    this.controller,
-    this.onDisposed,
-  }) : super(navigator);
-
-  AnimationController controller;
-  VoidCallback onDisposed;
-
-  @override
-  void dispose() {
-    super.dispose();
-    onDisposed();
-    controller.removeStatusListener(handleStatusChanged);
-    controller = null;
-  }
-
-  @override
-  void dragUpdate(double delta) {
-    controller.value -= delta;
-  }
-
-  @override
-  bool dragEnd(double velocity) {
-    if (velocity.abs() >= _kMinFlingVelocity) {
-      controller.fling(velocity: -velocity);
-    } else if (controller.value <= 0.5) {
-      controller.fling(velocity: -1.0);
-    } else {
-      controller.fling(velocity: 1.0);
-    }
-
-    // Don't end the gesture until the transition completes.
-    final AnimationStatus status = controller.status;
-    handleStatusChanged(controller.status);
-    controller?.addStatusListener(handleStatusChanged);
-
-    return (status == AnimationStatus.reverse || status == AnimationStatus.dismissed);
-  }
-
-  void handleStatusChanged(AnimationStatus status) {
-    if (status == AnimationStatus.dismissed)
-      navigator.pop();
-    if (status == AnimationStatus.dismissed || status == AnimationStatus.completed)
-      dispose();
-  }
-}
-
-/// A modal route that replaces the entire screen with a material design transition.
+/// A modal route that replaces the entire screen with a platform-adaptive transition.
 ///
-/// The entrance transition for the page slides the page upwards and fades it
+/// For Android, the entrance transition for the page slides the page upwards and fades it
 /// in. The exit transition is the same, but in reverse.
+///
+/// The transition is adaptive to the platform and on iOS, the page slides in from the right and
+/// exits in reverse. The page also shifts to the left in parallax when another page enters to
+/// cover it.
 ///
 /// By default, when a modal route is replaced by another, the previous route
 /// remains in memory. To free all the resources when this is not necessary, set
 /// [maintainState] to false.
+///
+/// Specify whether the incoming page is a fullscreen modal dialog. On iOS, those
+/// pages animate bottom->up rather than right->left.
+///
+/// The type `T` specifies the return type of the route which can be supplied as
+/// the route is popped from the stack via [Navigator.pop] when an optional
+/// `result` can be provided.
+///
+/// See also:
+///
+///  * [CupertinoPageRoute], that this [PageRoute] delegates transition animations to for iOS.
 class MaterialPageRoute<T> extends PageRoute<T> {
   /// Creates a page route for use in a material design app.
   MaterialPageRoute({
-    this.builder,
+    @required this.builder,
     RouteSettings settings: const RouteSettings(),
     this.maintainState: true,
-  }) : super(settings: settings) {
-    assert(builder != null);
+    bool fullscreenDialog: false,
+  }) : assert(builder != null),
+       super(settings: settings, fullscreenDialog: fullscreenDialog) {
+    // ignore: prefer_asserts_in_initializer_lists , https://github.com/dart-lang/sdk/issues/31223
     assert(opaque);
   }
 
@@ -181,6 +81,26 @@ class MaterialPageRoute<T> extends PageRoute<T> {
   @override
   final bool maintainState;
 
+  /// A delegate PageRoute to which iOS themed page operations are delegated to.
+  /// It's lazily created on first use.
+  CupertinoPageRoute<T> get _cupertinoPageRoute {
+    assert(_useCupertinoTransitions);
+    _internalCupertinoPageRoute ??= new CupertinoPageRoute<T>(
+      builder: builder, // Not used.
+      fullscreenDialog: fullscreenDialog,
+      hostRoute: this,
+    );
+    return _internalCupertinoPageRoute;
+  }
+  CupertinoPageRoute<T> _internalCupertinoPageRoute;
+
+  /// Whether we should currently be using Cupertino transitions. This is true
+  /// if the theme says we're on iOS, or if we're in an active gesture.
+  bool get _useCupertinoTransitions {
+    return _internalCupertinoPageRoute?.popGestureInProgress == true
+        || Theme.of(navigator.context).platform == TargetPlatform.iOS;
+  }
+
   @override
   Duration get transitionDuration => const Duration(milliseconds: 300);
 
@@ -188,34 +108,26 @@ class MaterialPageRoute<T> extends PageRoute<T> {
   Color get barrierColor => null;
 
   @override
-  bool canTransitionFrom(TransitionRoute<dynamic> nextRoute) {
-    return nextRoute is MaterialPageRoute<dynamic>;
+  bool canTransitionFrom(TransitionRoute<dynamic> previousRoute) {
+    return (previousRoute is MaterialPageRoute || previousRoute is CupertinoPageRoute);
+  }
+
+  @override
+  bool canTransitionTo(TransitionRoute<dynamic> nextRoute) {
+    // Don't perform outgoing animation if the next route is a fullscreen dialog.
+    return (nextRoute is MaterialPageRoute && !nextRoute.fullscreenDialog)
+        || (nextRoute is CupertinoPageRoute && !nextRoute.fullscreenDialog);
   }
 
   @override
   void dispose() {
-    _backGestureController?.dispose();
+    _internalCupertinoPageRoute?.dispose();
     super.dispose();
   }
 
-  _CupertinoBackGestureController _backGestureController;
-
   @override
-  NavigationGestureController startPopGesture(NavigatorState navigator) {
-    if (controller.status != AnimationStatus.completed)
-      return null;
-    assert(_backGestureController == null);
-    _backGestureController = new _CupertinoBackGestureController(
-      navigator: navigator,
-      controller: controller,
-      onDisposed: () { _backGestureController = null; }
-    );
-    return _backGestureController;
-  }
-
-  @override
-  Widget buildPage(BuildContext context, Animation<double> animation, Animation<double> forwardAnimation) {
-    Widget result = builder(context);
+  Widget buildPage(BuildContext context, Animation<double> animation, Animation<double> secondaryAnimation) {
+    final Widget result = builder(context);
     assert(() {
       if (result == null) {
         throw new FlutterError(
@@ -224,22 +136,18 @@ class MaterialPageRoute<T> extends PageRoute<T> {
         );
       }
       return true;
-    });
+    }());
     return result;
   }
 
   @override
-  Widget buildTransitions(BuildContext context, Animation<double> animation, Animation<double> forwardAnimation, Widget child) {
-    if (Theme.of(context).platform == TargetPlatform.iOS &&
-        Navigator.of(context).userGestureInProgress) {
-      return new _CupertinoPageTransition(
-        animation: new AnimationMean(left: animation, right: forwardAnimation),
-        child: child
-      );
+  Widget buildTransitions(BuildContext context, Animation<double> animation, Animation<double> secondaryAnimation, Widget child) {
+    if (_useCupertinoTransitions) {
+      return _cupertinoPageRoute.buildTransitions(context, animation, secondaryAnimation, child);
     } else {
       return new _MountainViewPageTransition(
-        animation: animation,
-        child: child
+        routeAnimation: animation,
+        child: child,
       );
     }
   }

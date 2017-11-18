@@ -9,25 +9,28 @@ import 'rendering_tester.dart';
 
 void main() {
   test('Stack can layout with top, right, bottom, left 0.0', () {
-    RenderBox size = new RenderConstrainedBox(
+    final RenderBox size = new RenderConstrainedBox(
       additionalConstraints: new BoxConstraints.tight(const Size(100.0, 100.0))
     );
 
-    RenderBox red = new RenderDecoratedBox(
-      decoration: new BoxDecoration(
-        backgroundColor: const Color(0xFFFF0000)
+    final RenderBox red = new RenderDecoratedBox(
+      decoration: const BoxDecoration(
+        color: const Color(0xFFFF0000),
       ),
       child: size
     );
 
-    RenderBox green = new RenderDecoratedBox(
-      decoration: new BoxDecoration(
-        backgroundColor: const Color(0xFFFF0000)
-      )
+    final RenderBox green = new RenderDecoratedBox(
+      decoration: const BoxDecoration(
+        color: const Color(0xFFFF0000),
+      ),
     );
 
-    RenderBox stack = new RenderStack(children: <RenderBox>[red, green]);
-    StackParentData greenParentData = green.parentData;
+    final RenderBox stack = new RenderStack(
+      textDirection: TextDirection.ltr,
+      children: <RenderBox>[red, green],
+    );
+    final StackParentData greenParentData = green.parentData;
     greenParentData
       ..top = 0.0
       ..right = 0.0
@@ -45,4 +48,37 @@ void main() {
     expect(green.size.width, equals(100.0));
     expect(green.size.height, equals(100.0));
   });
+
+
+  group('RenderIndexedStack', () {
+    test('visitChildrenForSemantics only visits displayed child', () {
+      final RenderBox child1 = new RenderConstrainedBox(
+          additionalConstraints: new BoxConstraints.tight(const Size(100.0, 100.0))
+      );
+      final RenderBox child2 = new RenderConstrainedBox(
+          additionalConstraints: new BoxConstraints.tight(const Size(100.0, 100.0))
+      );
+      final RenderBox child3 = new RenderConstrainedBox(
+          additionalConstraints: new BoxConstraints.tight(const Size(100.0, 100.0))
+      );
+      final RenderBox stack = new RenderIndexedStack(
+          index: 1,
+          textDirection: TextDirection.ltr,
+          children: <RenderBox>[child1, child2, child3],
+      );
+
+      final List<RenderObject> vistedChildren = <RenderObject>[];
+      final RenderObjectVisitor visitor = (RenderObject child) {
+        vistedChildren.add(child);
+      };
+
+      stack.visitChildrenForSemantics(visitor);
+
+      expect(vistedChildren, hasLength(1));
+      expect(vistedChildren.first, child2);
+    });
+
+  });
+
+  // More tests in ../widgets/stack_test.dart
 }

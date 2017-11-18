@@ -11,7 +11,8 @@ import 'package:intl/src/intl_helpers.dart';
 import 'stock_messages_en.dart' as messages_en;
 import 'stock_messages_es.dart' as messages_es;
 
-Map<String, Function> _deferredLibraries = {
+typedef Future<dynamic> LibraryLoader();
+Map<String, LibraryLoader> _deferredLibraries = {
   'en': () => new Future.value(null),
   'es': () => new Future.value(null),
 };
@@ -29,15 +30,24 @@ MessageLookupByLibrary _findExact(localeName) {
 
 /// User programs should call this before using [localeName] for messages.
 Future initializeMessages(String localeName) {
-  initializeInternalMessageLookup(() => new CompositeMessageLookup());
   var lib = _deferredLibraries[Intl.canonicalizedLocale(localeName)];
   var load = lib == null ? new Future.value(false) : lib();
-  return load.then((_) =>
-      messageLookup.addLocale(localeName, _findGeneratedMessagesFor));
+  return load.then((_) {
+    initializeInternalMessageLookup(() => new CompositeMessageLookup());
+    messageLookup.addLocale(localeName, _findGeneratedMessagesFor);
+  });
+}
+
+bool _messagesExistFor(String locale) {
+  var messages;
+  try {
+    messages = _findExact(locale);
+  } catch (e) {}
+  return messages != null;
 }
 
 MessageLookupByLibrary _findGeneratedMessagesFor(locale) {
-  var actualLocale = Intl.verifiedLocale(locale, (x) => _findExact(x) != null,
+  var actualLocale = Intl.verifiedLocale(locale, _messagesExistFor,
       onFailure: (_) => null);
   if (actualLocale == null) return null;
   return _findExact(actualLocale);

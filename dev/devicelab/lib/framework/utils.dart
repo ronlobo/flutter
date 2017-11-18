@@ -5,15 +5,19 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
+import 'package:args/args.dart';
 import 'package:meta/meta.dart';
 import 'package:path/path.dart' as path;
+import 'package:process/process.dart';
 import 'package:stack_trace/stack_trace.dart';
 
 /// Virtual current working directory, which affect functions, such as [exec].
 String cwd = Directory.current.path;
 
 List<ProcessInfo> _runningProcesses = <ProcessInfo>[];
+ProcessManager _processManager = const LocalProcessManager();
 
 class ProcessInfo {
   ProcessInfo(this.command, this.process);
@@ -46,7 +50,7 @@ class HealthCheckResult {
 
   @override
   String toString() {
-    StringBuffer buf = new StringBuffer(succeeded ? 'succeeded' : 'failed');
+    final StringBuffer buf = new StringBuffer(succeeded ? 'succeeded' : 'failed');
     if (details != null && details.trim().isNotEmpty) {
       buf.writeln();
       // Indent details by 4 spaces
@@ -89,9 +93,24 @@ Directory dir(String path) => new Directory(path);
 File file(String path) => new File(path);
 
 void copy(File sourceFile, Directory targetDirectory, {String name}) {
-  File target = file(
+  final File target = file(
       path.join(targetDirectory.path, name ?? path.basename(sourceFile.path)));
   target.writeAsBytesSync(sourceFile.readAsBytesSync());
+}
+
+void recursiveCopy(Directory source, Directory target) {
+  if (!target.existsSync())
+    target.createSync();
+
+  for (FileSystemEntity entity in source.listSync(followLinks: false)) {
+    final String name = path.basename(entity.path);
+    if (entity is Directory)
+      recursiveCopy(entity, new Directory(path.join(target.path, name)));
+    else if (entity is File) {
+      final File dest = new File(path.join(target.path, name));
+      dest.writeAsBytesSync(entity.readAsBytesSync());
+    }
+  }
 }
 
 FileSystemEntity move(FileSystemEntity whatToMove,
@@ -113,21 +132,26 @@ void mkdirs(Directory directory) {
 bool exists(FileSystemEntity entity) => entity.existsSync();
 
 void section(String title) {
-  print('\n••• $title •••');
+  title = '╡ ••• $title ••• ╞';
+  final String line = '═' * math.max((80 - title.length) ~/ 2, 2);
+  String output = '$line$title$line';
+  if (output.length == 79)
+    output += '═';
+  print('\n\n$output\n');
 }
 
 Future<String> getDartVersion() async {
   // The Dart VM returns the version text to stderr.
-  ProcessResult result = Process.runSync(dartBin, <String>['--version']);
+  final ProcessResult result = _processManager.runSync(<String>[dartBin, '--version']);
   String version = result.stderr.trim();
 
   // Convert:
   //   Dart VM version: 1.17.0-dev.2.0 (Tue May  3 12:14:52 2016) on "macos_x64"
   // to:
   //   1.17.0-dev.2.0
-  if (version.indexOf('(') != -1)
+  if (version.contains('('))
     version = version.substring(0, version.indexOf('(')).trim();
-  if (version.indexOf(':') != -1)
+  if (version.contains(':'))
     version = version.substring(version.indexOf(':') + 1).trim();
 
   return version.replaceAll('"', "'");
@@ -146,31 +170,41 @@ Future<String> getCurrentFlutterRepoCommit() {
 Future<DateTime> getFlutterRepoCommitTimestamp(String commit) {
   // git show -s --format=%at 4b546df7f0b3858aaaa56c4079e5be1ba91fbb65
   return inDirectory(flutterDirectory, () async {
-    String unixTimestamp = await eval('git', <String>[
+    final String unixTimestamp = await eval('git', <String>[
       'show',
       '-s',
       '--format=%at',
       commit,
     ]);
-    int secondsSinceEpoch = int.parse(unixTimestamp);
+    final int secondsSinceEpoch = int.parse(unixTimestamp);
     return new DateTime.fromMillisecondsSinceEpoch(secondsSinceEpoch * 1000);
   });
 }
 
-Future<Process> startProcess(String executable, List<String> arguments,
-    {Map<String, String> env}) async {
-  String command = '$executable ${arguments?.join(" ") ?? ""}';
-  print('Executing: $command');
-  Process proc = await Process.start(executable, arguments,
-      environment: env, workingDirectory: cwd);
-  ProcessInfo procInfo = new ProcessInfo(command, proc);
-  _runningProcesses.add(procInfo);
+Future<Process> startProcess(
+  String executable,
+  List<String> arguments, {
+  Map<String, String> environment,
+  String workingDirectory,
+}) async {
+  final String command = '$executable ${arguments?.join(" ") ?? ""}';
+  print('\nExecuting: $command');
+  environment ??= <String, String>{};
+  environment['BOT'] = 'true';
+  final Process process = await _processManager.start(
+    <String>[executable]..addAll(arguments),
+    environment: environment,
+    workingDirectory: workingDirectory ?? cwd,
+  );
+  final ProcessInfo processInfo = new ProcessInfo(command, process);
+  _runningProcesses.add(processInfo);
 
-  proc.exitCode.then((_) {
-    _runningProcesses.remove(procInfo);
+  process.exitCode.then((int exitCode) {
+    print('exitcode: $exitCode');
+    _runningProcesses.remove(processInfo);
   });
 
-  return proc;
+  return process;
 }
 
 Future<Null> forceQuitRunningProcesses() async {
@@ -191,20 +225,31 @@ Future<Null> forceQuitRunningProcesses() async {
 }
 
 /// Executes a command and returns its exit code.
-Future<int> exec(String executable, List<String> arguments,
-    {Map<String, String> env, bool canFail: false}) async {
-  Process proc = await startProcess(executable, arguments, env: env);
+Future<int> exec(
+  String executable,
+  List<String> arguments, {
+  Map<String, String> environment,
+  bool canFail: false,
+}) async {
+  final Process process = await startProcess(executable, arguments, environment: environment);
 
-  proc.stdout
+  final Completer<Null> stdoutDone = new Completer<Null>();
+  final Completer<Null> stderrDone = new Completer<Null>();
+  process.stdout
       .transform(UTF8.decoder)
       .transform(const LineSplitter())
-      .listen(print);
-  proc.stderr
+      .listen((String line) {
+        print('stdout: $line');
+      }, onDone: () { stdoutDone.complete(); });
+  process.stderr
       .transform(UTF8.decoder)
       .transform(const LineSplitter())
-      .listen(stderr.writeln);
+      .listen((String line) {
+        print('stderr: $line');
+      }, onDone: () { stderrDone.complete(); });
 
-  int exitCode = await proc.exitCode;
+  await Future.wait<Null>(<Future<Null>>[stdoutDone.future, stderrDone.future]);
+  final int exitCode = await process.exitCode;
 
   if (exitCode != 0 && !canFail)
     fail('Executable failed with exit code $exitCode.');
@@ -214,27 +259,60 @@ Future<int> exec(String executable, List<String> arguments,
 
 /// Executes a command and returns its standard output as a String.
 ///
-/// Standard error is redirected to the current process' standard error stream.
-Future<String> eval(String executable, List<String> arguments,
-    {Map<String, String> env, bool canFail: false}) async {
-  Process proc = await startProcess(executable, arguments, env: env);
-  proc.stderr.listen((List<int> data) {
-    stderr.add(data);
-  });
-  String output = await UTF8.decodeStream(proc.stdout);
-  int exitCode = await proc.exitCode;
+/// For logging purposes, the command's output is also printed out.
+Future<String> eval(
+  String executable,
+  List<String> arguments, {
+  Map<String, String> environment,
+  bool canFail: false,
+}) async {
+  final Process process = await startProcess(executable, arguments, environment: environment);
+
+  final StringBuffer output = new StringBuffer();
+  final Completer<Null> stdoutDone = new Completer<Null>();
+  final Completer<Null> stderrDone = new Completer<Null>();
+  process.stdout
+      .transform(UTF8.decoder)
+      .transform(const LineSplitter())
+      .listen((String line) {
+        print('stdout: $line');
+        output.writeln(line);
+      }, onDone: () { stdoutDone.complete(); });
+  process.stderr
+      .transform(UTF8.decoder)
+      .transform(const LineSplitter())
+      .listen((String line) {
+        print('stderr: $line');
+      }, onDone: () { stderrDone.complete(); });
+
+  await Future.wait<Null>(<Future<Null>>[stdoutDone.future, stderrDone.future]);
+  final int exitCode = await process.exitCode;
 
   if (exitCode != 0 && !canFail)
     fail('Executable failed with exit code $exitCode.');
 
-  return output.trimRight();
+  return output.toString().trimRight();
 }
 
-Future<int> flutter(String command,
-    {List<String> options: const <String>[], bool canFail: false}) {
-  List<String> args = <String>[command]..addAll(options);
+Future<int> flutter(String command, {
+  List<String> options: const <String>[],
+  bool canFail: false,
+  Map<String, String> environment,
+}) {
+  final List<String> args = <String>[command]..addAll(options);
   return exec(path.join(flutterDirectory.path, 'bin', 'flutter'), args,
-      canFail: canFail);
+      canFail: canFail, environment: environment);
+}
+
+/// Runs a `flutter` command and returns the standard output as a string.
+Future<String> evalFlutter(String command, {
+  List<String> options: const <String>[],
+  bool canFail: false,
+  Map<String, String> environment,
+}) {
+  final List<String> args = <String>[command]..addAll(options);
+  return eval(path.join(flutterDirectory.path, 'bin', 'flutter'), args,
+      canFail: canFail, environment: environment);
 }
 
 String get dartBin =>
@@ -243,7 +321,7 @@ String get dartBin =>
 Future<int> dart(List<String> args) => exec(dartBin, args);
 
 Future<dynamic> inDirectory(dynamic directory, Future<dynamic> action()) async {
-  String previousCwd = cwd;
+  final String previousCwd = cwd;
   try {
     cd(directory);
     return await action();
@@ -271,23 +349,23 @@ void cd(dynamic directory) {
 Directory get flutterDirectory => dir('../..').absolute;
 
 String requireEnvVar(String name) {
-  String value = Platform.environment[name];
+  final String value = Platform.environment[name];
 
-  if (value == null) fail('$name environment variable is missing. Quitting.');
+  if (value == null)
+    fail('$name environment variable is missing. Quitting.');
 
   return value;
 }
 
-dynamic/*=T*/ requireConfigProperty/*<T>*/(
-    Map<String, dynamic/*<T>*/ > map, String propertyName) {
+T requireConfigProperty<T>(Map<String, dynamic> map, String propertyName) {
   if (!map.containsKey(propertyName))
     fail('Configuration property not found: $propertyName');
-
-  return map[propertyName];
+  final T result = map[propertyName];
+  return result;
 }
 
 String jsonEncode(dynamic data) {
-  return new JsonEncoder.withIndent('  ').convert(data) + '\n';
+  return const JsonEncoder.withIndent('  ').convert(data) + '\n';
 }
 
 Future<Null> getFlutter(String revision) async {
@@ -346,35 +424,6 @@ void checkNotNull(Object o1,
     throw 'o10 is null';
 }
 
-/// Add benchmark values to a JSON results file.
-///
-/// If the file contains information about how long the benchmark took to run
-/// (a `time` field), then return that info.
-// TODO(yjbanov): move this data to __metadata__
-num addBuildInfo(File jsonFile,
-    {num expected, String sdk, String commit, DateTime timestamp}) {
-  Map<String, dynamic> json;
-
-  if (jsonFile.existsSync())
-    json = JSON.decode(jsonFile.readAsStringSync());
-  else
-    json = <String, dynamic>{};
-
-  if (expected != null)
-    json['expected'] = expected;
-  if (sdk != null)
-    json['sdk'] = sdk;
-  if (commit != null)
-    json['commit'] = commit;
-  if (timestamp != null)
-    json['timestamp'] = timestamp.millisecondsSinceEpoch;
-
-  jsonFile.writeAsStringSync(jsonEncode(json));
-
-  // Return the elapsed time of the benchmark (if any).
-  return json['time'];
-}
-
 /// Splits [from] into lines and selects those that contain [pattern].
 Iterable<String> grep(Pattern pattern, {@required String from}) {
   return from.split('\n').where((String line) {
@@ -395,12 +444,57 @@ Iterable<String> grep(Pattern pattern, {@required String from}) {
 ///
 ///     }
 Future<Null> runAndCaptureAsyncStacks(Future<Null> callback()) {
-  Completer<Null> completer = new Completer<Null>();
+  final Completer<Null> completer = new Completer<Null>();
   Chain.capture(() async {
     await callback();
     completer.complete();
-  }, onError: (dynamic error, Chain chain) async {
-    completer.completeError(error, chain);
-  });
+  }, onError: completer.completeError);
   return completer.future;
+}
+
+/// Return an unused TCP port number.
+Future<int> findAvailablePort() async {
+  int port = 20000;
+  while (true) {
+    try {
+      final ServerSocket socket =
+          await ServerSocket.bind(InternetAddress.LOOPBACK_IP_V4, port);
+      await socket.close();
+      return port;
+    } catch (_) {
+      port++;
+    }
+  }
+}
+
+bool canRun(String path) => _processManager.canRun(path);
+
+String extractCloudAuthTokenArg(List<String> rawArgs) {
+  final ArgParser argParser = new ArgParser()..addOption('cloud-auth-token');
+  ArgResults args;
+  try {
+    args = argParser.parse(rawArgs);
+  } on FormatException catch(error) {
+    stderr.writeln('${error.message}\n');
+    stderr.writeln('Usage:\n');
+    stderr.writeln(argParser.usage);
+    return null;
+  }
+
+  final String token = args['cloud-auth-token'];
+  if (token == null) {
+    stderr.writeln('Required option --cloud-auth-token not found');
+    return null;
+  }
+  return token;
+}
+
+// "An Observatory debugger and profiler on ... is available at: http://127.0.0.1:8100/"
+final RegExp _kObservatoryRegExp = new RegExp(r'An Observatory debugger .* is available at: (\S+:(\d+))');
+
+bool lineContainsServicePort(String line) => line.contains(_kObservatoryRegExp);
+
+int parseServicePort(String line) {
+  final Match match = _kObservatoryRegExp.firstMatch(line);
+  return match == null ? null : int.parse(match.group(2));
 }

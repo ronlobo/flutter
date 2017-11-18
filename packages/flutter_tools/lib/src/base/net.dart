@@ -3,33 +3,62 @@
 // found in the LICENSE file.
 
 import 'dart:async';
-import 'dart:io';
 
+import '../base/context.dart';
 import '../globals.dart';
 import 'common.dart';
+import 'io.dart';
 
 const int kNetworkProblemExitCode = 50;
 
+typedef HttpClient HttpClientFactory();
+
 /// Download a file from the given URL and return the bytes.
 Future<List<int>> fetchUrl(Uri url) async {
-  printTrace('Downloading $url.');
-
-  HttpClient httpClient = new HttpClient();
-  HttpClientRequest request = await httpClient.getUrl(url);
-  HttpClientResponse response = await request.close();
-
-  printTrace('Received response statusCode=${response.statusCode}');
-  if (response.statusCode != 200) {
-    throw new ToolExit(
-      'Download failed: $url\n'
-          '  because (${response.statusCode}) ${response.reasonPhrase}',
-      exitCode: kNetworkProblemExitCode,
-    );
+  int attempts = 0;
+  int duration = 1;
+  while (true) {
+    attempts += 1;
+    final List<int> result = await _attempt(url);
+    if (result != null)
+      return result;
+    printStatus('Download failed -- attempting retry $attempts in $duration second${ duration == 1 ? "" : "s"}...');
+    await new Future<Null>.delayed(new Duration(seconds: duration));
+    if (duration < 64)
+      duration *= 2;
   }
+}
 
-  BytesBuilder responseBody = new BytesBuilder(copy: false);
-  await for (List<int> chunk in response)
-    responseBody.add(chunk);
-
-  return responseBody.takeBytes();
+Future<List<int>> _attempt(Uri url) async {
+  printTrace('Downloading: $url');
+  HttpClient httpClient;
+  if (context[HttpClientFactory] != null) {
+    httpClient = context[HttpClientFactory]();
+  } else {
+    httpClient = new HttpClient();
+  }
+  final HttpClientRequest request = await httpClient.getUrl(url);
+  final HttpClientResponse response = await request.close();
+  if (response.statusCode != 200) {
+    if (response.statusCode > 0 && response.statusCode < 500) {
+      throwToolExit(
+        'Download failed.\n'
+        'URL: $url\n'
+        'Error: ${response.statusCode} ${response.reasonPhrase}',
+        exitCode: kNetworkProblemExitCode,
+      );
+    }
+    // 5xx errors are server errors and we can try again
+    printTrace('Download error: ${response.statusCode} ${response.reasonPhrase}');
+    return null;
+  }
+  printTrace('Received response from server, collecting bytes...');
+  try {
+    final BytesBuilder responseBody = new BytesBuilder(copy: false);
+    await response.forEach(responseBody.add);
+    return responseBody.takeBytes();
+  } on IOException catch (error) {
+    printTrace('Download error: $error');
+    return null;
+  }
 }

@@ -2,139 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'dart:ui' show Point, Offset;
+import 'dart:ui' show Offset;
+
+import 'package:flutter/foundation.dart';
 
 import 'lsq_solver.dart';
 
-export 'dart:ui' show Point, Offset;
-
-class _Estimate {
-  const _Estimate({ this.xCoefficients, this.yCoefficients, this.time, this.degree, this.confidence });
-
-  final List<double> xCoefficients;
-  final List<double> yCoefficients;
-  final Duration time;
-  final int degree;
-  final double confidence;
-}
-
-abstract class _VelocityTrackerStrategy {
-  void addMovement(Duration timeStamp, Point position);
-  _Estimate getEstimate();
-  void clear();
-}
-
-class _Movement {
-  Duration eventTime = Duration.ZERO;
-  Point position = Point.origin;
-}
-
-class _LeastSquaresVelocityTrackerStrategy extends _VelocityTrackerStrategy {
-  static const int kHistorySize = 20;
-  static const int kHorizonMilliseconds = 100;
-
-  _LeastSquaresVelocityTrackerStrategy(this.degree);
-
-  final int degree;
-  final List<_Movement> _movements = new List<_Movement>(kHistorySize);
-  int _index = 0;
-
-  @override
-  void addMovement(Duration timeStamp, Point position) {
-    _index += 1;
-    if (_index == kHistorySize)
-      _index = 0;
-    _Movement movement = _getMovement(_index);
-    movement.eventTime = timeStamp;
-    movement.position = position;
-  }
-
-  @override
-  _Estimate getEstimate() {
-    // Iterate over movement samples in reverse time order and collect samples.
-    List<double> x = new List<double>();
-    List<double> y = new List<double>();
-    List<double> w = new List<double>();
-    List<double> time = new List<double>();
-    int m = 0;
-    int index = _index;
-    _Movement newestMovement = _getMovement(index);
-    do {
-      _Movement movement = _getMovement(index);
-
-      double age = (newestMovement.eventTime - movement.eventTime).inMilliseconds.toDouble();
-      if (age > kHorizonMilliseconds)
-        break;
-
-      Point position = movement.position;
-      x.add(position.x);
-      y.add(position.y);
-      w.add(1.0);
-      time.add(-age);
-      index = (index == 0 ? kHistorySize : index) - 1;
-
-      m += 1;
-    } while (m < kHistorySize);
-
-    if (m == 0) // because we broke out of the loop above after age > kHorizonMilliseconds
-      return null; // no data
-
-    // Calculate a least squares polynomial fit.
-    int n = degree;
-    if (n > m - 1)
-      n = m - 1;
-
-    if (n >= 1) {
-      LeastSquaresSolver xSolver = new LeastSquaresSolver(time, x, w);
-      PolynomialFit xFit = xSolver.solve(n);
-      if (xFit != null) {
-        LeastSquaresSolver ySolver = new LeastSquaresSolver(time, y, w);
-        PolynomialFit yFit = ySolver.solve(n);
-        if (yFit != null) {
-          return new _Estimate(
-            xCoefficients: xFit.coefficients,
-            yCoefficients: yFit.coefficients,
-            time: newestMovement.eventTime,
-            degree: n,
-            confidence: xFit.confidence * yFit.confidence
-          );
-        }
-      }
-    }
-
-    // No velocity data available for this pointer, but we do have its current
-    // position.
-    return new _Estimate(
-      xCoefficients: <double>[ x[0] ],
-      yCoefficients: <double>[ y[0] ],
-      time: newestMovement.eventTime,
-      degree: 0,
-      confidence: 1.0
-    );
-  }
-
-  @override
-  void clear() {
-    _index = -1;
-  }
-
-  _Movement _getMovement(int i) {
-    _Movement result = _movements[i];
-    if (result == null) {
-      result = new _Movement();
-      _movements[i] = result;
-    }
-    return result;
-  }
-
-}
+export 'dart:ui' show Offset;
 
 /// A velocity in two dimensions.
 class Velocity {
   /// Creates a velocity.
   ///
   /// The [pixelsPerSecond] argument must not be null.
-  const Velocity({ this.pixelsPerSecond });
+  const Velocity({
+    @required this.pixelsPerSecond,
+  }) : assert(pixelsPerSecond != null);
 
   /// A velocity that isn't moving at all.
   static const Velocity zero = const Velocity(pixelsPerSecond: Offset.zero);
@@ -157,6 +40,27 @@ class Velocity {
         pixelsPerSecond: pixelsPerSecond + other.pixelsPerSecond);
   }
 
+  /// Return a velocity whose magnitude has been clamped to [minValue]
+  /// and [maxValue].
+  ///
+  /// If the magnitude of this Velocity is less than minValue then return a new
+  /// Velocity with the same direction and with magnitude [minValue]. Similarly,
+  /// if the magnitude of this Velocity is greater than maxValue then return a
+  /// new Velocity with the same direction and magnitude [maxValue].
+  ///
+  /// If the magnitude of this Velocity is within the specified bounds then
+  /// just return this.
+  Velocity clampMagnitude(double minValue, double maxValue) {
+    assert(minValue != null && minValue >= 0.0);
+    assert(maxValue != null && maxValue >= 0.0 && maxValue >= minValue);
+    final double valueSquared = pixelsPerSecond.distanceSquared;
+    if (valueSquared > maxValue * maxValue)
+      return new Velocity(pixelsPerSecond: (pixelsPerSecond / pixelsPerSecond.distance) * maxValue);
+    if (valueSquared < minValue * minValue)
+      return new Velocity(pixelsPerSecond: (pixelsPerSecond / pixelsPerSecond.distance) * minValue);
+    return this;
+  }
+
   @override
   bool operator ==(dynamic other) {
     if (other is! Velocity)
@@ -172,38 +76,164 @@ class Velocity {
   String toString() => 'Velocity(${pixelsPerSecond.dx.toStringAsFixed(1)}, ${pixelsPerSecond.dy.toStringAsFixed(1)})';
 }
 
-/// Computes a pointer velocity based on data from PointerMove events.
+/// A two dimensional velocity estimate.
 ///
-/// The input data is provided by calling addPosition(). Adding data
-/// is cheap.
+/// VelocityEstimates are computed by [VelocityTracker.getVelocityEstimate]. An
+/// estimate's [confidence] measures how well the the velocity tracker's position
+/// data fit a straight line, [duration] is the time that elapsed between the
+/// first and last position sample used to compute the velocity, and [offset]
+/// is similarly the difference between the first and last positions.
 ///
-/// To obtain a velocity, call getVelocity(). This will compute the
-/// velocity based on the data added so far. Only call this when you
-/// need to use the velocity, as it is comparatively expensive.
+/// See also:
 ///
-/// The quality of the velocity estimation will be better if more data
-/// points have been received.
-class VelocityTracker {
-
-  /// The maximum length of time between two move events to allow
-  /// before assuming the pointer stopped.
-  static const Duration kAssumePointerMoveStoppedTime = const Duration(milliseconds: 40);
-
-  /// Creates a velocity tracker.
-  VelocityTracker() : _strategy = _createStrategy();
-
-  Duration _lastTimeStamp = const Duration();
-  _VelocityTrackerStrategy _strategy;
-
-  /// Add a given position corresponding to a specific time.
+///  * VelocityTracker, which computes [VelocityEstimate]s.
+///  * Velocity, which encapsulates (just) a velocity vector and provides some
+///    useful velocity operations.
+class VelocityEstimate {
+  /// Creates a dimensional velocity estimate.
   ///
-  /// If [kAssumePointerMoveStoppedTime] has elapsed since the last
-  /// call, then earlier data will be discarded.
-  void addPosition(Duration timeStamp, Point position) {
-    if (timeStamp - _lastTimeStamp >= kAssumePointerMoveStoppedTime)
-      _strategy.clear();
-    _lastTimeStamp = timeStamp;
-    _strategy.addMovement(timeStamp, position);
+  /// [pixelsPerSecond], [confidence], [duration], and [offset] must not be null.
+  const VelocityEstimate({
+    @required this.pixelsPerSecond,
+    @required this.confidence,
+    @required this.duration,
+    @required this.offset,
+  }) : assert(pixelsPerSecond != null),
+       assert(confidence != null),
+       assert(duration != null),
+       assert(offset != null);
+
+  /// The number of pixels per second of velocity in the x and y directions.
+  final Offset pixelsPerSecond;
+
+  /// A value between 0.0 and 1.0 that indicates how well [VelocityTracker]
+  /// was able to fit a straight line to its position data.
+  ///
+  /// The value of this property is 1.0 for a perfect fit, 0.0 for a poor fit.
+  final double confidence;
+
+  /// The time that elapsed between the first and last position sample used
+  /// to compute [pixelsPerSecond].
+  final Duration duration;
+
+  /// The difference between the first and last position sample used
+  /// to compute [pixelsPerSecond].
+  final Offset offset;
+
+  @override
+  String toString() => 'VelocityEstimate(${pixelsPerSecond.dx.toStringAsFixed(1)}, ${pixelsPerSecond.dy.toStringAsFixed(1)}; offset: $offset, duration: $duration, confidence: ${confidence.toStringAsFixed(1)})';
+}
+
+class _PointAtTime {
+  const _PointAtTime(this.point, this.time)
+      : assert(point != null),
+        assert(time != null);
+
+  final Duration time;
+  final Offset point;
+
+  @override
+  String toString() => '_PointAtTime($point at $time)';
+}
+
+/// Computes a pointer's velocity based on data from [PointerMoveEvent]s.
+///
+/// The input data is provided by calling [addPosition]. Adding data is cheap.
+///
+/// To obtain a velocity, call [getVelocity] or [getVelocityEstimate]. This will
+/// compute the velocity based on the data added so far. Only call these when
+/// you need to use the velocity, as they are comparatively expensive.
+///
+/// The quality of the velocity estimation will be better if more data points
+/// have been received.
+class VelocityTracker {
+  static const int _kAssumePointerMoveStoppedMilliseconds = 40;
+  static const int _kHistorySize = 20;
+  static const int _kHorizonMilliseconds = 100;
+  static const int _kMinSampleSize = 3;
+
+  // Circular buffer; current sample at _index.
+  final List<_PointAtTime> _samples = new List<_PointAtTime>(_kHistorySize);
+  int _index = 0;
+
+  /// Adds a position as the given time to the tracker.
+  void addPosition(Duration time, Offset position) {
+    _index += 1;
+    if (_index == _kHistorySize)
+      _index = 0;
+    _samples[_index] = new _PointAtTime(position, time);
+  }
+
+  /// Returns an estimate of the velocity of the object being tracked by the
+  /// tracker given the current information available to the tracker.
+  ///
+  /// Information is added using [addPosition].
+  ///
+  /// Returns null if there is no data on which to base an estimate.
+  VelocityEstimate getVelocityEstimate() {
+    final List<double> x = <double>[];
+    final List<double> y = <double>[];
+    final List<double> w = <double>[];
+    final List<double> time = <double>[];
+    int sampleCount = 0;
+    int index = _index;
+
+    final _PointAtTime newestSample = _samples[index];
+    if (newestSample == null)
+      return null;
+
+    _PointAtTime previousSample = newestSample;
+    _PointAtTime oldestSample = newestSample;
+
+    // Starting with the most recent PointAtTime sample, iterate backwards while
+    // the samples represent continuous motion.
+    do {
+      final _PointAtTime sample = _samples[index];
+      if (sample == null)
+        break;
+
+      final double age = (newestSample.time - sample.time).inMilliseconds.toDouble();
+      final double delta = (sample.time - previousSample.time).inMilliseconds.abs().toDouble();
+      previousSample = sample;
+      if (age > _kHorizonMilliseconds || delta > _kAssumePointerMoveStoppedMilliseconds)
+        break;
+
+      oldestSample = sample;
+      final Offset position = sample.point;
+      x.add(position.dx);
+      y.add(position.dy);
+      w.add(1.0);
+      time.add(-age);
+      index = (index == 0 ? _kHistorySize : index) - 1;
+
+      sampleCount += 1;
+    } while (sampleCount < _kHistorySize);
+
+    if (sampleCount >= _kMinSampleSize) {
+      final LeastSquaresSolver xSolver = new LeastSquaresSolver(time, x, w);
+      final PolynomialFit xFit = xSolver.solve(2);
+      if (xFit != null) {
+        final LeastSquaresSolver ySolver = new LeastSquaresSolver(time, y, w);
+        final PolynomialFit yFit = ySolver.solve(2);
+        if (yFit != null) {
+          return new VelocityEstimate( // convert from pixels/ms to pixels/s
+            pixelsPerSecond: new Offset(xFit.coefficients[1] * 1000, yFit.coefficients[1] * 1000),
+            confidence: xFit.confidence * yFit.confidence,
+            duration: newestSample.time - oldestSample.time,
+            offset: newestSample.point - oldestSample.point,
+          );
+        }
+      }
+    }
+
+    // We're unable to make a velocity estimate but we did have at least one
+    // valid pointer position.
+    return new VelocityEstimate(
+      pixelsPerSecond: Offset.zero,
+      confidence: 1.0,
+      duration: newestSample.time - oldestSample.time,
+      offset: newestSample.point - oldestSample.point,
+    );
   }
 
   /// Computes the velocity of the pointer at the time of the last
@@ -211,22 +241,12 @@ class VelocityTracker {
   ///
   /// This can be expensive. Only call this when you need the velocity.
   ///
-  /// getVelocity() will return null if no estimate is available or if
-  /// the velocity is zero.
+  /// Returns [Velocity.zero] if there is no data from which to compute an
+  /// estimate or if the estimated velocity is zero.
   Velocity getVelocity() {
-    _Estimate estimate = _strategy.getEstimate();
-    if (estimate != null && estimate.degree >= 1) {
-      return new Velocity(
-        pixelsPerSecond: new Offset( // convert from pixels/ms to pixels/s
-          estimate.xCoefficients[1] * 1000,
-          estimate.yCoefficients[1] * 1000
-        )
-      );
-    }
-    return null;
-  }
-
-  static _VelocityTrackerStrategy _createStrategy() {
-    return new _LeastSquaresVelocityTrackerStrategy(2);
+    final VelocityEstimate estimate = getVelocityEstimate();
+    if (estimate == null || estimate.pixelsPerSecond == Offset.zero)
+      return Velocity.zero;
+    return new Velocity(pixelsPerSecond: estimate.pixelsPerSecond);
   }
 }

@@ -11,17 +11,17 @@ import 'package:test/test.dart';
 
 void main() {
   test('Flutter gallery example code parser test', () async {
-    TestAssetBundle bundle = new TestAssetBundle();
+    final TestAssetBundle bundle = new TestAssetBundle();
 
-    String codeSnippet0 = await getExampleCode('test_0', bundle);
+    final String codeSnippet0 = await getExampleCode('test_0', bundle);
     expect(codeSnippet0, 'test 0 0\ntest 0 1');
 
-    String codeSnippet1 = await getExampleCode('test_1', bundle);
+    final String codeSnippet1 = await getExampleCode('test_1', bundle);
     expect(codeSnippet1, 'test 1 0\ntest 1 1');
   });
 }
 
-const String testCodeFile = """// A fake test file
+const String testCodeFile = '''// A fake test file
 // START test_0
 test 0 0
 test 0 1
@@ -32,7 +32,7 @@ test 0 1
 test 1 0
 test 1 1
 // END
-""";
+''';
 
 class TestAssetBundle extends AssetBundle {
   @override
@@ -46,7 +46,7 @@ class TestAssetBundle extends AssetBundle {
   }
 
   @override
-  Future<dynamic> loadStructuredData(String key, Future<dynamic> parser(String value)) async {
+  Future<T> loadStructuredData<T>(String key, Future<T> parser(String value)) async {
     return parser(await loadString(key));
   }
 

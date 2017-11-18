@@ -4,11 +4,10 @@
 
 import 'dart:async';
 
-import 'package:path/path.dart' as path;
-
+import '../base/common.dart';
+import '../base/file_system.dart';
 import '../base/process.dart';
 import '../cache.dart';
-import '../globals.dart';
 import '../runner/flutter_command.dart';
 
 class FormatCommand extends FlutterCommand {
@@ -22,23 +21,25 @@ class FormatCommand extends FlutterCommand {
   final String description = 'Format one or more dart files.';
 
   @override
-  String get invocation => "${runner.executableName} $name <one or more paths>";
+  String get invocation => '${runner.executableName} $name <one or more paths>';
 
   @override
-  Future<int> runCommand() async {
+  Future<Null> runCommand() async {
     if (argResults.rest.isEmpty) {
-      printStatus('No files specified to be formatted.');
-      printStatus('');
-      printStatus('To format all files in the current directory tree:');
-      printStatus('${runner.executableName} $name .');
-      printStatus('');
-      printStatus(usage);
-      return 1;
+      throwToolExit(
+        'No files specified to be formatted.\n'
+        '\n'
+        'To format all files in the current directory tree:\n'
+        '${runner.executableName} $name .\n'
+        '\n'
+        '$usage'
+      );
     }
 
-    String dartfmt = path.join(
-        Cache.flutterRoot, 'bin', 'cache', 'dart-sdk', 'bin', 'dartfmt');
-    List<String> cmd = <String>[dartfmt, '-w']..addAll(argResults.rest);
-    return runCommandAndStreamOutput(cmd);
+    final String dartfmt = fs.path.join(Cache.flutterRoot, 'bin', 'cache', 'dart-sdk', 'bin', 'dartfmt');
+    final List<String> cmd = <String>[dartfmt, '-w']..addAll(argResults.rest);
+    final int result = await runCommandAndStreamOutput(cmd);
+    if (result != 0)
+      throwToolExit('Formatting failed: $result', exitCode: result);
   }
 }

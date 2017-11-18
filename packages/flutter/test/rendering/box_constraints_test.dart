@@ -8,12 +8,12 @@ import 'package:test/test.dart';
 void main() {
   test('BoxConstraints toString', () {
     expect(const BoxConstraints.expand().toString(), contains('biggest'));
-    expect(new BoxConstraints().toString(), contains('unconstrained'));
-    expect(new BoxConstraints.tightFor(width: 50.0).toString(), contains('w=50'));
+    expect(const BoxConstraints().toString(), contains('unconstrained'));
+    expect(const BoxConstraints.tightFor(width: 50.0).toString(), contains('w=50'));
   });
 
   test('BoxConstraints copyWith', () {
-    BoxConstraints constraints = new BoxConstraints(
+    final BoxConstraints constraints = const BoxConstraints(
       minWidth: 3.0,
       maxWidth: 7.0,
       minHeight: 11.0,
@@ -36,7 +36,7 @@ void main() {
   });
 
   test('BoxConstraints operators', () {
-    BoxConstraints constraints = new BoxConstraints(
+    final BoxConstraints constraints = const BoxConstraints(
       minWidth: 3.0,
       maxWidth: 7.0,
       minHeight: 11.0,
@@ -62,7 +62,7 @@ void main() {
 
   test('BoxConstraints lerp', () {
     expect(BoxConstraints.lerp(null, null, 0.5), isNull);
-    BoxConstraints constraints = new BoxConstraints(
+    final BoxConstraints constraints = const BoxConstraints(
       minWidth: 3.0,
       maxWidth: 7.0,
       minHeight: 11.0,
@@ -78,7 +78,7 @@ void main() {
     expect(copy.maxWidth, 3.5);
     expect(copy.minHeight, 5.5);
     expect(copy.maxHeight, 8.5);
-    copy = BoxConstraints.lerp(new BoxConstraints(
+    copy = BoxConstraints.lerp(const BoxConstraints(
       minWidth: 13.0,
       maxWidth: 17.0,
       minHeight: 111.0,
@@ -90,14 +90,82 @@ void main() {
     expect(copy.maxHeight, 97.0);
   });
 
+  test('BoxConstraints lerp with unbounded width', () {
+    final BoxConstraints constraints1 = const BoxConstraints(
+      minWidth: double.INFINITY,
+      maxWidth: double.INFINITY,
+      minHeight: 10.0,
+      maxHeight: 20.0,
+    );
+    final BoxConstraints constraints2 = const BoxConstraints(
+      minWidth: double.INFINITY,
+      maxWidth: double.INFINITY,
+      minHeight: 20.0,
+      maxHeight: 30.0,
+    );
+    final BoxConstraints constraints3 = const BoxConstraints(
+      minWidth: double.INFINITY,
+      maxWidth: double.INFINITY,
+      minHeight: 15.0,
+      maxHeight: 25.0,
+    );
+    expect(BoxConstraints.lerp(constraints1, constraints2, 0.5), constraints3);
+  });
+
+  test('BoxConstraints lerp with unbounded height', () {
+    final BoxConstraints constraints1 = const BoxConstraints(
+      minWidth: 10.0,
+      maxWidth: 20.0,
+      minHeight: double.INFINITY,
+      maxHeight: double.INFINITY,
+    );
+    final BoxConstraints constraints2 = const BoxConstraints(
+      minWidth: 20.0,
+      maxWidth: 30.0,
+      minHeight: double.INFINITY,
+      maxHeight: double.INFINITY,
+    );
+    final BoxConstraints constraints3 = const BoxConstraints(
+      minWidth: 15.0,
+      maxWidth: 25.0,
+      minHeight: double.INFINITY,
+      maxHeight: double.INFINITY,
+    );
+    expect(BoxConstraints.lerp(constraints1, constraints2, 0.5), constraints3);
+  });
+
+  test('BoxConstraints lerp from bounded to unbounded', () {
+    final BoxConstraints constraints1 = const BoxConstraints(
+      minWidth: double.INFINITY,
+      maxWidth: double.INFINITY,
+      minHeight: double.INFINITY,
+      maxHeight: double.INFINITY,
+    );
+    final BoxConstraints constraints2 = const BoxConstraints(
+      minWidth: 20.0,
+      maxWidth: 30.0,
+      minHeight: double.INFINITY,
+      maxHeight: double.INFINITY,
+    );
+    final BoxConstraints constraints3 = const BoxConstraints(
+      minWidth: double.INFINITY,
+      maxWidth: double.INFINITY,
+      minHeight: 20.0,
+      maxHeight: 30.0,
+    );
+    expect(() => BoxConstraints.lerp(constraints1, constraints2, 0.5), throwsA(const isInstanceOf<AssertionError>()));
+    expect(() => BoxConstraints.lerp(constraints1, constraints3, 0.5), throwsA(const isInstanceOf<AssertionError>()));
+    expect(() => BoxConstraints.lerp(constraints2, constraints3, 0.5), throwsA(const isInstanceOf<AssertionError>()));
+  });
+
   test('BoxConstraints normalize', () {
-    BoxConstraints constraints = new BoxConstraints(
+    final BoxConstraints constraints = const BoxConstraints(
       minWidth: 3.0,
       maxWidth: 2.0,
       minHeight: 11.0,
       maxHeight: 18.0
     );
-    BoxConstraints copy = constraints.normalize();
+    final BoxConstraints copy = constraints.normalize();
     expect(copy.minWidth, 3.0);
     expect(copy.maxWidth, 3.0);
     expect(copy.minHeight, 11.0);

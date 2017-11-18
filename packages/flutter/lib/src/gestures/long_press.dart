@@ -17,16 +17,16 @@ class LongPressGestureRecognizer extends PrimaryPointerGestureRecognizer {
   /// Creates a long-press gesture recognizer.
   ///
   /// Consider assigning the [onLongPress] callback after creating this object.
-  LongPressGestureRecognizer() : super(deadline: kLongPressTimeout);
+  LongPressGestureRecognizer({ Object debugOwner }) : super(deadline: kLongPressTimeout, debugOwner: debugOwner);
 
-  /// Called when a long-press is recongized.
+  /// Called when a long-press is recognized.
   GestureLongPressCallback onLongPress;
 
   @override
   void didExceedDeadline() {
     resolve(GestureDisposition.accepted);
     if (onLongPress != null)
-      invokeCallback/*<Null>*/('onLongPress', onLongPress);
+      invokeCallback<Null>('onLongPress', onLongPress); // ignore: STRONG_MODE_INVALID_CAST_FUNCTION_EXPR, https://github.com/dart-lang/sdk/issues/27504
   }
 
   @override
@@ -36,5 +36,5 @@ class LongPressGestureRecognizer extends PrimaryPointerGestureRecognizer {
   }
 
   @override
-  String toStringShort() => 'long press';
+  String get debugDescription => 'long press';
 }

@@ -2,20 +2,25 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'dart:ui' as ui;
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/animation.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 
-import 'animation_tester.dart';
+import '../scheduler/scheduler_tester.dart';
 
 void main() {
   setUp(() {
     WidgetsFlutterBinding.ensureInitialized();
     WidgetsBinding.instance.resetEpoch();
+    ui.window.onBeginFrame = null;
+    ui.window.onDrawFrame = null;
   });
 
   test('Can set value during status callback', () {
-    AnimationController controller = new AnimationController(
+    final AnimationController controller = new AnimationController(
       duration: const Duration(milliseconds: 100),
       vsync: const TestVSync(),
     );
@@ -36,10 +41,10 @@ void main() {
     controller.forward();
     expect(didComplete, isFalse);
     expect(didDismiss, isFalse);
-    WidgetsBinding.instance.handleBeginFrame(const Duration(seconds: 1));
+    tick(const Duration(seconds: 1));
     expect(didComplete, isFalse);
     expect(didDismiss, isFalse);
-    WidgetsBinding.instance.handleBeginFrame(const Duration(seconds: 2));
+    tick(const Duration(seconds: 2));
     expect(didComplete, isTrue);
     expect(didDismiss, isTrue);
 
@@ -47,16 +52,14 @@ void main() {
   });
 
   test('Receives status callbacks for forward and reverse', () {
-    AnimationController controller = new AnimationController(
+    final AnimationController controller = new AnimationController(
       duration: const Duration(milliseconds: 100),
       vsync: const TestVSync(),
     );
-    List<double> valueLog = <double>[];
-    List<AnimationStatus> log = <AnimationStatus>[];
+    final List<double> valueLog = <double>[];
+    final List<AnimationStatus> log = <AnimationStatus>[];
     controller
-      ..addStatusListener((AnimationStatus status) {
-        log.add(status);
-      })
+      ..addStatusListener(log.add)
       ..addListener(() {
         valueLog.add(controller.value);
       });
@@ -93,16 +96,16 @@ void main() {
     controller.reverse();
     log.clear();
 
-    WidgetsBinding.instance.handleBeginFrame(const Duration(seconds: 10));
+    tick(const Duration(seconds: 10));
     expect(log, equals(<AnimationStatus>[]));
     expect(valueLog, equals(<AnimationStatus>[]));
-    WidgetsBinding.instance.handleBeginFrame(const Duration(seconds: 20));
+    tick(const Duration(seconds: 20));
     expect(log, equals(<AnimationStatus>[]));
     expect(valueLog, equals(<AnimationStatus>[]));
-    WidgetsBinding.instance.handleBeginFrame(const Duration(seconds: 30));
+    tick(const Duration(seconds: 30));
     expect(log, equals(<AnimationStatus>[]));
     expect(valueLog, equals(<AnimationStatus>[]));
-    WidgetsBinding.instance.handleBeginFrame(const Duration(seconds: 40));
+    tick(const Duration(seconds: 40));
     expect(log, equals(<AnimationStatus>[]));
     expect(valueLog, equals(<AnimationStatus>[]));
 
@@ -110,16 +113,14 @@ void main() {
   });
 
   test('Forward and reverse from values', () {
-    AnimationController controller = new AnimationController(
+    final AnimationController controller = new AnimationController(
       duration: const Duration(milliseconds: 100),
       vsync: const TestVSync(),
     );
-    List<double> valueLog = <double>[];
-    List<AnimationStatus> statusLog = <AnimationStatus>[];
+    final List<double> valueLog = <double>[];
+    final List<AnimationStatus> statusLog = <AnimationStatus>[];
     controller
-      ..addStatusListener((AnimationStatus status) {
-        statusLog.add(status);
-      })
+      ..addStatusListener(statusLog.add)
       ..addListener(() {
         valueLog.add(controller.value);
       });
@@ -138,16 +139,14 @@ void main() {
   });
 
   test('Forward only from value', () {
-    AnimationController controller = new AnimationController(
+    final AnimationController controller = new AnimationController(
       duration: const Duration(milliseconds: 100),
       vsync: const TestVSync(),
     );
-    List<double> valueLog = <double>[];
-    List<AnimationStatus> statusLog = <AnimationStatus>[];
+    final List<double> valueLog = <double>[];
+    final List<AnimationStatus> statusLog = <AnimationStatus>[];
     controller
-      ..addStatusListener((AnimationStatus status) {
-        statusLog.add(status);
-      })
+      ..addStatusListener(statusLog.add)
       ..addListener(() {
         valueLog.add(controller.value);
       });
@@ -159,18 +158,18 @@ void main() {
   });
 
   test('Can fling to upper and lower bounds', () {
-    AnimationController controller = new AnimationController(
+    final AnimationController controller = new AnimationController(
       duration: const Duration(milliseconds: 100),
       vsync: const TestVSync(),
     );
 
     controller.fling();
-    WidgetsBinding.instance.handleBeginFrame(const Duration(seconds: 1));
-    WidgetsBinding.instance.handleBeginFrame(const Duration(seconds: 2));
+    tick(const Duration(seconds: 1));
+    tick(const Duration(seconds: 2));
     expect(controller.value, 1.0);
     controller.stop();
 
-    AnimationController largeRangeController = new AnimationController(
+    final AnimationController largeRangeController = new AnimationController(
       duration: const Duration(milliseconds: 100),
       lowerBound: -30.0,
       upperBound: 45.0,
@@ -178,45 +177,352 @@ void main() {
     );
 
     largeRangeController.fling();
-    WidgetsBinding.instance.handleBeginFrame(const Duration(seconds: 3));
-    WidgetsBinding.instance.handleBeginFrame(const Duration(seconds: 4));
+    tick(const Duration(seconds: 3));
+    tick(const Duration(seconds: 4));
     expect(largeRangeController.value, 45.0);
     largeRangeController.fling(velocity: -1.0);
-    WidgetsBinding.instance.handleBeginFrame(const Duration(seconds: 5));
-    WidgetsBinding.instance.handleBeginFrame(const Duration(seconds: 6));
+    tick(const Duration(seconds: 5));
+    tick(const Duration(seconds: 6));
     expect(largeRangeController.value, -30.0);
     largeRangeController.stop();
   });
 
   test('lastElapsedDuration control test', () {
-    AnimationController controller = new AnimationController(
+    final AnimationController controller = new AnimationController(
       duration: const Duration(milliseconds: 100),
       vsync: const TestVSync(),
     );
     controller.forward();
-    WidgetsBinding.instance.handleBeginFrame(const Duration(milliseconds: 20));
-    WidgetsBinding.instance.handleBeginFrame(const Duration(milliseconds: 30));
-    WidgetsBinding.instance.handleBeginFrame(const Duration(milliseconds: 40));
+    tick(const Duration(milliseconds: 20));
+    tick(const Duration(milliseconds: 30));
+    tick(const Duration(milliseconds: 40));
     expect(controller.lastElapsedDuration, equals(const Duration(milliseconds: 20)));
     controller.stop();
   });
 
   test('toString control test', () {
-    AnimationController controller = new AnimationController(
+    final AnimationController controller = new AnimationController(
       duration: const Duration(milliseconds: 100),
       vsync: const TestVSync(),
     );
-    expect(controller.toString(), hasOneLineDescription);
+    expect(controller, hasOneLineDescription);
     controller.forward();
-    WidgetsBinding.instance.handleBeginFrame(const Duration(milliseconds: 20));
-    WidgetsBinding.instance.handleBeginFrame(const Duration(milliseconds: 30));
-    expect(controller.toString(), hasOneLineDescription);
-    WidgetsBinding.instance.handleBeginFrame(const Duration(milliseconds: 120));
-    expect(controller.toString(), hasOneLineDescription);
+    tick(const Duration(milliseconds: 10));
+    tick(const Duration(milliseconds: 20));
+    expect(controller, hasOneLineDescription);
+    tick(const Duration(milliseconds: 30));
+    expect(controller, hasOneLineDescription);
     controller.reverse();
-    WidgetsBinding.instance.handleBeginFrame(const Duration(milliseconds: 20));
-    WidgetsBinding.instance.handleBeginFrame(const Duration(milliseconds: 30));
-    expect(controller.toString(), hasOneLineDescription);
+    tick(const Duration(milliseconds: 40));
+    tick(const Duration(milliseconds: 50));
+    expect(controller, hasOneLineDescription);
     controller.stop();
+  });
+
+  test('velocity test - linear', () {
+    final AnimationController controller = new AnimationController(
+      duration: const Duration(milliseconds: 1000),
+      vsync: const TestVSync(),
+    );
+
+    // mid-flight
+    controller.forward();
+    tick(const Duration(milliseconds: 0));
+    tick(const Duration(milliseconds: 500));
+    expect(controller.velocity, inInclusiveRange(0.9, 1.1));
+
+    // edges
+    controller.forward();
+    expect(controller.velocity, inInclusiveRange(0.4, 0.6));
+    tick(Duration.ZERO);
+    expect(controller.velocity, inInclusiveRange(0.4, 0.6));
+    tick(const Duration(milliseconds: 5));
+    expect(controller.velocity, inInclusiveRange(0.9, 1.1));
+
+    controller.forward(from: 0.5);
+    expect(controller.velocity, inInclusiveRange(0.4, 0.6));
+    tick(Duration.ZERO);
+    expect(controller.velocity, inInclusiveRange(0.4, 0.6));
+    tick(const Duration(milliseconds: 5));
+    expect(controller.velocity, inInclusiveRange(0.9, 1.1));
+
+    // stopped
+    controller.forward(from: 1.0);
+    expect(controller.velocity, 0.0);
+    tick(Duration.ZERO);
+    expect(controller.velocity, 0.0);
+    tick(const Duration(milliseconds: 500));
+    expect(controller.velocity, 0.0);
+
+    controller.forward();
+    tick(Duration.ZERO);
+    tick(const Duration(milliseconds: 1000));
+    expect(controller.velocity, 0.0);
+
+    controller.stop();
+  });
+
+  test('Disposed AnimationController toString works', () {
+    final AnimationController controller = new AnimationController(
+      duration: const Duration(milliseconds: 100),
+      vsync: const TestVSync(),
+    );
+    controller.dispose();
+    expect(controller, hasOneLineDescription);
+  });
+
+  test('AnimationController error handling', () {
+    final AnimationController controller = new AnimationController(
+      vsync: const TestVSync(),
+    );
+
+    expect(controller.forward, throwsFlutterError);
+    expect(controller.reverse, throwsFlutterError);
+    expect(() { controller.animateTo(0.5); }, throwsFlutterError);
+    expect(controller.repeat, throwsFlutterError);
+
+    controller.dispose();
+    expect(controller.dispose, throwsFlutterError);
+  });
+
+  test('AnimationController repeat() throws if period is not specified', () {
+    final AnimationController controller = new AnimationController(
+      vsync: const TestVSync(),
+    );
+    expect(() { controller.repeat(); }, throwsFlutterError);
+    expect(() { controller.repeat(period: null); }, throwsFlutterError);
+  });
+
+  test('Do not animate if already at target', () {
+    final List<AnimationStatus> statusLog = <AnimationStatus>[];
+
+    final AnimationController controller = new AnimationController(
+      value: 0.5,
+      vsync: const TestVSync(),
+    )..addStatusListener(statusLog.add);
+
+    expect(controller.value, equals(0.5));
+    controller.animateTo(0.5, duration: const Duration(milliseconds: 100));
+    expect(statusLog, equals(<AnimationStatus>[ AnimationStatus.completed ]));
+    expect(controller.value, equals(0.5));
+  });
+
+  test('Do not animate to upperBound if already at upperBound', () {
+    final List<AnimationStatus> statusLog = <AnimationStatus>[];
+
+    final AnimationController controller = new AnimationController(
+      value: 1.0,
+      upperBound: 1.0,
+      lowerBound: 0.0,
+      vsync: const TestVSync(),
+    )..addStatusListener(statusLog.add);
+
+    expect(controller.value, equals(1.0));
+    controller.animateTo(1.0, duration: const Duration(milliseconds: 100));
+    expect(statusLog, equals(<AnimationStatus>[ AnimationStatus.completed ]));
+    expect(controller.value, equals(1.0));
+  });
+
+  test('Do not animate to lowerBound if already at lowerBound', () {
+    final List<AnimationStatus> statusLog = <AnimationStatus>[];
+
+    final AnimationController controller = new AnimationController(
+      value: 0.0,
+      upperBound: 1.0,
+      lowerBound: 0.0,
+      vsync: const TestVSync(),
+    )..addStatusListener(statusLog.add);
+
+    expect(controller.value, equals(0.0));
+    controller.animateTo(0.0, duration: const Duration(milliseconds: 100));
+    expect(statusLog, equals(<AnimationStatus>[ AnimationStatus.completed ]));
+    expect(controller.value, equals(0.0));
+  });
+
+  test('Do not animate if already at target mid-flight (forward)', () {
+    final List<AnimationStatus> statusLog = <AnimationStatus>[];
+    final AnimationController controller = new AnimationController(
+      value: 0.0,
+      duration: const Duration(milliseconds: 1000),
+      vsync: const TestVSync(),
+    )..addStatusListener(statusLog.add);
+
+    expect(controller.value, equals(0.0));
+
+    controller.forward();
+    tick(const Duration(milliseconds: 0));
+    tick(const Duration(milliseconds: 500));
+    expect(controller.value, inInclusiveRange(0.4, 0.6));
+    expect(statusLog, equals(<AnimationStatus>[ AnimationStatus.forward ]));
+
+    final double currentValue = controller.value;
+    controller.animateTo(currentValue, duration: const Duration(milliseconds: 100));
+    expect(statusLog, equals(<AnimationStatus>[ AnimationStatus.forward, AnimationStatus.completed ]));
+    expect(controller.value, currentValue);
+  });
+
+  test('Do not animate if already at target mid-flight (reverse)', () {
+    final List<AnimationStatus> statusLog = <AnimationStatus>[];
+    final AnimationController controller = new AnimationController(
+      value: 1.0,
+      duration: const Duration(milliseconds: 1000),
+      vsync: const TestVSync(),
+    )..addStatusListener(statusLog.add);
+
+    expect(controller.value, equals(1.0));
+
+    controller.reverse();
+    tick(const Duration(milliseconds: 0));
+    tick(const Duration(milliseconds: 500));
+    expect(controller.value, inInclusiveRange(0.4, 0.6));
+    expect(statusLog, equals(<AnimationStatus>[ AnimationStatus.reverse ]));
+
+    final double currentValue = controller.value;
+    controller.animateTo(currentValue, duration: const Duration(milliseconds: 100));
+    expect(statusLog, equals(<AnimationStatus>[ AnimationStatus.reverse, AnimationStatus.completed ]));
+    expect(controller.value, currentValue);
+  });
+
+  test('animateTo can deal with duration == Duration.ZERO', () {
+    final AnimationController controller = new AnimationController(
+      duration: const Duration(milliseconds: 100),
+      vsync: const TestVSync(),
+    );
+
+    controller.forward(from: 0.2);
+    expect(controller.value, 0.2);
+    controller.animateTo(1.0, duration: Duration.ZERO);
+    expect(SchedulerBinding.instance.transientCallbackCount, equals(0), reason: 'Expected no animation.');
+    expect(controller.value, 1.0);
+  });
+
+  test('setting value directly sets correct status', () {
+    final AnimationController controller = new AnimationController(
+      value: 0.0,
+      lowerBound: 0.0,
+      upperBound: 1.0,
+      vsync: const TestVSync(),
+    );
+
+    expect(controller.value, 0.0);
+    expect(controller.status, AnimationStatus.dismissed);
+
+    controller.value = 0.5;
+    expect(controller.value, 0.5);
+    expect(controller.status, AnimationStatus.forward);
+
+    controller.value = 1.0;
+    expect(controller.value, 1.0);
+    expect(controller.status, AnimationStatus.completed);
+
+    controller.value = 0.5;
+    expect(controller.value, 0.5);
+    expect(controller.status, AnimationStatus.forward);
+
+    controller.value = 0.0;
+    expect(controller.value, 0.0);
+    expect(controller.status, AnimationStatus.dismissed);
+  });
+
+  test('animateTo sets correct status', () {
+    final List<AnimationStatus> statusLog = <AnimationStatus>[];
+    final AnimationController controller = new AnimationController(
+      duration: const Duration(milliseconds: 100),
+      value: 0.0,
+      lowerBound: 0.0,
+      upperBound: 1.0,
+      vsync: const TestVSync(),
+    )..addStatusListener(statusLog.add);
+
+    expect(controller.value, 0.0);
+    expect(controller.status, AnimationStatus.dismissed);
+
+    // Animate from 0.0 to 0.5
+    controller.animateTo(0.5);
+    tick(const Duration(milliseconds: 0));
+    tick(const Duration(milliseconds: 150));
+    expect(controller.value, 0.5);
+    expect(statusLog, equals(<AnimationStatus>[ AnimationStatus.forward, AnimationStatus.completed ]));
+    statusLog.clear();
+
+    // Animate from 0.5 to 1.0
+    controller.animateTo(1.0);
+    tick(const Duration(milliseconds: 0));
+    tick(const Duration(milliseconds: 150));
+    expect(controller.value, 1.0);
+    expect(statusLog, equals(<AnimationStatus>[ AnimationStatus.forward, AnimationStatus.completed ]));
+    statusLog.clear();
+
+    // Animate from 1.0 to 0.5
+    controller.animateTo(0.5);
+    tick(const Duration(milliseconds: 0));
+    tick(const Duration(milliseconds: 150));
+    expect(controller.value, 0.5);
+    expect(statusLog, equals(<AnimationStatus>[ AnimationStatus.forward, AnimationStatus.completed ]));
+    statusLog.clear();
+
+    // Animate from 0.5 to 1.0
+    controller.animateTo(0.0);
+    tick(const Duration(milliseconds: 0));
+    tick(const Duration(milliseconds: 150));
+    expect(controller.value, 0.0);
+    expect(statusLog, equals(<AnimationStatus>[ AnimationStatus.forward, AnimationStatus.completed ]));
+    statusLog.clear();
+  });
+
+  test('after a reverse call animateTo sets correct status', () {
+    final List<AnimationStatus> statusLog = <AnimationStatus>[];
+    final AnimationController controller = new AnimationController(
+      duration: const Duration(milliseconds: 100),
+      value: 1.0,
+      lowerBound: 0.0,
+      upperBound: 1.0,
+      vsync: const TestVSync(),
+    )..addStatusListener(statusLog.add);
+
+    expect(controller.value, 1.0);
+    expect(controller.status, AnimationStatus.completed);
+
+    controller.reverse();
+    tick(const Duration(milliseconds: 0));
+    tick(const Duration(milliseconds: 150));
+    expect(controller.value, 0.0);
+    expect(statusLog, equals(<AnimationStatus>[ AnimationStatus.reverse, AnimationStatus.dismissed ]));
+    statusLog.clear();
+
+    controller.animateTo(0.5);
+    tick(const Duration(milliseconds: 0));
+    tick(const Duration(milliseconds: 150));
+    expect(controller.value, 0.5);
+    expect(statusLog, equals(<AnimationStatus>[ AnimationStatus.forward, AnimationStatus.completed ]));
+    statusLog.clear();
+  });
+
+  test('after a forward call animateTo sets correct status', () {
+    final List<AnimationStatus> statusLog = <AnimationStatus>[];
+    final AnimationController controller = new AnimationController(
+      duration: const Duration(milliseconds: 100),
+      value: 0.0,
+      lowerBound: 0.0,
+      upperBound: 1.0,
+      vsync: const TestVSync(),
+    )..addStatusListener(statusLog.add);
+
+    expect(controller.value, 0.0);
+    expect(controller.status, AnimationStatus.dismissed);
+
+    controller.forward();
+    tick(const Duration(milliseconds: 0));
+    tick(const Duration(milliseconds: 150));
+    expect(controller.value, 1.0);
+    expect(statusLog, equals(<AnimationStatus>[ AnimationStatus.forward, AnimationStatus.completed ]));
+    statusLog.clear();
+
+    controller.animateTo(0.5);
+    tick(const Duration(milliseconds: 0));
+    tick(const Duration(milliseconds: 150));
+    expect(controller.value, 0.5);
+    expect(statusLog, equals(<AnimationStatus>[ AnimationStatus.forward, AnimationStatus.completed ]));
+    statusLog.clear();
   });
 }

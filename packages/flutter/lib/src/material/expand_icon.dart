@@ -2,14 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
-import 'package:meta/meta.dart';
 
 import 'colors.dart';
 import 'debug.dart';
-import 'icon.dart';
-import 'icons.dart';
 import 'icon_button.dart';
+import 'icons.dart';
 import 'theme.dart';
 
 /// A widget representing a rotating expand/collapse button. The icon rotates
@@ -21,17 +20,16 @@ import 'theme.dart';
 class ExpandIcon extends StatefulWidget {
   /// Creates an [ExpandIcon] with the given padding, and a callback that is
   /// triggered when the icon is pressed.
-  ExpandIcon({
+  const ExpandIcon({
     Key key,
     this.isExpanded: false,
     this.size: 24.0,
     @required this.onPressed,
     this.padding: const EdgeInsets.all(8.0)
-  }) : super(key: key) {
-    assert(this.isExpanded != null);
-    assert(this.size != null);
-    assert(this.padding != null);
-  }
+  }) : assert(isExpanded != null),
+       assert(size != null),
+       assert(padding != null),
+       super(key: key);
 
   /// Whether the icon is in an expanded state.
   ///
@@ -50,11 +48,11 @@ class ExpandIcon extends StatefulWidget {
   /// If this is set to null, the button will be disabled.
   final ValueChanged<bool> onPressed;
 
-  /// The padding around the icon. The entire padded icon will reactb to input
+  /// The padding around the icon. The entire padded icon will react to input
   /// gestures.
   ///
   /// This property must not be null. It defaults to 8.0 padding on all sides.
-  final EdgeInsets padding;
+  final EdgeInsetsGeometry padding;
 
   @override
   _ExpandIconState createState() => new _ExpandIconState();
@@ -83,9 +81,10 @@ class _ExpandIconState extends State<ExpandIcon> with SingleTickerProviderStateM
   }
 
   @override
-  void didUpdateConfig(ExpandIcon oldConfig) {
-    if (config.isExpanded != oldConfig.isExpanded) {
-      if (config.isExpanded) {
+  void didUpdateWidget(ExpandIcon oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isExpanded != oldWidget.isExpanded) {
+      if (widget.isExpanded) {
         _controller.forward();
       } else {
         _controller.reverse();
@@ -94,20 +93,20 @@ class _ExpandIconState extends State<ExpandIcon> with SingleTickerProviderStateM
   }
 
   void _handlePressed() {
-    if (config.onPressed != null)
-      config.onPressed(config.isExpanded);
+    if (widget.onPressed != null)
+      widget.onPressed(widget.isExpanded);
   }
 
   @override
   Widget build(BuildContext context) {
     assert(debugCheckHasMaterial(context));
     return new IconButton(
-      padding: config.padding,
+      padding: widget.padding,
       color: Colors.black38,
-      onPressed: config.onPressed == null ? null : _handlePressed,
+      onPressed: widget.onPressed == null ? null : _handlePressed,
       icon: new RotationTransition(
         turns: _iconTurns,
-        child: new Icon(Icons.expand_more)
+        child: const Icon(Icons.expand_more)
       )
     );
   }

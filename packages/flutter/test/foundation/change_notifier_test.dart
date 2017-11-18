@@ -24,52 +24,52 @@ void main() {
     test.addListener(listener);
     test.addListener(listener);
     test.notify();
-    expect(log, equals(<String>['listener', 'listener']));
+    expect(log, <String>['listener', 'listener']);
     log.clear();
 
     test.removeListener(listener);
     test.notify();
-    expect(log, equals(<String>['listener']));
+    expect(log, <String>['listener']);
     log.clear();
 
     test.removeListener(listener);
     test.notify();
-    expect(log, equals(<String>[]));
+    expect(log, <String>[]);
     log.clear();
 
     test.removeListener(listener);
     test.notify();
-    expect(log, equals(<String>[]));
+    expect(log, <String>[]);
     log.clear();
 
     test.addListener(listener);
     test.notify();
-    expect(log, equals(<String>['listener']));
+    expect(log, <String>['listener']);
     log.clear();
 
     test.addListener(listener1);
     test.notify();
-    expect(log, equals(<String>['listener', 'listener1']));
+    expect(log, <String>['listener', 'listener1']);
     log.clear();
 
     test.addListener(listener2);
     test.notify();
-    expect(log, equals(<String>['listener', 'listener1', 'listener2']));
+    expect(log, <String>['listener', 'listener1', 'listener2']);
     log.clear();
 
     test.removeListener(listener1);
     test.notify();
-    expect(log, equals(<String>['listener', 'listener2']));
+    expect(log, <String>['listener', 'listener2']);
     log.clear();
 
     test.addListener(listener1);
     test.notify();
-    expect(log, equals(<String>['listener', 'listener2', 'listener1']));
+    expect(log, <String>['listener', 'listener2', 'listener1']);
     log.clear();
 
     test.addListener(badListener);
     test.notify();
-    expect(log, equals(<String>['listener', 'listener2', 'listener1', 'badListener']));
+    expect(log, <String>['listener', 'listener2', 'listener1', 'badListener']);
     expect(tester.takeException(), isNullThrownError);
     log.clear();
 
@@ -79,12 +79,12 @@ void main() {
     test.removeListener(listener2);
     test.addListener(listener2);
     test.notify();
-    expect(log, equals(<String>['badListener', 'listener1', 'listener2']));
+    expect(log, <String>['badListener', 'listener1', 'listener2']);
     expect(tester.takeException(), isNullThrownError);
     log.clear();
   });
 
-  testWidgets('ChangeNotifier with mutating listener', (WidgetTester tester) async {
+  test('ChangeNotifier with mutating listener', () {
     final TestNotifier test = new TestNotifier();
     final List<String> log = <String>[];
 
@@ -102,15 +102,137 @@ void main() {
     test.addListener(listener2);
     test.addListener(listener3);
     test.notify();
-    expect(log, equals(<String>['listener1', 'listener2']));
+    expect(log, <String>['listener1', 'listener2']);
     log.clear();
 
     test.notify();
-    expect(log, equals(<String>['listener2', 'listener4']));
+    expect(log, <String>['listener2', 'listener4']);
     log.clear();
 
     test.notify();
-    expect(log, equals(<String>['listener2', 'listener4', 'listener4']));
+    expect(log, <String>['listener2', 'listener4', 'listener4']);
     log.clear();
+  });
+
+  test('Merging change notifiers', () {
+    final TestNotifier source1 = new TestNotifier();
+    final TestNotifier source2 = new TestNotifier();
+    final TestNotifier source3 = new TestNotifier();
+    final List<String> log = <String>[];
+
+    final Listenable merged = new Listenable.merge(<Listenable>[source1, source2]);
+    final VoidCallback listener1 = () { log.add('listener1'); };
+    final VoidCallback listener2 = () { log.add('listener2'); };
+
+    merged.addListener(listener1);
+    source1.notify();
+    source2.notify();
+    source3.notify();
+    expect(log, <String>['listener1', 'listener1']);
+    log.clear();
+
+    merged.removeListener(listener1);
+    source1.notify();
+    source2.notify();
+    source3.notify();
+    expect(log, isEmpty);
+    log.clear();
+
+    merged.addListener(listener1);
+    merged.addListener(listener2);
+    source1.notify();
+    source2.notify();
+    source3.notify();
+    expect(log, <String>['listener1', 'listener2', 'listener1', 'listener2']);
+    log.clear();
+  });
+
+  test('Merging change notifiers ignores null', () {
+    final TestNotifier source1 = new TestNotifier();
+    final TestNotifier source2 = new TestNotifier();
+    final List<String> log = <String>[];
+
+    final Listenable merged = new Listenable.merge(<Listenable>[null, source1, null, source2, null]);
+    final VoidCallback listener = () { log.add('listener'); };
+
+    merged.addListener(listener);
+    source1.notify();
+    source2.notify();
+    expect(log, <String>['listener', 'listener']);
+    log.clear();
+  });
+
+  test('Can dispose merged notifier', () {
+    final TestNotifier source1 = new TestNotifier();
+    final TestNotifier source2 = new TestNotifier();
+    final List<String> log = <String>[];
+
+    final ChangeNotifier merged = new Listenable.merge(<Listenable>[source1, source2]);
+    final VoidCallback listener = () { log.add('listener'); };
+
+    merged.addListener(listener);
+    source1.notify();
+    source2.notify();
+    expect(log, <String>['listener', 'listener']);
+    log.clear();
+    merged.dispose();
+
+    source1.notify();
+    source2.notify();
+    expect(log, isEmpty);
+  });
+
+  test('Cannot use a disposed ChangeNotifier', () {
+    final TestNotifier source = new TestNotifier();
+    source.dispose();
+    expect(() { source.addListener(null); }, throwsFlutterError);
+    expect(() { source.removeListener(null); }, throwsFlutterError);
+    expect(() { source.dispose(); }, throwsFlutterError);
+    expect(() { source.notify(); }, throwsFlutterError);
+  });
+
+  test('Value notifier', () {
+    final ValueNotifier<double> notifier = new ValueNotifier<double>(2.0);
+
+    final List<double> log = <double>[];
+    final VoidCallback listener = () { log.add(notifier.value); };
+
+    notifier.addListener(listener);
+    notifier.value = 3.0;
+
+    expect(log, equals(<double>[ 3.0 ]));
+    log.clear();
+
+    notifier.value = 3.0;
+    expect(log, isEmpty);
+  });
+
+  test('Listenable.merge toString', () {
+    final TestNotifier source1 = new TestNotifier();
+    final TestNotifier source2 = new TestNotifier();
+
+    ChangeNotifier listenableUnderTest = new Listenable.merge(<Listenable>[]);
+    expect(listenableUnderTest.toString(), 'Listenable.merge([])');
+
+    listenableUnderTest = new Listenable.merge(<Listenable>[null]);
+    expect(listenableUnderTest.toString(), 'Listenable.merge([null])');
+
+    listenableUnderTest = new Listenable.merge(<Listenable>[source1]);
+    expect(
+      listenableUnderTest.toString(), 
+      "Listenable.merge([Instance of 'TestNotifier'])",
+    );
+
+    listenableUnderTest = new Listenable.merge(<Listenable>[source1, source2]);
+    expect(
+      listenableUnderTest.toString(), 
+      "Listenable.merge([Instance of 'TestNotifier', Instance of 'TestNotifier'])",
+    );
+
+    listenableUnderTest = new Listenable.merge(<Listenable>[null, source2]);
+    expect(
+      listenableUnderTest.toString(), 
+      "Listenable.merge([null, Instance of 'TestNotifier'])",
+    );
   });
 }
